@@ -403,6 +403,138 @@ class TestFromQuantizedMoE:
             os.unlink(path)
 
 
+class TestStreamingQuantize:
+    """Test streaming_quantize produces bitwise-identical output to save_quantized."""
+
+    def test_dense_matches_in_memory(self):
+        """Streaming quantize of dense model must match in-memory quantize."""
+        from bitsandbytes.checkpoint import streaming_quantize
+        from bitsandbytes.kbit_lora import KbitLoraModel
+        from safetensors import safe_open
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create and save tiny model to disk
+            model = _make_tiny_dense_model()
+            model.save_pretrained(os.path.join(tmpdir, "hf_model"))
+
+            # Path A: In-memory quantize → save_quantized
+            kbit = KbitLoraModel(
+                model, lora_r=4, lora_alpha=8.0, k=4,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                compute_dtype=torch.bfloat16,
+            )
+            path_a = os.path.join(tmpdir, "inmemory.safetensors")
+            save_quantized(kbit, path_a)
+            del kbit
+
+            # Path B: Streaming quantize from saved model
+            path_b = os.path.join(tmpdir, "streamed.safetensors")
+            streaming_quantize(
+                os.path.join(tmpdir, "hf_model"), path_b, k=4,
+            )
+
+            # Compare all tensors
+            sf_a = safe_open(path_a, framework="pt", device="cpu")
+            sf_b = safe_open(path_b, framework="pt", device="cpu")
+
+            keys_a = set(sf_a.keys())
+            keys_b = set(sf_b.keys())
+            assert keys_a == keys_b, f"Key mismatch: {keys_a - keys_b} vs {keys_b - keys_a}"
+
+            for key in sorted(keys_a):
+                t_a = sf_a.get_tensor(key)
+                t_b = sf_b.get_tensor(key)
+                assert t_a.shape == t_b.shape, f"{key}: shape {t_a.shape} vs {t_b.shape}"
+                assert t_a.dtype == t_b.dtype, f"{key}: dtype {t_a.dtype} vs {t_b.dtype}"
+                assert torch.equal(t_a, t_b), f"{key}: values differ"
+
+    def test_dense_metadata_matches(self):
+        """Streaming quantize metadata must match in-memory metadata."""
+        from bitsandbytes.checkpoint import streaming_quantize
+        from bitsandbytes.kbit_lora import KbitLoraModel
+        from safetensors import safe_open
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model = _make_tiny_dense_model()
+            model.save_pretrained(os.path.join(tmpdir, "hf_model"))
+
+            kbit = KbitLoraModel(
+                model, lora_r=4, lora_alpha=8.0, k=4,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                compute_dtype=torch.bfloat16,
+            )
+            path_a = os.path.join(tmpdir, "inmemory.safetensors")
+            save_quantized(kbit, path_a)
+            del kbit
+
+            path_b = os.path.join(tmpdir, "streamed.safetensors")
+            streaming_quantize(os.path.join(tmpdir, "hf_model"), path_b, k=4)
+
+            sf_a = safe_open(path_a, framework="pt", device="cpu")
+            sf_b = safe_open(path_b, framework="pt", device="cpu")
+            meta_a = sf_a.metadata()
+            meta_b = sf_b.metadata()
+
+            # Check key metadata fields match
+            for field in ["model_type", "hidden_size", "num_layers",
+                         "num_attention_heads", "num_key_value_heads", "head_dim",
+                         "intermediate_size", "vocab_size",
+                         "k_attention", "k_mlp", "k_lm_head",
+                         "is_moe", "has_qk_norm"]:
+                assert meta_a[field] == meta_b[field], \
+                    f"Metadata {field}: {meta_a[field]} vs {meta_b[field]}"
+
+            # Per-projection dims
+            for i in range(2):
+                for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
+                    for dim in ["N", "K", "N_padded", "k"]:
+                        key = f"layer.{i}.attn.{proj}.{dim}"
+                        assert meta_a[key] == meta_b[key], \
+                            f"Metadata {key}: {meta_a[key]} vs {meta_b[key]}"
+
+    def test_streamed_loadable_by_from_quantized(self):
+        """Output of streaming_quantize should be loadable by from_quantized."""
+        from bitsandbytes.checkpoint import streaming_quantize
+        from bitsandbytes.kbit_lora import KbitLoraModel
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model = _make_tiny_dense_model()
+            model.save_pretrained(os.path.join(tmpdir, "hf_model"))
+            del model
+
+            path = os.path.join(tmpdir, "quantized.safetensors")
+            streaming_quantize(os.path.join(tmpdir, "hf_model"), path, k=4)
+
+            loaded = KbitLoraModel.from_quantized(
+                path, lora_r=4, lora_alpha=8.0,
+                weight_streaming=False,
+            )
+
+            # Forward pass should work
+            input_ids = torch.randint(0, 100, (1, 32), device="cuda")
+            labels = input_ids.clone()
+            loaded.eval()
+            with torch.no_grad():
+                result = loaded(input_ids, labels=labels)
+            assert result["loss"].isfinite()
+
+    def test_copies_config_json(self):
+        """streaming_quantize should copy config.json alongside output."""
+        from bitsandbytes.checkpoint import streaming_quantize
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model = _make_tiny_dense_model()
+            model.save_pretrained(os.path.join(tmpdir, "hf_model"))
+            del model
+
+            output_dir = os.path.join(tmpdir, "output")
+            os.makedirs(output_dir)
+            path = os.path.join(output_dir, "model.safetensors")
+            streaming_quantize(os.path.join(tmpdir, "hf_model"), path, k=4)
+
+            assert os.path.exists(os.path.join(output_dir, "config.json"))
+
+
 class TestSaveLoadLora:
 
     def test_lora_round_trip(self, kbit_model):
