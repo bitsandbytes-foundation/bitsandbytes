@@ -87,7 +87,8 @@ def train_standard(model, input_ids_list, labels_list, n_steps=100, lr=1e-4):
         labels = labels_list[idx].unsqueeze(0).cuda()
 
         optimizer.zero_grad()
-        loss = model(input_ids, labels)
+        result = model(input_ids, labels)
+        loss = result["loss"]
         loss.backward()
         optimizer.step()
 
@@ -188,9 +189,12 @@ def main():
     input_ids = tokens["input_ids"].cuda()
 
     with torch.no_grad():
-        output = model_reload(input_ids, labels=None)
-        # Just verify it runs without error
-        print(f"  LoRA reload OK, output shape: {output.shape if hasattr(output, 'shape') else type(output)}")
+        result = model_reload(input_ids, labels=None)
+        logits = result["logits"]
+        # Generate a few tokens greedily
+        next_tokens = logits.argmax(dim=-1)
+        generated = tokenizer.decode(next_tokens[0], skip_special_tokens=True)
+        print(f"  LoRA reload OK, generated: {generated[:100]}")
 
     # Save results
     results = {
