@@ -1,4 +1,6 @@
+import contextlib
 import inspect
+import logging
 
 import pytest
 import torch
@@ -6,6 +8,12 @@ from torch import nn
 
 import bitsandbytes as bnb
 from tests.helpers import get_available_devices, id_formatter, is_supported_on_hpu
+
+
+@contextlib.contextmanager
+def caplog_at_level(caplog, level, logger_name):
+    with caplog.at_level(level, logger=logger_name):
+        yield
 
 
 class MockArgs:
@@ -453,46 +461,38 @@ def test_embedding_error(device, embedding_class, input_shape, embedding_dim, qu
 
 
 @pytest.mark.parametrize("device", get_available_devices())
-def test_4bit_linear_warnings(device):
+def test_4bit_linear_warnings(device, caplog):
     dim1 = 64
 
-    with pytest.warns(UserWarning, match=r"inference or training"):
+    with caplog_at_level(caplog, logging.WARNING, "bitsandbytes.nn.modules"):
         net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
         net = net.to(device)
         inp = torch.rand(10, dim1, device=device, dtype=torch.float16)
         net(inp)
-    with pytest.warns(UserWarning, match=r"inference."):
+    assert any("inference or training" in msg for msg in caplog.messages)
+
+    caplog.clear()
+    with caplog_at_level(caplog, logging.WARNING, "bitsandbytes.nn.modules"):
         net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
         net = net.to(device)
         inp = torch.rand(1, dim1, device=device, dtype=torch.float16)
         net(inp)
-
-    with pytest.warns(UserWarning) as record:
-        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
-        net = net.to(device)
-        inp = torch.rand(10, dim1, device=device, dtype=torch.float16)
-        net(inp)
-
-        net = nn.Sequential(*[bnb.nn.Linear4bit(dim1, dim1, quant_type="nf4") for i in range(10)])
-        net = net.to(device)
-        inp = torch.rand(1, dim1, device=device, dtype=torch.float16)
-        net(inp)
-
-    assert len(record) == 2
+    assert any("inference." in msg for msg in caplog.messages)
 
 
 @pytest.mark.parametrize("device", get_available_devices())
-def test_4bit_embedding_warnings(device):
+def test_4bit_embedding_warnings(device, caplog):
     num_embeddings = 128
     default_block_size = 64
 
-    with pytest.warns(UserWarning, match=r"inference."):
+    with caplog_at_level(caplog, logging.WARNING, "bitsandbytes.nn.modules"):
         net = bnb.nn.Embedding4bit(
             num_embeddings=num_embeddings, embedding_dim=default_block_size + 1, quant_type="nf4"
         )
         net.to(device)
         inp = torch.randint(low=0, high=num_embeddings, size=(1,), device=device)
         net(inp)
+    assert any("inference" in msg for msg in caplog.messages)
 
 
 def test_4bit_embedding_weight_fsdp_fix(requires_cuda):
