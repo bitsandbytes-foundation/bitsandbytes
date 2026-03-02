@@ -10,6 +10,7 @@ Supported model_types: llama, mistral, qwen2, qwen3, qwen3_moe, glm4
 """
 
 import math
+from dataclasses import dataclass, field
 from typing import Optional
 
 import torch
@@ -24,6 +25,29 @@ from bitsandbytes.chunked import chunked_mlp_forward
 import bitsandbytes.functional as F
 from bitsandbytes.moe import moe_expert_forward, moe_router_dispatch
 from bitsandbytes.training import checkpoint_cpu_offload
+
+
+@dataclass
+class StreamingContext:
+    """Holds state between forward_streaming and backward_streaming.
+
+    Created by forward_streaming(), consumed by backward_streaming().
+    """
+
+    checkpoints: list[torch.Tensor] = field(default_factory=list)
+    position_ids: Optional[torch.Tensor] = None
+    loss: Optional[torch.Tensor] = None
+    hidden_final: Optional[torch.Tensor] = None
+    grad_from_loss: Optional[torch.Tensor] = None
+
+    def free(self):
+        """Explicitly free CPU pinned checkpoint memory."""
+        self.checkpoints.clear()
+        self.hidden_final = None
+        self.grad_from_loss = None
+
+    def __del__(self):
+        self.free()
 
 
 class KbitLoraModel(nn.Module):
@@ -1157,15 +1181,18 @@ class KbitLoraModel(nn.Module):
             params.append(info[proj]["B"])
         return params
 
-    def forward_streaming_explicit(
+    # ─── Separated streaming forward/backward ───
+
+    def forward_streaming(
         self,
         input_ids: torch.Tensor,
         labels: torch.Tensor,
         position_ids: Optional[torch.Tensor] = None,
-    ):
-        """Forward + backward with explicit per-layer autograd.grad() control.
+    ) -> tuple[torch.Tensor, StreamingContext]:
+        """Forward pass with weight streaming. Returns (loss, context).
 
-        Returns loss value. Gradients are accumulated on LoRA params.
+        The context must be passed to backward_streaming() to compute
+        gradients. This separation enables clean gradient accumulation.
         """
         B, S = input_ids.shape
         device = input_ids.device
@@ -1175,7 +1202,7 @@ class KbitLoraModel(nn.Module):
 
         self._extend_rope_cache(S, device)
 
-        # ─── FORWARD: save checkpoints at block boundaries ───
+        # Embed
         if self.embed_tokens is not None:
             hidden = self.embed_tokens(input_ids).to(self.compute_dtype)
         else:
@@ -1192,6 +1219,7 @@ class KbitLoraModel(nn.Module):
         # Pre-load layer 0
         self._stream_load_layer(0, slot=0, sync=True)
 
+        # Double-buffered forward (no grad — just checkpointing)
         for i in range(n):
             next_slot = 1 - (i % 2)
             if i + 1 < n:
@@ -1200,7 +1228,6 @@ class KbitLoraModel(nn.Module):
             with torch.no_grad():
                 hidden = self._layer_forward(i, hidden, position_ids)
 
-            # Save checkpoint
             ckpt = torch.empty(hidden.shape, dtype=hidden.dtype, device="cpu", pin_memory=True)
             ckpt.copy_(hidden, non_blocking=True)
             checkpoints.append(ckpt)
@@ -1208,7 +1235,7 @@ class KbitLoraModel(nn.Module):
             if i + 1 < n:
                 torch.cuda.current_stream().wait_stream(self._copy_stream)
 
-        # ─── LOSS (with grad) ───
+        # Compute loss (with grad)
         hidden_final = checkpoints[-1].to(device, non_blocking=True).requires_grad_(True)
         torch.cuda.current_stream().synchronize()
 
@@ -1230,22 +1257,39 @@ class KbitLoraModel(nn.Module):
             self.compute_dtype, self.ce_chunk_size,
         )
 
-        # Also get grad for final norm weights
+        # Compute grad w.r.t. hidden_final and final norm
         norm_params = [self._norm_weights["final_norm_weight"]]
         all_grads = torch.autograd.grad(
             loss, [hidden_final] + norm_params,
             retain_graph=False,
         )
-        grad = all_grads[0]
+        grad_from_loss = all_grads[0]
+
+        # Accumulate final norm gradients
         for param, g in zip(norm_params, all_grads[1:]):
             if param.grad is None:
                 param.grad = g.detach()
             else:
                 param.grad.add_(g.detach())
 
-        loss_val = loss.detach()
+        ctx = StreamingContext(
+            checkpoints=checkpoints,
+            position_ids=position_ids,
+            loss=loss.detach(),
+            hidden_final=hidden_final,
+            grad_from_loss=grad_from_loss,
+        )
+        return loss.detach(), ctx
 
-        # ─── BACKWARD: reverse layer order, double-buffered ───
+    def backward_streaming(self, ctx: StreamingContext):
+        """Backward pass with weight streaming. Accumulates LoRA gradients.
+
+        Consumes and frees the context.
+        """
+        device = ctx.position_ids.device
+        n = self._num_loaded_layers
+        grad = ctx.grad_from_loss
+
         # Pre-load last layer
         last_slot = (n - 1) % 2
         self._stream_load_layer(n - 1, slot=last_slot, sync=True)
@@ -1259,12 +1303,12 @@ class KbitLoraModel(nn.Module):
                 self._stream_load_layer(i - 1, slot=next_bwd_slot, sync=False)
 
             # Restore checkpoint and recompute forward with grad
-            input_act = checkpoints[i].to(device, non_blocking=True)
+            input_act = ctx.checkpoints[i].to(device, non_blocking=True)
             torch.cuda.current_stream().synchronize()
             input_act = input_act.requires_grad_(True)
 
             with torch.enable_grad():
-                output = self._layer_forward(i, input_act, position_ids)
+                output = self._layer_forward(i, input_act, ctx.position_ids)
 
             # Get LoRA params + norm params for this layer
             lora_params = self.get_layer_lora_params(i)
@@ -1301,7 +1345,7 @@ class KbitLoraModel(nn.Module):
             if i > 0:
                 torch.cuda.current_stream().wait_stream(self._copy_stream)
 
-        return loss_val
+        ctx.free()
 
     # ─── Standard forward ───
 
