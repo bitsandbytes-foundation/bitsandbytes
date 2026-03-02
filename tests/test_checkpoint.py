@@ -249,16 +249,33 @@ class TestFromQuantized:
 
             # Verify streaming infrastructure exists
             assert hasattr(loaded, "_cpu_weights")
-            assert hasattr(loaded, "_gpu_slots")
-            assert len(loaded._cpu_weights) == len(kbit_model._layer_data)
-            assert len(loaded._gpu_slots) == 2
+            assert hasattr(loaded, "_n_resident")
 
-            # Verify _layer_data quantized weights are None (moved to CPU pinned)
+            n = len(kbit_model._layer_data)
+            nr = loaded._n_resident
+            n_streamed = n - nr
+
+            # CPU weights should match number of non-resident layers
+            assert len(loaded._cpu_weights) == n_streamed
+            # GPU slots allocated only if there are streamed layers
+            if n_streamed > 0:
+                assert len(loaded._gpu_slots) == 2
+            else:
+                assert len(loaded._gpu_slots) == 0
+
+            # Verify layer data:
+            # - Resident layers keep weights on GPU
+            # - Streamed layers have weights = None (moved to CPU pinned)
             for i, layer_info in enumerate(loaded._layer_data):
                 for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
-                    assert layer_info[proj]["packed"] is None, \
-                        f"Layer {i} {proj}.packed should be None after streaming init"
-                    # LoRA params should still exist on GPU
+                    if i < nr:
+                        # Resident: weights on GPU
+                        assert layer_info[proj]["packed"] is not None
+                        assert layer_info[proj]["packed"].device.type == "cuda"
+                    else:
+                        # Streamed: weights moved to CPU
+                        assert layer_info[proj]["packed"] is None
+                    # LoRA params always on GPU
                     assert layer_info[proj]["A"].device.type == "cuda"
                     assert layer_info[proj]["B"].device.type == "cuda"
         finally:
@@ -393,14 +410,182 @@ class TestFromQuantizedMoE:
             )
 
             assert hasattr(loaded, "_cpu_weights")
-            assert len(loaded._cpu_weights) == 2
+            assert hasattr(loaded, "_n_resident")
 
-            # Expert weights should be in CPU pinned memory
+            nr = loaded._n_resident
+            n_streamed = 2 - nr
+
+            # CPU weights should match number of non-resident layers
+            assert len(loaded._cpu_weights) == n_streamed
+
+            # If there are streamed layers, expert weights in CPU pinned
             for cpu_layer in loaded._cpu_weights:
                 assert "expert_gate_packed" in cpu_layer
                 assert cpu_layer["expert_gate_packed"].is_pinned()
+
+            # If all layers are resident, expert weights on GPU
+            for i in range(nr):
+                li = loaded._layer_data[i]
+                if li.get("is_moe"):
+                    assert li["expert_gate_packed"] is not None
+                    assert li["expert_gate_packed"].device.type == "cuda"
         finally:
             os.unlink(path)
+
+
+class TestPartialResidency:
+    """Test partial residency: some layers on GPU, rest streamed."""
+
+    @pytest.fixture
+    def quantized_path(self, kbit_model):
+        """Save kbit_model to a temporary quantized checkpoint."""
+        with tempfile.NamedTemporaryFile(suffix=".safetensors", delete=False) as f:
+            path = f.name
+        save_quantized(kbit_model, path)
+        yield path
+        os.unlink(path)
+
+    def test_all_resident_with_enough_vram(self, quantized_path):
+        """With enough VRAM, all layers should be resident (no streaming)."""
+        from bitsandbytes.kbit_lora import KbitLoraModel
+
+        loaded = KbitLoraModel.from_quantized(
+            quantized_path, lora_r=4, lora_alpha=8.0,
+            attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+            weight_streaming=True, batch_size=1, seq_len=32,
+        )
+
+        # Tiny model fits entirely on GPU
+        assert loaded._n_resident == loaded._num_loaded_layers
+        assert len(loaded._cpu_weights) == 0
+
+        # Weights should be on GPU, not None
+        for layer_info in loaded._layer_data:
+            for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
+                assert layer_info[proj]["packed"] is not None
+                assert layer_info[proj]["packed"].device.type == "cuda"
+
+    def test_forced_partial_residency(self, quantized_path):
+        """Monkey-patch _compute_residency to force partial split."""
+        from bitsandbytes.kbit_lora import KbitLoraModel
+        from unittest.mock import patch
+
+        # Force only 1 of 2 layers to be resident
+        with patch.object(KbitLoraModel, "_compute_residency", return_value=1):
+            loaded = KbitLoraModel.from_quantized(
+                quantized_path, lora_r=4, lora_alpha=8.0,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                weight_streaming=True, batch_size=1, seq_len=32,
+            )
+
+        assert loaded._n_resident == 1
+        assert len(loaded._cpu_weights) == 1  # 1 layer streamed
+        assert len(loaded._gpu_slots) == 2    # double buffer allocated
+
+        # Layer 0: resident, weights on GPU
+        for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
+            assert loaded._layer_data[0][proj]["packed"] is not None
+            assert loaded._layer_data[0][proj]["packed"].device.type == "cuda"
+
+        # Layer 1: streamed, weights moved to CPU
+        for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
+            assert loaded._layer_data[1][proj]["packed"] is None
+            assert proj in loaded._cpu_weights[0]
+            assert loaded._cpu_weights[0][proj]["packed"].is_pinned()
+
+    def test_forced_partial_forward_backward(self, quantized_path):
+        """Partial residency should produce correct forward/backward results."""
+        from bitsandbytes.kbit_lora import KbitLoraModel
+        from unittest.mock import patch
+
+        # Force 1 resident + 1 streamed
+        with patch.object(KbitLoraModel, "_compute_residency", return_value=1):
+            model = KbitLoraModel.from_quantized(
+                quantized_path, lora_r=4, lora_alpha=8.0,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                weight_streaming=True, batch_size=1, seq_len=32,
+            )
+
+        model.train()
+        input_ids = torch.randint(0, 100, (1, 32), device="cuda")
+        labels = input_ids.clone()
+
+        loss, ctx = model.forward_streaming(input_ids, labels)
+        assert loss.item() > 0
+        model.backward_streaming(ctx)
+
+        # Should have gradients for all LoRA params
+        # Note: LoRA A gradients are zero at initialization because B is
+        # zero-initialized (d(loss)/dA depends on B). Only B has non-zero grads.
+        for name, param in model._lora_params.named_parameters():
+            assert param.grad is not None, f"No gradient for {name}"
+            if name.endswith("_B"):
+                assert param.grad.abs().sum() > 0, f"Zero gradient for {name}"
+
+    def test_zero_resident_streaming(self, quantized_path):
+        """Force 0 resident layers — everything streamed."""
+        from bitsandbytes.kbit_lora import KbitLoraModel
+        from unittest.mock import patch
+
+        with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
+            model = KbitLoraModel.from_quantized(
+                quantized_path, lora_r=4, lora_alpha=8.0,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                weight_streaming=True, batch_size=1, seq_len=32,
+            )
+
+        assert model._n_resident == 0
+        assert len(model._cpu_weights) == 2
+
+        # Forward/backward should work
+        model.train()
+        input_ids = torch.randint(0, 100, (1, 32), device="cuda")
+        labels = input_ids.clone()
+
+        loss, ctx = model.forward_streaming(input_ids, labels)
+        assert loss.item() > 0
+        model.backward_streaming(ctx)
+
+        for name, param in model._lora_params.named_parameters():
+            assert param.grad is not None, f"No gradient for {name}"
+
+    def test_partial_vs_full_resident_gradient_match(self, quantized_path):
+        """Partial residency must give same gradients as fully resident."""
+        from bitsandbytes.kbit_lora import KbitLoraModel
+        from unittest.mock import patch
+
+        def _run_fwd_bwd(n_resident):
+            # Same seed for LoRA initialization
+            torch.manual_seed(123)
+            with patch.object(KbitLoraModel, "_compute_residency", return_value=n_resident):
+                m = KbitLoraModel.from_quantized(
+                    quantized_path, lora_r=4, lora_alpha=8.0,
+                    attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                    weight_streaming=True, batch_size=1, seq_len=32,
+                )
+            m.train()
+            torch.manual_seed(42)
+            ids = torch.randint(0, 100, (1, 32), device="cuda")
+            lb = ids.clone()
+            loss, ctx = m.forward_streaming(ids, lb)
+            m.backward_streaming(ctx)
+            grads = {}
+            for name, p in m._lora_params.named_parameters():
+                if p.grad is not None:
+                    grads[name] = p.grad.clone()
+            return loss, grads
+
+        loss_full, grads_full = _run_fwd_bwd(2)  # fully resident
+        loss_part, grads_part = _run_fwd_bwd(1)  # 1 resident + 1 streamed
+
+        assert torch.allclose(loss_full, loss_part, atol=1e-5), (
+            f"Loss mismatch: full={loss_full.item()}, partial={loss_part.item()}"
+        )
+
+        for name in grads_full:
+            assert torch.allclose(grads_full[name], grads_part[name], atol=1e-4), (
+                f"Gradient mismatch for {name}"
+            )
 
 
 class TestStreamingQuantize:

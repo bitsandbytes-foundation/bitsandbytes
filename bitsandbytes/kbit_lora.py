@@ -211,6 +211,8 @@ class KbitLoraModel(nn.Module):
         self._quantize_and_create_lora(model)
 
         # Set up weight streaming
+        self._batch_size_hint = 1
+        self._seq_len_hint = 2048
         if self.weight_streaming:
             self._init_weight_streaming()
 
@@ -240,6 +242,8 @@ class KbitLoraModel(nn.Module):
         target_device: torch.device = torch.device("cuda:0"),
         lora_on_experts: bool = False,
         expert_chunk_size: int = 32,
+        batch_size: int = 8,
+        seq_len: int = 1024,
         lora_checkpoint: Optional[str] = None,
     ) -> "KbitLoraModel":
         """Load a pre-quantized model from a safetensors checkpoint.
@@ -261,6 +265,8 @@ class KbitLoraModel(nn.Module):
             target_device: GPU device for computation.
             lora_on_experts: If True, add LoRA to expert projections.
             expert_chunk_size: Experts processed at once in MoE forward.
+            batch_size: Batch size hint for VRAM estimation (partial residency).
+            seq_len: Sequence length hint for VRAM estimation (partial residency).
             lora_checkpoint: Optional path to saved LoRA weights to load.
         """
         from safetensors import safe_open
@@ -309,6 +315,8 @@ class KbitLoraModel(nn.Module):
         self.include_lm_head = True
         self.lora_on_experts = lora_on_experts
         self.expert_chunk_size = expert_chunk_size
+        self._batch_size_hint = batch_size
+        self._seq_len_hint = seq_len
 
         self.hidden_size = int(meta["hidden_size"])
         self.num_heads = int(meta["num_attention_heads"])
@@ -814,19 +822,189 @@ class KbitLoraModel(nn.Module):
         else:
             return ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
+    @staticmethod
+    def _compute_layer_weight_bytes(layer_info: dict) -> int:
+        """Compute byte size of a layer's quantized weight tensors."""
+        weight_keys = ["packed", "absmax", "codebook"]
+        total = 0
+
+        # Dense projections
+        for key, value in layer_info.items():
+            if isinstance(value, dict) and "packed" in value:
+                for wk in weight_keys:
+                    if wk in value and value[wk] is not None:
+                        total += value[wk].nbytes
+
+        # MoE expert weights
+        if layer_info.get("is_moe"):
+            for expert_proj in ["gate", "up", "down"]:
+                for suffix in ["packed", "absmax"]:
+                    key = f"expert_{expert_proj}_{suffix}"
+                    if key in layer_info and layer_info[key] is not None:
+                        total += layer_info[key].nbytes
+            if "expert_codebook" in layer_info and layer_info["expert_codebook"] is not None:
+                total += layer_info["expert_codebook"].nbytes
+
+        return total
+
+    def _compute_residency(self) -> int:
+        """Compute how many layers can stay resident on GPU.
+
+        Returns the number of leading layers that fit in available VRAM
+        after accounting for fixed costs and activation memory.
+        """
+        device = self._target_device
+        _, free_vram = torch.cuda.mem_get_info(device)
+
+        # Compute fixed costs
+        # CUDA context overhead
+        cuda_context = int(1.5e9)
+
+        # Embedding table
+        embed_bytes = 0
+        if self.embed_tokens is not None:
+            embed_bytes = self.embed_tokens.weight.nelement() * self.embed_tokens.weight.element_size()
+
+        # LM head
+        lm_head_bytes = 0
+        if self._lm_head_info is not None:
+            for key in ["packed", "absmax", "codebook"]:
+                if key in self._lm_head_info:
+                    lm_head_bytes += self._lm_head_info[key].nelement() * self._lm_head_info[key].element_size()
+
+        # LoRA params (A + B for each projection in each layer) + gradients
+        lora_total_bytes = sum(
+            p.nelement() * p.element_size() for p in self._lora_params.parameters()
+        )
+        lora_grad_bytes = lora_total_bytes  # Same size for gradients
+
+        # Norm weights + gradients
+        norm_bytes = sum(
+            p.nelement() * p.element_size() for p in self._norm_weights.parameters()
+        )
+        norm_grad_bytes = norm_bytes
+
+        # Optimizer state (Adam: 2 states per parameter)
+        optimizer_state_bytes = 2 * (lora_total_bytes + norm_bytes)
+
+        # Activation estimate (conservative: peak activations during one layer)
+        B = self._batch_size_hint
+        S = self._seq_len_hint
+        H = self.hidden_size
+        I = self.intermediate_size
+        # Attention intermediates: hidden, Q, K, V at peak = 4 * B*S*H * 2 bytes (bf16)
+        # MLP intermediates: gate + up = 2 * B*S*I * 2 bytes
+        activation_bytes = B * S * H * 4 * 2 + B * S * I * 2 * 2
+
+        # Compute per-layer sizes
+        layer_sizes = [
+            self._compute_layer_weight_bytes(layer_info)
+            for layer_info in self._layer_data
+        ]
+
+        # Double-buffer GPU slots (sized for largest layer)
+        max_layer_bytes = max(layer_sizes) if layer_sizes else 0
+        double_buffer_bytes = 2 * max_layer_bytes
+
+        overhead = (
+            cuda_context
+            + embed_bytes
+            + lm_head_bytes
+            + lora_total_bytes
+            + lora_grad_bytes
+            + norm_bytes
+            + norm_grad_bytes
+            + optimizer_state_bytes
+            + activation_bytes
+            + double_buffer_bytes
+        )
+        available_for_resident = free_vram - overhead
+
+        # Greedily pack layers from the start
+        n_resident = 0
+        used = 0
+        for size in layer_sizes:
+            if used + size <= available_for_resident:
+                n_resident += 1
+                used += size
+            else:
+                break
+
+        return n_resident
+
     def _init_weight_streaming(self):
-        """Move quantized weights to CPU pinned memory and pre-allocate GPU buffers."""
+        """Move non-resident quantized weights to CPU pinned memory and pre-allocate GPU buffers.
+
+        Computes partial residency: first N layers stay on GPU, rest are streamed.
+        """
         device = self._target_device
         weight_keys = ["packed", "absmax", "codebook"]
 
+        # Compute residency
+        self._n_resident = self._compute_residency()
+        n = self._num_loaded_layers
+
+        # If all layers fit on GPU, no streaming needed
+        if self._n_resident >= n:
+            self._n_resident = n
+            self._cpu_weights = []
+            self._gpu_slots = []
+            self._copy_stream = torch.cuda.Stream(device=device)
+
+            # Ensure resident layer weights are on GPU
+            for layer_info in self._layer_data:
+                proj_keys = self._get_streaming_weight_keys(layer_info)
+                for proj in proj_keys:
+                    for wk in weight_keys:
+                        t = layer_info[proj][wk]
+                        if t is not None and t.device != device:
+                            layer_info[proj][wk] = t.to(device)
+                if layer_info.get("is_moe"):
+                    for expert_proj in ["gate", "up", "down"]:
+                        for suffix in ["packed", "absmax"]:
+                            key = f"expert_{expert_proj}_{suffix}"
+                            t = layer_info.get(key)
+                            if t is not None and t.device != device:
+                                layer_info[key] = t.to(device)
+                    cb = layer_info.get("expert_codebook")
+                    if cb is not None and cb.device != device:
+                        layer_info["expert_codebook"] = cb.to(device)
+
+            resident_bytes = sum(
+                self._compute_layer_weight_bytes(li) for li in self._layer_data
+            )
+            print(
+                f"Partial residency: {n} / {n} layers on GPU (100%), 0 streamed\n"
+                f"  Resident: {resident_bytes / 1e9:.1f} GB (all layers)"
+            )
+            return
+
+        # Move resident layers to GPU (they may be on CPU from from_quantized)
+        for i in range(self._n_resident):
+            layer_info = self._layer_data[i]
+            proj_keys = self._get_streaming_weight_keys(layer_info)
+            for proj in proj_keys:
+                for wk in weight_keys:
+                    t = layer_info[proj][wk]
+                    if t is not None and t.device != device:
+                        layer_info[proj][wk] = t.to(device)
+            if layer_info.get("is_moe"):
+                for expert_proj in ["gate", "up", "down"]:
+                    for suffix in ["packed", "absmax"]:
+                        key = f"expert_{expert_proj}_{suffix}"
+                        t = layer_info.get(key)
+                        if t is not None and t.device != device:
+                            layer_info[key] = t.to(device)
+                cb = layer_info.get("expert_codebook")
+                if cb is not None and cb.device != device:
+                    layer_info["expert_codebook"] = cb.to(device)
+
+        # Move non-resident layers to CPU pinned memory
         self._cpu_weights = []
-        max_slot_bytes = 0
-
-        for layer_info in self._layer_data:
+        for i in range(self._n_resident, n):
+            layer_info = self._layer_data[i]
             cpu_layer = {}
-            layer_bytes = 0
 
-            # Dense projections (attention + MLP/shared expert)
             proj_keys = self._get_streaming_weight_keys(layer_info)
             for proj in proj_keys:
                 cpu_proj = {}
@@ -835,11 +1013,9 @@ class KbitLoraModel(nn.Module):
                     cpu_tensor = torch.empty_like(gpu_tensor, device="cpu", pin_memory=True)
                     cpu_tensor.copy_(gpu_tensor)
                     cpu_proj[wk] = cpu_tensor
-                    layer_bytes += cpu_tensor.nbytes
                     layer_info[proj][wk] = None
                 cpu_layer[proj] = cpu_proj
 
-            # MoE expert weights (concatenated)
             if layer_info.get("is_moe"):
                 for expert_proj in ["gate", "up", "down"]:
                     for suffix in ["packed", "absmax"]:
@@ -848,20 +1024,16 @@ class KbitLoraModel(nn.Module):
                         cpu_tensor = torch.empty_like(gpu_tensor, device="cpu", pin_memory=True)
                         cpu_tensor.copy_(gpu_tensor)
                         cpu_layer[key] = cpu_tensor
-                        layer_bytes += cpu_tensor.nbytes
                         layer_info[key] = None
-                # Codebook (shared across expert projections)
                 cb = layer_info["expert_codebook"]
                 cpu_cb = torch.empty_like(cb, device="cpu", pin_memory=True)
                 cpu_cb.copy_(cb)
                 cpu_layer["expert_codebook"] = cpu_cb
-                layer_bytes += cpu_cb.nbytes
                 layer_info["expert_codebook"] = None
 
             self._cpu_weights.append(cpu_layer)
-            max_slot_bytes = max(max_slot_bytes, layer_bytes)
 
-        # Free registered buffers
+        # Free registered buffers for non-resident layers
         buffers_to_remove = []
         for name, buf in self.named_buffers():
             if any(name.startswith(p) for p in ("_packed_", "_absmax_", "_codebook_", "_router_")):
@@ -872,7 +1044,7 @@ class KbitLoraModel(nn.Module):
             delattr(self, name)
         torch.cuda.empty_cache()
 
-        # Pre-allocate 2 GPU buffer slots sized for the largest layer
+        # Pre-allocate 2 GPU buffer slots for the largest non-resident layer
         self._copy_stream = torch.cuda.Stream(device=device)
 
         def _layer_bytes(cpu_layer):
@@ -905,15 +1077,27 @@ class KbitLoraModel(nn.Module):
             sum(_entry_bytes(v) for v in cl.values()) for cl in self._cpu_weights
         )
         slot_bytes = sum(_entry_bytes(v) for v in self._gpu_slots[0].values())
+        resident_bytes = sum(
+            self._compute_layer_weight_bytes(self._layer_data[i])
+            for i in range(self._n_resident)
+        )
+        n_streamed = n - self._n_resident
+        pct = 100 * self._n_resident / n if n > 0 else 0
+        resident_str = (
+            f"layers 0-{self._n_resident - 1}" if self._n_resident > 0 else "none"
+        )
         print(
-            f"Weight streaming: {total_cpu_bytes / 1e9:.1f} GB on CPU pinned, "
-            f"{2 * slot_bytes / 1e6:.0f} MB GPU double-buffer "
-            f"({len(self._cpu_weights)} layers)"
+            f"Partial residency: {self._n_resident} / {n} layers on GPU ({pct:.1f}%), "
+            f"{n_streamed} streamed\n"
+            f"  Resident: {resident_bytes / 1e9:.1f} GB ({resident_str})\n"
+            f"  Streamed: {total_cpu_bytes / 1e9:.1f} GB (layers {self._n_resident}-{n - 1})\n"
+            f"  GPU double-buffer: {2 * slot_bytes / 1e6:.0f} MB (2 slots × {slot_bytes / 1e6:.0f} MB)"
         )
 
     def _stream_load_layer(self, layer_idx: int, slot: int, sync: bool = False):
         """Copy a layer's quantized weights from CPU pinned to a GPU slot."""
-        cpu_layer = self._cpu_weights[layer_idx]
+        cpu_idx = layer_idx - self._n_resident
+        cpu_layer = self._cpu_weights[cpu_idx]
         gpu_slot = self._gpu_slots[slot]
 
         def _do_copies(non_blocking: bool):
@@ -1106,12 +1290,14 @@ class KbitLoraModel(nn.Module):
         position_ids: torch.Tensor,
     ):
         """Forward pass for one decoder layer (dense or MoE)."""
-        if self.weight_streaming:
+        n_resident = getattr(self, "_n_resident", 0)
+        if self.weight_streaming and layer_idx >= n_resident:
             if torch.is_grad_enabled():
                 self._stream_load_layer(layer_idx, 0, sync=True)
                 info = self._get_layer_gpu_weights(layer_idx, 0)
             else:
-                slot = layer_idx % 2
+                stream_idx = layer_idx - n_resident
+                slot = stream_idx % 2
                 info = self._get_layer_gpu_weights(layer_idx, slot)
         else:
             info = self._layer_data[layer_idx]
@@ -1143,29 +1329,38 @@ class KbitLoraModel(nn.Module):
     # ─── Streaming forward ───
 
     def _forward_streaming(self, hidden: torch.Tensor, position_ids: torch.Tensor):
-        """Double-buffered streaming forward pass."""
+        """Double-buffered streaming forward pass with partial residency."""
         n = self._num_loaded_layers
+        nr = self._n_resident
 
-        self._current_slot = 0
-        self._stream_load_layer(0, slot=0, sync=True)
+        def _make_layer_fn(layer_idx, pos_ids):
+            def _fn(h):
+                return self._layer_forward(layer_idx, h, pos_ids)
+            return _fn
 
-        for i in range(n):
-            next_slot = 1 - (i % 2)
-
-            if i + 1 < n:
-                self._stream_load_layer(i + 1, slot=next_slot, sync=False)
-
-            def _make_stream_fn(layer_idx, pos_ids):
-                def _fn(h):
-                    return self._layer_forward(layer_idx, h, pos_ids)
-                return _fn
-
+        # Phase 1: Resident layers (no streaming, weights on GPU)
+        for i in range(nr):
             hidden = checkpoint_cpu_offload(
-                _make_stream_fn(i, position_ids), hidden,
+                _make_layer_fn(i, position_ids), hidden,
             )
 
-            if i + 1 < n:
-                torch.cuda.current_stream().wait_stream(self._copy_stream)
+        # Phase 2: Streamed layers (double-buffered from CPU)
+        if nr < n:
+            self._stream_load_layer(nr, slot=0, sync=True)
+
+            for i in range(nr, n):
+                stream_idx = i - nr
+                next_slot = 1 - (stream_idx % 2)
+
+                if i + 1 < n:
+                    self._stream_load_layer(i + 1, slot=next_slot, sync=False)
+
+                hidden = checkpoint_cpu_offload(
+                    _make_layer_fn(i, position_ids), hidden,
+                )
+
+                if i + 1 < n:
+                    torch.cuda.current_stream().wait_stream(self._copy_stream)
 
         return hidden
 
@@ -1209,6 +1404,7 @@ class KbitLoraModel(nn.Module):
             hidden = input_ids
 
         n = self._num_loaded_layers
+        nr = self._n_resident
         checkpoints = []
 
         # Save input to first layer on CPU pinned
@@ -1216,15 +1412,8 @@ class KbitLoraModel(nn.Module):
         ckpt.copy_(hidden, non_blocking=True)
         checkpoints.append(ckpt)
 
-        # Pre-load layer 0
-        self._stream_load_layer(0, slot=0, sync=True)
-
-        # Double-buffered forward (no grad — just checkpointing)
-        for i in range(n):
-            next_slot = 1 - (i % 2)
-            if i + 1 < n:
-                self._stream_load_layer(i + 1, slot=next_slot, sync=False)
-
+        # Phase 1: Resident layers (no streaming, weights on GPU)
+        for i in range(nr):
             with torch.no_grad():
                 hidden = self._layer_forward(i, hidden, position_ids)
 
@@ -1232,8 +1421,25 @@ class KbitLoraModel(nn.Module):
             ckpt.copy_(hidden, non_blocking=True)
             checkpoints.append(ckpt)
 
-            if i + 1 < n:
-                torch.cuda.current_stream().wait_stream(self._copy_stream)
+        # Phase 2: Streamed layers (double-buffered from CPU)
+        if nr < n:
+            self._stream_load_layer(nr, slot=0, sync=True)
+
+            for i in range(nr, n):
+                stream_idx = i - nr
+                next_slot = 1 - (stream_idx % 2)
+                if i + 1 < n:
+                    self._stream_load_layer(i + 1, slot=next_slot, sync=False)
+
+                with torch.no_grad():
+                    hidden = self._layer_forward(i, hidden, position_ids)
+
+                ckpt = torch.empty(hidden.shape, dtype=hidden.dtype, device="cpu", pin_memory=True)
+                ckpt.copy_(hidden, non_blocking=True)
+                checkpoints.append(ckpt)
+
+                if i + 1 < n:
+                    torch.cuda.current_stream().wait_stream(self._copy_stream)
 
         # Compute loss (with grad)
         hidden_final = checkpoints[-1].to(device, non_blocking=True).requires_grad_(True)
@@ -1284,22 +1490,27 @@ class KbitLoraModel(nn.Module):
     def backward_streaming(self, ctx: StreamingContext):
         """Backward pass with weight streaming. Accumulates LoRA gradients.
 
-        Consumes and frees the context.
+        Consumes and frees the context. Handles partial residency:
+        resident layers use weights from _layer_data directly,
+        streamed layers use double-buffered GPU slots.
         """
         device = ctx.position_ids.device
         n = self._num_loaded_layers
+        nr = self._n_resident
         grad = ctx.grad_from_loss
 
-        # Pre-load last layer
-        last_slot = (n - 1) % 2
-        self._stream_load_layer(n - 1, slot=last_slot, sync=True)
+        # Pre-load last layer if it's streamed
+        if n - 1 >= nr:
+            last_stream_idx = (n - 1) - nr
+            self._stream_load_layer(n - 1, slot=last_stream_idx % 2, sync=True)
 
         for i in reversed(range(n)):
-            cur_slot = i % 2
-            next_bwd_slot = 1 - cur_slot
+            is_streamed = i >= nr
 
-            # Prefetch next backward layer (i-1)
-            if i > 0:
+            # Prefetch next backward layer if also streamed
+            if is_streamed and i - 1 >= nr:
+                prev_stream_idx = (i - 1) - nr
+                next_bwd_slot = prev_stream_idx % 2
                 self._stream_load_layer(i - 1, slot=next_bwd_slot, sync=False)
 
             # Restore checkpoint and recompute forward with grad
@@ -1342,7 +1553,7 @@ class KbitLoraModel(nn.Module):
                     param.grad.add_(g.detach())
 
             # Wait for prefetch
-            if i > 0:
+            if is_streamed and i - 1 >= nr:
                 torch.cuda.current_stream().wait_stream(self._copy_stream)
 
         ctx.free()
