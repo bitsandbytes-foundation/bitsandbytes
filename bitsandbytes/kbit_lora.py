@@ -200,6 +200,306 @@ class KbitLoraModel(nn.Module):
         for p in self._norm_weights.parameters():
             p.requires_grad_(True)
 
+    # ─── Load from pre-quantized checkpoint ───
+
+    @classmethod
+    def from_quantized(
+        cls,
+        checkpoint_path: str,
+        lora_r: int = 64,
+        lora_alpha: float = 16.0,
+        attn_chunk_size: int = 4096,
+        mlp_chunk_size: int = 4096,
+        ce_chunk_size: int = 8192,
+        compute_dtype: torch.dtype = torch.bfloat16,
+        weight_streaming: bool = True,
+        target_device: torch.device = torch.device("cuda:0"),
+        lora_on_experts: bool = False,
+        expert_chunk_size: int = 32,
+        lora_checkpoint: Optional[str] = None,
+    ) -> "KbitLoraModel":
+        """Load a pre-quantized model from a safetensors checkpoint.
+
+        This is Path B: load pre-quantized weights without requiring the
+        original HuggingFace model. Use save_quantized() to create the
+        checkpoint (Path A).
+
+        Args:
+            checkpoint_path: Path to safetensors file from save_quantized().
+            lora_r: LoRA rank.
+            lora_alpha: LoRA scaling factor.
+            attn_chunk_size: Sequence chunk size for attention.
+            mlp_chunk_size: Sequence chunk size for MLP.
+            ce_chunk_size: Vocab chunk size for cross-entropy.
+            compute_dtype: Computation dtype.
+            weight_streaming: If True, keep weights in CPU pinned memory
+                and stream to GPU layer-by-layer.
+            target_device: GPU device for computation.
+            lora_on_experts: If True, add LoRA to expert projections.
+            expert_chunk_size: Experts processed at once in MoE forward.
+            lora_checkpoint: Optional path to saved LoRA weights to load.
+        """
+        from safetensors import safe_open
+
+        # 1. Open safetensors and read metadata
+        sf = safe_open(checkpoint_path, framework="pt", device="cpu")
+        meta = sf.metadata()
+
+        # 2. Create instance without calling __init__
+        self = cls.__new__(cls)
+        nn.Module.__init__(self)
+
+        # 3. Reconstruct ArchConfig from metadata
+        class _MinimalConfig:
+            pass
+
+        cfg = _MinimalConfig()
+        cfg.model_type = meta["model_type"]
+        if meta.get("is_moe") == "True":
+            cfg.num_experts = int(meta["num_experts"])
+            cfg.num_local_experts = int(meta["num_experts"])
+            cfg.num_experts_per_tok = int(meta["num_active_experts"])
+            cfg.moe_intermediate_size = int(meta["expert_intermediate_size"])
+
+        self.arch = detect_arch_config(cfg)
+
+        # 4. Set attributes from metadata and parameters
+        self.config = None
+        self.model_type = meta["model_type"]
+        self.lora_r = lora_r
+        self.lora_s = lora_alpha / lora_r
+        self.k = int(meta.get("k_attention", "4"))
+        self.k_config = {}
+        self.k_attention = int(meta["k_attention"])
+        self.k_mlp = int(meta["k_mlp"])
+        self.k_lm_head = int(meta["k_lm_head"])
+        self.k_experts = int(meta["k_experts"])
+        self.k_shared_expert = int(meta["k_shared_expert"])
+        self.attn_chunk_size = attn_chunk_size
+        self.mlp_chunk_size = mlp_chunk_size
+        self.ce_chunk_size = ce_chunk_size
+        self.compute_dtype = compute_dtype
+        self.cpu_offload = weight_streaming
+        self.weight_streaming = weight_streaming
+        self.include_embed = True
+        self.include_lm_head = True
+        self.lora_on_experts = lora_on_experts
+        self.expert_chunk_size = expert_chunk_size
+
+        self.hidden_size = int(meta["hidden_size"])
+        self.num_heads = int(meta["num_attention_heads"])
+        self.num_kv_heads = int(meta["num_key_value_heads"])
+        self.head_dim = int(meta["head_dim"])
+        self.q_dim = self.num_heads * self.head_dim
+        self.kv_dim = self.num_kv_heads * self.head_dim
+        self.intermediate_size = int(meta["intermediate_size"])
+        self.vocab_size = int(meta["vocab_size"])
+        self.num_layers = int(meta["num_layers"])
+        self.rms_norm_eps = float(meta["rms_norm_eps"])
+        self.rope_theta = float(meta["rope_theta"])
+
+        self._layer_start = int(meta.get("layer_start", "0"))
+        self._layer_end = int(meta.get("layer_end", meta["num_layers"]))
+        self._num_loaded_layers = int(meta.get("num_loaded_layers", meta["num_layers"]))
+
+        self._streaming = True
+        self._target_device = target_device
+        self.model = None
+        self.lm_head_tied = False
+
+        # 5. Initialize parameter containers
+        self._quantized_weights = nn.ParameterDict()
+        self._lora_params = nn.ParameterDict()
+        self._norm_weights = nn.ParameterDict()
+
+        # 6. Load embedding
+        if "embed_tokens.weight" in sf.keys():
+            embed_weight = sf.get_tensor("embed_tokens.weight").to(target_device)
+            self.embed_tokens = nn.Embedding(self.vocab_size, self.hidden_size)
+            self.embed_tokens.weight = nn.Parameter(embed_weight, requires_grad=False)
+        else:
+            self.embed_tokens = None
+
+        # 7. Populate _layer_data from safetensors
+        self._layer_data = []
+        for i in range(self._num_loaded_layers):
+            prefix = f"layer.{i}"
+            layer_info = {}
+
+            # Attention projections
+            for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
+                N = int(meta[f"{prefix}.attn.{proj}.N"])
+                K = int(meta[f"{prefix}.attn.{proj}.K"])
+                N_padded = int(meta[f"{prefix}.attn.{proj}.N_padded"])
+                k_val = int(meta[f"{prefix}.attn.{proj}.k"])
+
+                packed = sf.get_tensor(f"{prefix}.attn.{proj}.packed")
+                absmax = sf.get_tensor(f"{prefix}.attn.{proj}.absmax")
+                codebook = sf.get_tensor(f"{prefix}.attn.{proj}.codebook")
+
+                if not weight_streaming:
+                    packed = packed.to(target_device)
+                    absmax = absmax.to(target_device)
+                    codebook = codebook.to(target_device)
+
+                A, B = self._create_lora(f"layers_{i}_attn_{proj}", N, K)
+
+                layer_info[proj] = {
+                    "packed": packed, "absmax": absmax, "codebook": codebook,
+                    "N_padded": N_padded, "N": N, "K": K, "k": k_val,
+                    "A": A, "B": B,
+                }
+
+            # MLP or MoE
+            global_layer_idx = self._layer_start + i
+            is_moe_layer = self.arch.is_moe_layer(global_layer_idx)
+
+            if is_moe_layer:
+                layer_info["is_moe"] = True
+
+                # Router weight (always on GPU, not quantized)
+                router_weight = sf.get_tensor(f"{prefix}.moe.router_weight")
+                layer_info["router_weight"] = router_weight.to(
+                    target_device, dtype=compute_dtype
+                )
+
+                # Shared expert (if present)
+                if self.arch.has_shared_expert:
+                    for proj in ["shared_gate_proj", "shared_up_proj", "shared_down_proj"]:
+                        N = int(meta[f"{prefix}.moe.{proj}.N"])
+                        K = int(meta[f"{prefix}.moe.{proj}.K"])
+                        N_padded = int(meta[f"{prefix}.moe.{proj}.N_padded"])
+                        k_val = int(meta[f"{prefix}.moe.{proj}.k"])
+
+                        packed = sf.get_tensor(f"{prefix}.moe.{proj}.packed")
+                        absmax = sf.get_tensor(f"{prefix}.moe.{proj}.absmax")
+                        codebook = sf.get_tensor(f"{prefix}.moe.{proj}.codebook")
+
+                        if not weight_streaming:
+                            packed = packed.to(target_device)
+                            absmax = absmax.to(target_device)
+                            codebook = codebook.to(target_device)
+
+                        A, B = self._create_lora(f"layers_{i}_moe_{proj}", N, K)
+
+                        layer_info[proj] = {
+                            "packed": packed, "absmax": absmax, "codebook": codebook,
+                            "N_padded": N_padded, "N": N, "K": K, "k": k_val,
+                            "A": A, "B": B,
+                        }
+
+                # Expert weights (concatenated across all experts)
+                expert_N = int(meta[f"{prefix}.moe.experts.N"])
+                expert_K = int(meta[f"{prefix}.moe.experts.K"])
+                expert_N_padded = int(meta[f"{prefix}.moe.experts.N_padded"])
+                expert_k = int(meta[f"{prefix}.moe.experts.k"])
+
+                for expert_proj in ["gate", "up", "down"]:
+                    for suffix in ["packed", "absmax"]:
+                        key = f"expert_{expert_proj}_{suffix}"
+                        tensor = sf.get_tensor(f"{prefix}.moe.experts.{expert_proj}.{suffix}")
+                        if not weight_streaming:
+                            tensor = tensor.to(target_device)
+                        layer_info[key] = tensor
+
+                expert_codebook = sf.get_tensor(f"{prefix}.moe.experts.codebook")
+                if not weight_streaming:
+                    expert_codebook = expert_codebook.to(target_device)
+                layer_info["expert_codebook"] = expert_codebook
+                layer_info["expert_k"] = expert_k
+                layer_info["expert_N"] = expert_N
+                layer_info["expert_K"] = expert_K
+                layer_info["expert_N_padded"] = expert_N_padded
+            else:
+                # Dense MLP
+                for proj in ["gate_proj", "up_proj", "down_proj"]:
+                    N = int(meta[f"{prefix}.mlp.{proj}.N"])
+                    K = int(meta[f"{prefix}.mlp.{proj}.K"])
+                    N_padded = int(meta[f"{prefix}.mlp.{proj}.N_padded"])
+                    k_val = int(meta[f"{prefix}.mlp.{proj}.k"])
+
+                    packed = sf.get_tensor(f"{prefix}.mlp.{proj}.packed")
+                    absmax = sf.get_tensor(f"{prefix}.mlp.{proj}.absmax")
+                    codebook = sf.get_tensor(f"{prefix}.mlp.{proj}.codebook")
+
+                    if not weight_streaming:
+                        packed = packed.to(target_device)
+                        absmax = absmax.to(target_device)
+                        codebook = codebook.to(target_device)
+
+                    A, B = self._create_lora(f"layers_{i}_mlp_{proj}", N, K)
+
+                    layer_info[proj] = {
+                        "packed": packed, "absmax": absmax, "codebook": codebook,
+                        "N_padded": N_padded, "N": N, "K": K, "k": k_val,
+                        "A": A, "B": B,
+                    }
+
+            # Norm weights (always on GPU)
+            for nk in ["input_layernorm", "post_attention_layernorm"]:
+                tensor_name = f"{prefix}.{nk}.weight"
+                if tensor_name in sf.keys():
+                    weight = sf.get_tensor(tensor_name).to(
+                        target_device, dtype=compute_dtype
+                    )
+                    safe_name = f"layers_{i}_{nk}_weight"
+                    self._norm_weights[safe_name] = nn.Parameter(weight)
+                    layer_info[nk] = self._norm_weights[safe_name]
+
+            # QK norms (Qwen3)
+            if self.arch.has_qk_norm:
+                for nk in ["q_norm", "k_norm"]:
+                    tensor_name = f"{prefix}.{nk}.weight"
+                    if tensor_name in sf.keys():
+                        weight = sf.get_tensor(tensor_name).to(
+                            target_device, dtype=compute_dtype
+                        )
+                        safe_name = f"layers_{i}_attn_{nk}_weight"
+                        self._norm_weights[safe_name] = nn.Parameter(weight)
+                        layer_info[nk] = self._norm_weights[safe_name]
+
+            self._layer_data.append(layer_info)
+
+        # 8. Final norm
+        if "final_norm.weight" in sf.keys():
+            weight = sf.get_tensor("final_norm.weight").to(
+                target_device, dtype=compute_dtype
+            )
+            self._norm_weights["final_norm_weight"] = nn.Parameter(weight)
+
+        # 9. LM head (always on GPU — small relative to layer weights)
+        self._lm_head_info = None
+        if "lm_head.packed" in sf.keys():
+            self._lm_head_info = {
+                "packed": sf.get_tensor("lm_head.packed").to(target_device),
+                "absmax": sf.get_tensor("lm_head.absmax").to(target_device),
+                "codebook": sf.get_tensor("lm_head.codebook").to(target_device),
+                "N_padded": int(meta["lm_head.N_padded"]),
+                "N": int(meta["lm_head.N"]),
+                "K": int(meta["lm_head.K"]),
+                "k": int(meta["lm_head.k"]),
+            }
+
+        # 10. Build RoPE cache
+        self._build_rope_cache(target_device)
+
+        # 11. Init weight streaming
+        if weight_streaming:
+            self._init_weight_streaming()
+
+        # 12. Set trainable params
+        for p in self._lora_params.parameters():
+            p.requires_grad_(True)
+        for p in self._norm_weights.parameters():
+            p.requires_grad_(True)
+
+        # 13. Load LoRA checkpoint (optional)
+        if lora_checkpoint is not None:
+            from bitsandbytes.checkpoint import load_lora
+            load_lora(self, lora_checkpoint)
+
+        return self
+
     # ─── Quantization & LoRA creation ───
 
     def _quantize_weight(self, weight: torch.Tensor, name: str, k: int | None = None):
@@ -550,21 +850,37 @@ class KbitLoraModel(nn.Module):
 
         # Pre-allocate 2 GPU buffer slots sized for the largest layer
         self._copy_stream = torch.cuda.Stream(device=device)
+
+        def _layer_bytes(cpu_layer):
+            total = 0
+            for v in cpu_layer.values():
+                if isinstance(v, dict):
+                    total += sum(t.nbytes for t in v.values())
+                else:
+                    total += v.nbytes
+            return total
+
+        largest_idx = max(range(len(self._cpu_weights)), key=lambda i: _layer_bytes(self._cpu_weights[i]))
+        largest_cpu_layer = self._cpu_weights[largest_idx]
+
         self._gpu_slots = []
         for _ in range(2):
             slot = {}
-            for i, cpu_layer in enumerate(self._cpu_weights):
-                if i == 0:
-                    for key, cpu_tensor in cpu_layer.items():
-                        slot[key] = torch.empty_like(cpu_tensor, device=device)
-                    break
+            for key, value in largest_cpu_layer.items():
+                if isinstance(value, dict):
+                    slot[key] = {wk: torch.empty_like(t, device=device) for wk, t in value.items()}
+                else:
+                    slot[key] = torch.empty_like(value, device=device)
             self._gpu_slots.append(slot)
         self._current_slot = 0
 
+        def _entry_bytes(v):
+            return sum(t.nbytes for t in v.values()) if isinstance(v, dict) else v.nbytes
+
         total_cpu_bytes = sum(
-            sum(t.nbytes for t in cl.values()) for cl in self._cpu_weights
+            sum(_entry_bytes(v) for v in cl.values()) for cl in self._cpu_weights
         )
-        slot_bytes = sum(t.nbytes for t in self._gpu_slots[0].values())
+        slot_bytes = sum(_entry_bytes(v) for v in self._gpu_slots[0].values())
         print(
             f"Weight streaming: {total_cpu_bytes / 1e9:.1f} GB on CPU pinned, "
             f"{2 * slot_bytes / 1e6:.0f} MB GPU double-buffer "
@@ -576,17 +892,27 @@ class KbitLoraModel(nn.Module):
         cpu_layer = self._cpu_weights[layer_idx]
         gpu_slot = self._gpu_slots[slot]
 
+        def _do_copies(non_blocking: bool):
+            for key, cpu_value in cpu_layer.items():
+                if isinstance(cpu_value, dict):
+                    # Nested proj dict: {packed: tensor, absmax: tensor, codebook: tensor}
+                    if key not in gpu_slot:
+                        gpu_slot[key] = {}
+                    for wk, cpu_tensor in cpu_value.items():
+                        if wk not in gpu_slot[key]:
+                            gpu_slot[key][wk] = torch.empty_like(cpu_tensor, device=self._target_device)
+                        gpu_slot[key][wk].copy_(cpu_tensor, non_blocking=non_blocking)
+                else:
+                    # Flat tensor (expert concatenated weights)
+                    if key not in gpu_slot:
+                        gpu_slot[key] = torch.empty_like(cpu_value, device=self._target_device)
+                    gpu_slot[key].copy_(cpu_value, non_blocking=non_blocking)
+
         if sync:
-            for key, cpu_tensor in cpu_layer.items():
-                if key not in gpu_slot:
-                    gpu_slot[key] = torch.empty_like(cpu_tensor, device=self._target_device)
-                gpu_slot[key].copy_(cpu_tensor)
+            _do_copies(non_blocking=False)
         else:
             with torch.cuda.stream(self._copy_stream):
-                for key, cpu_tensor in cpu_layer.items():
-                    if key not in gpu_slot:
-                        gpu_slot[key] = torch.empty_like(cpu_tensor, device=self._target_device)
-                    gpu_slot[key].copy_(cpu_tensor, non_blocking=True)
+                _do_copies(non_blocking=True)
 
     def _get_layer_gpu_weights(self, layer_idx: int, slot: int) -> dict:
         """Build a layer_info-compatible dict from GPU slot + always-resident data."""
