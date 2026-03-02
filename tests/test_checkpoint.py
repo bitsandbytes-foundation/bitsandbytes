@@ -588,6 +588,205 @@ class TestPartialResidency:
             )
 
 
+class TestRAMStrategy:
+    """Test RAM strategy auto-detection (pinned, hybrid, mmap)."""
+
+    @pytest.fixture
+    def quantized_path(self, kbit_model):
+        """Save kbit_model to a temporary quantized checkpoint."""
+        with tempfile.NamedTemporaryFile(suffix=".safetensors", delete=False) as f:
+            path = f.name
+        save_quantized(kbit_model, path)
+        yield path
+        os.unlink(path)
+
+    def test_default_pinned_with_enough_ram(self, quantized_path):
+        """With plenty of RAM, strategy should be 'pinned'."""
+        from bitsandbytes.kbit_lora import KbitLoraModel
+        from unittest.mock import patch
+
+        # Force 0 resident to exercise streaming, with plenty of RAM
+        with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
+            m = KbitLoraModel.from_quantized(
+                quantized_path, lora_r=4, lora_alpha=8.0,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                weight_streaming=True, batch_size=1, seq_len=32,
+            )
+
+        assert m._ram_strategy == "pinned"
+        assert m._safetensors_file is None
+        assert len(m._staging_buffers) == 0
+        # All cpu_weights should be non-None (pinned)
+        for cl in m._cpu_weights:
+            assert cl is not None
+
+    def test_mmap_with_low_ram(self, quantized_path):
+        """With very low RAM, strategy should be 'mmap'."""
+        from bitsandbytes.kbit_lora import KbitLoraModel, get_available_ram_bytes
+        from unittest.mock import patch
+
+        # Force 0 resident and very low available RAM (1 byte)
+        with patch.object(KbitLoraModel, "_compute_residency", return_value=0), \
+             patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=1):
+            m = KbitLoraModel.from_quantized(
+                quantized_path, lora_r=4, lora_alpha=8.0,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                weight_streaming=True, batch_size=1, seq_len=32,
+            )
+
+        assert m._ram_strategy == "mmap"
+        assert m._safetensors_file is not None
+        assert len(m._staging_buffers) == 2
+        # All cpu_weights should be None (mmap)
+        for cl in m._cpu_weights:
+            assert cl is None
+
+    def test_hybrid_with_limited_ram(self, quantized_path):
+        """With limited RAM, strategy should be 'hybrid'."""
+        from bitsandbytes.kbit_lora import KbitLoraModel
+
+        # First determine layer sizes to craft the right RAM value
+        from unittest.mock import patch
+        with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
+            m_probe = KbitLoraModel.from_quantized(
+                quantized_path, lora_r=4, lora_alpha=8.0,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                weight_streaming=True, batch_size=1, seq_len=32,
+            )
+
+        # Get size of 1 layer (all layers same size for this model)
+        layer_bytes = sum(
+            (sum(t.nbytes for t in v.values()) if isinstance(v, dict) else v.nbytes)
+            for v in m_probe._cpu_weights[0].values()
+        )
+        total_bytes = layer_bytes * 2  # 2 layers
+
+        # Set RAM to 4GB headroom + 1.5 layers worth (enough for 1 layer but not 2)
+        fake_ram = 4 * 1024**3 + int(layer_bytes * 1.5)
+
+        with patch.object(KbitLoraModel, "_compute_residency", return_value=0), \
+             patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=fake_ram):
+            m = KbitLoraModel.from_quantized(
+                quantized_path, lora_r=4, lora_alpha=8.0,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                weight_streaming=True, batch_size=1, seq_len=32,
+            )
+
+        assert m._ram_strategy == "hybrid"
+        assert m._safetensors_file is not None
+        assert len(m._staging_buffers) == 2
+        # First layer pinned, second mmap
+        assert m._cpu_weights[0] is not None  # pinned
+        assert m._cpu_weights[1] is None      # mmap
+
+    def test_mmap_forward_backward(self, quantized_path):
+        """Mmap strategy should produce correct forward/backward."""
+        from bitsandbytes.kbit_lora import KbitLoraModel
+        from unittest.mock import patch
+
+        # Force mmap for all layers
+        torch.manual_seed(123)
+        with patch.object(KbitLoraModel, "_compute_residency", return_value=0), \
+             patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=1):
+            m = KbitLoraModel.from_quantized(
+                quantized_path, lora_r=4, lora_alpha=8.0,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                weight_streaming=True, batch_size=1, seq_len=32,
+            )
+
+        m.train()
+        torch.manual_seed(42)
+        ids = torch.randint(0, 100, (1, 32), device="cuda")
+        lb = ids.clone()
+        loss, ctx = m.forward_streaming(ids, lb)
+        assert loss.item() > 0
+        m.backward_streaming(ctx)
+
+        for name, p in m._lora_params.named_parameters():
+            assert p.grad is not None, f"No gradient for {name}"
+
+    def test_hybrid_forward_backward(self, quantized_path):
+        """Hybrid strategy should produce correct forward/backward."""
+        from bitsandbytes.kbit_lora import KbitLoraModel
+        from unittest.mock import patch
+
+        # First get layer size
+        with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
+            m_probe = KbitLoraModel.from_quantized(
+                quantized_path, lora_r=4, lora_alpha=8.0,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                weight_streaming=True, batch_size=1, seq_len=32,
+            )
+        layer_bytes = sum(
+            (sum(t.nbytes for t in v.values()) if isinstance(v, dict) else v.nbytes)
+            for v in m_probe._cpu_weights[0].values()
+        )
+        fake_ram = 4 * 1024**3 + int(layer_bytes * 1.5)
+
+        torch.manual_seed(123)
+        with patch.object(KbitLoraModel, "_compute_residency", return_value=0), \
+             patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=fake_ram):
+            m = KbitLoraModel.from_quantized(
+                quantized_path, lora_r=4, lora_alpha=8.0,
+                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                weight_streaming=True, batch_size=1, seq_len=32,
+            )
+
+        assert m._ram_strategy == "hybrid"
+        m.train()
+        torch.manual_seed(42)
+        ids = torch.randint(0, 100, (1, 32), device="cuda")
+        lb = ids.clone()
+        loss, ctx = m.forward_streaming(ids, lb)
+        assert loss.item() > 0
+        m.backward_streaming(ctx)
+
+        for name, p in m._lora_params.named_parameters():
+            assert p.grad is not None, f"No gradient for {name}"
+
+    def test_mmap_matches_pinned_gradients(self, quantized_path):
+        """Mmap strategy should produce same gradients as pinned."""
+        from bitsandbytes.kbit_lora import KbitLoraModel
+        from unittest.mock import patch
+
+        def _run(strategy_ram):
+            torch.manual_seed(123)
+            patches = [patch.object(KbitLoraModel, "_compute_residency", return_value=0)]
+            if strategy_ram is not None:
+                patches.append(
+                    patch("bitsandbytes.kbit_lora.get_available_ram_bytes",
+                          return_value=strategy_ram)
+                )
+            with patches[0] if len(patches) == 1 else patches[0], \
+                 (patches[1] if len(patches) > 1 else patch.object(
+                     KbitLoraModel, "_compute_residency", return_value=0)):
+                m = KbitLoraModel.from_quantized(
+                    quantized_path, lora_r=4, lora_alpha=8.0,
+                    attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                    weight_streaming=True, batch_size=1, seq_len=32,
+                )
+            m.train()
+            torch.manual_seed(42)
+            ids = torch.randint(0, 100, (1, 32), device="cuda")
+            lb = ids.clone()
+            loss, ctx = m.forward_streaming(ids, lb)
+            m.backward_streaming(ctx)
+            grads = {}
+            for name, p in m._lora_params.named_parameters():
+                if p.grad is not None:
+                    grads[name] = p.grad.clone()
+            return loss, grads
+
+        loss_pinned, grads_pinned = _run(None)  # default: enough RAM → pinned
+        loss_mmap, grads_mmap = _run(1)  # very low RAM → mmap
+
+        assert torch.allclose(loss_pinned, loss_mmap, atol=1e-5)
+        for name in grads_pinned:
+            assert torch.allclose(grads_pinned[name], grads_mmap[name], atol=1e-4), (
+                f"Gradient mismatch for {name}"
+            )
+
+
 class TestStreamingQuantize:
     """Test streaming_quantize produces bitwise-identical output to save_quantized."""
 

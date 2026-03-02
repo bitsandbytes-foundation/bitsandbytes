@@ -10,6 +10,7 @@ Supported model_types: llama, mistral, qwen2, qwen3, qwen3_moe, glm4
 """
 
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -25,6 +26,19 @@ from bitsandbytes.chunked import chunked_mlp_forward
 import bitsandbytes.functional as F
 from bitsandbytes.moe import moe_expert_forward, moe_router_dispatch
 from bitsandbytes.training import checkpoint_cpu_offload
+
+
+def get_available_ram_bytes() -> int:
+    """Read MemAvailable from /proc/meminfo (Linux only)."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) * 1024
+    except (FileNotFoundError, PermissionError):
+        pass
+    # Fallback: assume 32 GB if /proc/meminfo unavailable
+    return 32 * 1024**3
 
 
 @dataclass
@@ -213,6 +227,8 @@ class KbitLoraModel(nn.Module):
         # Set up weight streaming
         self._batch_size_hint = 1
         self._seq_len_hint = 2048
+        self._checkpoint_path = None
+        self._tensor_name_map = []
         if self.weight_streaming:
             self._init_weight_streaming()
 
@@ -336,6 +352,7 @@ class KbitLoraModel(nn.Module):
 
         self._streaming = True
         self._target_device = target_device
+        self._checkpoint_path = checkpoint_path
         self.model = None
         self.lm_head_tied = False
 
@@ -354,9 +371,11 @@ class KbitLoraModel(nn.Module):
 
         # 7. Populate _layer_data from safetensors
         self._layer_data = []
+        self._tensor_name_map = []  # For mmap backend: proj → {wk: tensor_name}
         for i in range(self._num_loaded_layers):
             prefix = f"layer.{i}"
             layer_info = {}
+            layer_names = {}  # tensor name mapping for mmap
 
             # Attention projections
             for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
@@ -368,6 +387,12 @@ class KbitLoraModel(nn.Module):
                 packed = sf.get_tensor(f"{prefix}.attn.{proj}.packed")
                 absmax = sf.get_tensor(f"{prefix}.attn.{proj}.absmax")
                 codebook = sf.get_tensor(f"{prefix}.attn.{proj}.codebook")
+
+                layer_names[proj] = {
+                    "packed": f"{prefix}.attn.{proj}.packed",
+                    "absmax": f"{prefix}.attn.{proj}.absmax",
+                    "codebook": f"{prefix}.attn.{proj}.codebook",
+                }
 
                 if not weight_streaming:
                     packed = packed.to(target_device)
@@ -407,6 +432,12 @@ class KbitLoraModel(nn.Module):
                         absmax = sf.get_tensor(f"{prefix}.moe.{proj}.absmax")
                         codebook = sf.get_tensor(f"{prefix}.moe.{proj}.codebook")
 
+                        layer_names[proj] = {
+                            "packed": f"{prefix}.moe.{proj}.packed",
+                            "absmax": f"{prefix}.moe.{proj}.absmax",
+                            "codebook": f"{prefix}.moe.{proj}.codebook",
+                        }
+
                         if not weight_streaming:
                             packed = packed.to(target_device)
                             absmax = absmax.to(target_device)
@@ -430,11 +461,13 @@ class KbitLoraModel(nn.Module):
                     for suffix in ["packed", "absmax"]:
                         key = f"expert_{expert_proj}_{suffix}"
                         tensor = sf.get_tensor(f"{prefix}.moe.experts.{expert_proj}.{suffix}")
+                        layer_names[key] = f"{prefix}.moe.experts.{expert_proj}.{suffix}"
                         if not weight_streaming:
                             tensor = tensor.to(target_device)
                         layer_info[key] = tensor
 
                 expert_codebook = sf.get_tensor(f"{prefix}.moe.experts.codebook")
+                layer_names["expert_codebook"] = f"{prefix}.moe.experts.codebook"
                 if not weight_streaming:
                     expert_codebook = expert_codebook.to(target_device)
                 layer_info["expert_codebook"] = expert_codebook
@@ -453,6 +486,12 @@ class KbitLoraModel(nn.Module):
                     packed = sf.get_tensor(f"{prefix}.mlp.{proj}.packed")
                     absmax = sf.get_tensor(f"{prefix}.mlp.{proj}.absmax")
                     codebook = sf.get_tensor(f"{prefix}.mlp.{proj}.codebook")
+
+                    layer_names[proj] = {
+                        "packed": f"{prefix}.mlp.{proj}.packed",
+                        "absmax": f"{prefix}.mlp.{proj}.absmax",
+                        "codebook": f"{prefix}.mlp.{proj}.codebook",
+                    }
 
                     if not weight_streaming:
                         packed = packed.to(target_device)
@@ -491,6 +530,7 @@ class KbitLoraModel(nn.Module):
                         layer_info[nk] = self._norm_weights[safe_name]
 
             self._layer_data.append(layer_info)
+            self._tensor_name_map.append(layer_names)
 
         # 8. Final norm
         if "final_norm.weight" in sf.keys():
@@ -999,39 +1039,102 @@ class KbitLoraModel(nn.Module):
                 if cb is not None and cb.device != device:
                     layer_info["expert_codebook"] = cb.to(device)
 
-        # Move non-resident layers to CPU pinned memory
+        # Compute non-resident layer sizes
+        n_streamed = n - self._n_resident
+        streamed_layer_sizes = [
+            self._compute_layer_weight_bytes(self._layer_data[i])
+            for i in range(self._n_resident, n)
+        ]
+        total_streamed_bytes = sum(streamed_layer_sizes)
+
+        # Select RAM strategy
+        has_checkpoint = getattr(self, "_checkpoint_path", None) is not None
+        available_ram = get_available_ram_bytes()
+        headroom = 4 * 1024**3  # 4 GB safety margin
+        usable_ram = max(0, available_ram - headroom)
+
+        if usable_ram >= total_streamed_bytes or not has_checkpoint:
+            # All-pinned: pre-load everything into CPU pinned RAM
+            # Also forced when no checkpoint file (from __init__ path)
+            self._ram_strategy = "pinned"
+            n_pinned = n_streamed
+        elif usable_ram >= total_streamed_bytes * 0.3:
+            # Hybrid: pin as many layers as fit, mmap the rest
+            self._ram_strategy = "hybrid"
+            n_pinned = 0
+            pinned_so_far = 0
+            for size in streamed_layer_sizes:
+                if pinned_so_far + size <= usable_ram:
+                    n_pinned += 1
+                    pinned_so_far += size
+                else:
+                    break
+        else:
+            # All-mmap: use staging buffers
+            self._ram_strategy = "mmap"
+            n_pinned = 0
+
+        # Initialize safetensors file handle for mmap/hybrid
+        self._safetensors_file = None
+        self._staging_buffers = []
+        self._mmap_layer_names = {}
+
+        if self._ram_strategy in ("hybrid", "mmap") and has_checkpoint:
+            from safetensors import safe_open
+            self._safetensors_file = safe_open(
+                self._checkpoint_path, framework="pt", device="cpu"
+            )
+
+        # Move non-resident layers: pinned or leave for mmap
         self._cpu_weights = []
-        for i in range(self._n_resident, n):
-            layer_info = self._layer_data[i]
-            cpu_layer = {}
+        for si in range(n_streamed):
+            layer_idx = self._n_resident + si
+            layer_info = self._layer_data[layer_idx]
 
-            proj_keys = self._get_streaming_weight_keys(layer_info)
-            for proj in proj_keys:
-                cpu_proj = {}
-                for wk in weight_keys:
-                    gpu_tensor = layer_info[proj][wk]
-                    cpu_tensor = torch.empty_like(gpu_tensor, device="cpu", pin_memory=True)
-                    cpu_tensor.copy_(gpu_tensor)
-                    cpu_proj[wk] = cpu_tensor
-                    layer_info[proj][wk] = None
-                cpu_layer[proj] = cpu_proj
+            if si < n_pinned:
+                # Pinned: copy to CPU pinned memory
+                cpu_layer = {}
+                proj_keys = self._get_streaming_weight_keys(layer_info)
+                for proj in proj_keys:
+                    cpu_proj = {}
+                    for wk in weight_keys:
+                        src_tensor = layer_info[proj][wk]
+                        cpu_tensor = torch.empty_like(src_tensor, device="cpu", pin_memory=True)
+                        cpu_tensor.copy_(src_tensor)
+                        cpu_proj[wk] = cpu_tensor
+                        layer_info[proj][wk] = None
+                    cpu_layer[proj] = cpu_proj
 
-            if layer_info.get("is_moe"):
-                for expert_proj in ["gate", "up", "down"]:
-                    for suffix in ["packed", "absmax"]:
-                        key = f"expert_{expert_proj}_{suffix}"
-                        gpu_tensor = layer_info[key]
-                        cpu_tensor = torch.empty_like(gpu_tensor, device="cpu", pin_memory=True)
-                        cpu_tensor.copy_(gpu_tensor)
-                        cpu_layer[key] = cpu_tensor
-                        layer_info[key] = None
-                cb = layer_info["expert_codebook"]
-                cpu_cb = torch.empty_like(cb, device="cpu", pin_memory=True)
-                cpu_cb.copy_(cb)
-                cpu_layer["expert_codebook"] = cpu_cb
-                layer_info["expert_codebook"] = None
+                if layer_info.get("is_moe"):
+                    for expert_proj in ["gate", "up", "down"]:
+                        for suffix in ["packed", "absmax"]:
+                            key = f"expert_{expert_proj}_{suffix}"
+                            src_tensor = layer_info[key]
+                            cpu_tensor = torch.empty_like(src_tensor, device="cpu", pin_memory=True)
+                            cpu_tensor.copy_(src_tensor)
+                            cpu_layer[key] = cpu_tensor
+                            layer_info[key] = None
+                    cb = layer_info["expert_codebook"]
+                    cpu_cb = torch.empty_like(cb, device="cpu", pin_memory=True)
+                    cpu_cb.copy_(cb)
+                    cpu_layer["expert_codebook"] = cpu_cb
+                    layer_info["expert_codebook"] = None
 
-            self._cpu_weights.append(cpu_layer)
+                self._cpu_weights.append(cpu_layer)
+            else:
+                # Mmap: store None, will load from safetensors on demand
+                self._mmap_layer_names[si] = self._tensor_name_map[layer_idx]
+                # Clear weight tensors from _layer_data
+                proj_keys = self._get_streaming_weight_keys(layer_info)
+                for proj in proj_keys:
+                    for wk in weight_keys:
+                        layer_info[proj][wk] = None
+                if layer_info.get("is_moe"):
+                    for expert_proj in ["gate", "up", "down"]:
+                        for suffix in ["packed", "absmax"]:
+                            layer_info[f"expert_{expert_proj}_{suffix}"] = None
+                    layer_info["expert_codebook"] = None
+                self._cpu_weights.append(None)  # Marker for mmap layer
 
         # Free registered buffers for non-resident layers
         buffers_to_remove = []
@@ -1047,22 +1150,45 @@ class KbitLoraModel(nn.Module):
         # Pre-allocate 2 GPU buffer slots for the largest non-resident layer
         self._copy_stream = torch.cuda.Stream(device=device)
 
-        def _layer_bytes(cpu_layer):
-            total = 0
-            for v in cpu_layer.values():
-                if isinstance(v, dict):
-                    total += sum(t.nbytes for t in v.values())
-                else:
-                    total += v.nbytes
-            return total
+        # Determine the reference layer for GPU slot sizing
+        # Prefer a pinned layer (has actual tensors); fall back to loading
+        # from safetensors for mmap-only case
+        ref_layer = None
+        for cpu_layer in self._cpu_weights:
+            if cpu_layer is not None:
+                ref_layer = cpu_layer
+                break
 
-        largest_idx = max(range(len(self._cpu_weights)), key=lambda i: _layer_bytes(self._cpu_weights[i]))
-        largest_cpu_layer = self._cpu_weights[largest_idx]
+        if ref_layer is None and self._safetensors_file is not None:
+            # All layers are mmap — build reference from first mmap layer
+            first_mmap_si = min(self._mmap_layer_names.keys())
+            names = self._mmap_layer_names[first_mmap_si]
+            ref_layer = {}
+            for key, value in names.items():
+                if isinstance(value, dict):
+                    ref_layer[key] = {
+                        wk: self._safetensors_file.get_tensor(tn)
+                        for wk, tn in value.items()
+                    }
+                else:
+                    ref_layer[key] = self._safetensors_file.get_tensor(value)
+
+        def _entry_bytes(v):
+            return sum(t.nbytes for t in v.values()) if isinstance(v, dict) else v.nbytes
+
+        # Find largest layer for slot sizing (check all non-resident layers)
+        def _ref_bytes(layer):
+            return sum(_entry_bytes(v) for v in layer.values())
+
+        largest_ref = ref_layer
+        for cpu_layer in self._cpu_weights:
+            if cpu_layer is not None and _ref_bytes(cpu_layer) > _ref_bytes(largest_ref):
+                largest_ref = cpu_layer
 
         self._gpu_slots = []
         for _ in range(2):
             slot = {}
-            for key, value in largest_cpu_layer.items():
+            for key, value in largest_ref.items():
                 if isinstance(value, dict):
                     slot[key] = {wk: torch.empty_like(t, device=device) for wk, t in value.items()}
                 else:
@@ -1070,40 +1196,71 @@ class KbitLoraModel(nn.Module):
             self._gpu_slots.append(slot)
         self._current_slot = 0
 
-        def _entry_bytes(v):
-            return sum(t.nbytes for t in v.values()) if isinstance(v, dict) else v.nbytes
+        # Allocate staging buffers for mmap path
+        if self._ram_strategy in ("hybrid", "mmap"):
+            for _ in range(2):
+                staging = {}
+                for key, value in largest_ref.items():
+                    if isinstance(value, dict):
+                        staging[key] = {
+                            wk: torch.empty_like(t, device="cpu", pin_memory=True)
+                            for wk, t in value.items()
+                        }
+                    else:
+                        staging[key] = torch.empty_like(value, device="cpu", pin_memory=True)
+                self._staging_buffers.append(staging)
 
-        total_cpu_bytes = sum(
-            sum(_entry_bytes(v) for v in cl.values()) for cl in self._cpu_weights
+        # Print summary
+        pinned_bytes = sum(
+            sum(_entry_bytes(v) for v in cl.values())
+            for cl in self._cpu_weights if cl is not None
         )
+        mmap_bytes = total_streamed_bytes - pinned_bytes
         slot_bytes = sum(_entry_bytes(v) for v in self._gpu_slots[0].values())
         resident_bytes = sum(
             self._compute_layer_weight_bytes(self._layer_data[i])
             for i in range(self._n_resident)
         )
-        n_streamed = n - self._n_resident
         pct = 100 * self._n_resident / n if n > 0 else 0
         resident_str = (
             f"layers 0-{self._n_resident - 1}" if self._n_resident > 0 else "none"
         )
+        strategy_detail = f"RAM strategy: {self._ram_strategy}"
+        if self._ram_strategy == "hybrid":
+            strategy_detail += f" ({n_pinned} pinned, {n_streamed - n_pinned} mmap)"
+        strategy_detail += f" ({available_ram / 1e9:.1f} GB available)"
         print(
             f"Partial residency: {self._n_resident} / {n} layers on GPU ({pct:.1f}%), "
             f"{n_streamed} streamed\n"
             f"  Resident: {resident_bytes / 1e9:.1f} GB ({resident_str})\n"
-            f"  Streamed: {total_cpu_bytes / 1e9:.1f} GB (layers {self._n_resident}-{n - 1})\n"
-            f"  GPU double-buffer: {2 * slot_bytes / 1e6:.0f} MB (2 slots × {slot_bytes / 1e6:.0f} MB)"
+            f"  Pinned: {pinned_bytes / 1e9:.1f} GB ({n_pinned} layers)\n"
+            f"  Mmap: {mmap_bytes / 1e9:.1f} GB ({n_streamed - n_pinned} layers)\n"
+            f"  GPU double-buffer: {2 * slot_bytes / 1e6:.0f} MB\n"
+            f"  {strategy_detail}"
         )
 
     def _stream_load_layer(self, layer_idx: int, slot: int, sync: bool = False):
-        """Copy a layer's quantized weights from CPU pinned to a GPU slot."""
+        """Load a layer's quantized weights into a GPU slot.
+
+        Handles both pinned (direct DMA) and mmap (safetensors → staging → GPU) sources.
+        """
         cpu_idx = layer_idx - self._n_resident
         cpu_layer = self._cpu_weights[cpu_idx]
+
+        if cpu_layer is not None:
+            # Pinned path: async DMA from CPU pinned to GPU
+            self._copy_pinned_to_gpu(cpu_layer, slot, sync)
+        else:
+            # Mmap path: load from safetensors → staging buffer → GPU
+            self._mmap_load_to_gpu(cpu_idx, slot, sync)
+
+    def _copy_pinned_to_gpu(self, cpu_layer: dict, slot: int, sync: bool = False):
+        """Copy pinned CPU tensors to a GPU slot."""
         gpu_slot = self._gpu_slots[slot]
 
         def _do_copies(non_blocking: bool):
             for key, cpu_value in cpu_layer.items():
                 if isinstance(cpu_value, dict):
-                    # Nested proj dict: {packed: tensor, absmax: tensor, codebook: tensor}
                     if key not in gpu_slot:
                         gpu_slot[key] = {}
                     for wk, cpu_tensor in cpu_value.items():
@@ -1111,7 +1268,6 @@ class KbitLoraModel(nn.Module):
                             gpu_slot[key][wk] = torch.empty_like(cpu_tensor, device=self._target_device)
                         gpu_slot[key][wk].copy_(cpu_tensor, non_blocking=non_blocking)
                 else:
-                    # Flat tensor (expert concatenated weights)
                     if key not in gpu_slot:
                         gpu_slot[key] = torch.empty_like(cpu_value, device=self._target_device)
                     gpu_slot[key].copy_(cpu_value, non_blocking=non_blocking)
@@ -1121,6 +1277,25 @@ class KbitLoraModel(nn.Module):
         else:
             with torch.cuda.stream(self._copy_stream):
                 _do_copies(non_blocking=True)
+
+    def _mmap_load_to_gpu(self, cpu_idx: int, slot: int, sync: bool = False):
+        """Load from safetensors file → staging buffer → GPU slot."""
+        tensor_names = self._mmap_layer_names[cpu_idx]
+        staging = self._staging_buffers[slot]
+        gpu_slot = self._gpu_slots[slot]
+
+        # Step 1: Load from safetensors mmap into staging buffer (synchronous)
+        for key, names in tensor_names.items():
+            if isinstance(names, dict):
+                for wk, tensor_name in names.items():
+                    tensor = self._safetensors_file.get_tensor(tensor_name)
+                    staging[key][wk][:tensor.numel()].view_as(tensor).copy_(tensor)
+            else:
+                tensor = self._safetensors_file.get_tensor(names)
+                staging[key][:tensor.numel()].view_as(tensor).copy_(tensor)
+
+        # Step 2: DMA from staging (pinned) to GPU slot
+        self._copy_pinned_to_gpu(staging, slot, sync)
 
     def _get_layer_gpu_weights(self, layer_idx: int, slot: int) -> dict:
         """Build a layer_info-compatible dict from GPU slot + always-resident data."""
