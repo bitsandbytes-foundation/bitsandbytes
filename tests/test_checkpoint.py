@@ -799,6 +799,10 @@ class TestGDS:
         yield path
         os.unlink(path)
 
+    @pytest.mark.skipif(
+        "GeForce" not in torch.cuda.get_device_name(0),
+        reason="Test requires GeForce GPU (verifies GDS fallback)",
+    )
     def test_gds_fallback_on_geforce(self, quantized_path):
         """On GeForce GPUs, use_gds=True should warn and fall back to CPU path."""
         import warnings
@@ -946,14 +950,22 @@ class TestGDS:
             assert list(shape) == list(tensor.shape), f"Shape mismatch for {name}"
             assert size == tensor.nbytes, f"Size mismatch for {name}: {size} vs {tensor.nbytes}"
 
-    def test_detect_gds_support_geforce(self):
-        """Verify _detect_gds_support returns False on GeForce GPUs."""
+    def test_detect_gds_support(self):
+        """Verify _detect_gds_support matches GPU type."""
         from bitsandbytes.kbit_lora import KbitLoraModel
 
         gpu_name = torch.cuda.get_device_name(0)
         result = KbitLoraModel._detect_gds_support()
         if "GeForce" in gpu_name:
             assert result is False, "GDS should not be supported on GeForce"
+        else:
+            # Non-GeForce GPU (workstation/datacenter): GDS should be True
+            # if kvikio is installed
+            try:
+                import kvikio  # noqa: F401
+                assert result is True, f"GDS should be supported on {gpu_name}"
+            except ImportError:
+                assert result is False
 
 
 class TestStreamingQuantize:
