@@ -1059,6 +1059,113 @@ def _(
     return out
 
 
+def _vq_scalar_gemv_impl(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    out: torch.Tensor,
+    tiled: bool = False,
+) -> None:
+    M = A.shape[0]
+    dtype_suffix = "fp16" if A.dtype == torch.float16 else "bf16"
+    tiled_str = "_tiled" if tiled else ""
+
+    with _cuda_device_of(A):
+        fn = getattr(lib, f"cvq_scalar_gemv{tiled_str}_{dtype_suffix}_p{p}")
+        fn(
+            get_ptr(A),
+            get_ptr(B_packed),
+            get_ptr(B_absmax),
+            get_ptr(codebook),
+            get_ptr(out),
+            ct.c_int(M),
+            ct.c_int(K_dim),
+            ct.c_int(N),
+            _get_tensor_stream(A),
+        )
+
+
+@register_kernel("bitsandbytes::vq_scalar_gemv", "cuda")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(
+        A.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"vq_scalar_gemv supports float16 and bfloat16, got {A.dtype}",
+    )
+    M = A.shape[0]
+    out = torch.empty(M, N, device=A.device, dtype=A.dtype)
+    _vq_scalar_gemv_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, out=out)
+    return out
+
+
+@register_kernel("bitsandbytes::vq_scalar_gemv.out", "cuda")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    out: torch.Tensor,
+) -> None:
+    _vq_scalar_gemv_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, out=out)
+
+
+@register_kernel("bitsandbytes::vq_scalar_gemv_tiled", "cuda")
+def _(
+    A: torch.Tensor,
+    B_packed_tiled: torch.Tensor,
+    B_absmax_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(
+        A.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"vq_scalar_gemv_tiled supports float16 and bfloat16, got {A.dtype}",
+    )
+    M = A.shape[0]
+    out = torch.empty(M, N, device=A.device, dtype=A.dtype)
+    _vq_scalar_gemv_impl(A, B_packed_tiled, B_absmax_tiled, codebook, K_dim, N, p, out=out, tiled=True)
+    return out
+
+
+@register_kernel("bitsandbytes::vq_scalar_gemv_tiled_", "cuda")
+def _(
+    A: torch.Tensor,
+    B_packed_tiled: torch.Tensor,
+    B_absmax_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(
+        A.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"vq_scalar_gemv_tiled_ supports float16 and bfloat16, got {A.dtype}",
+    )
+    M = A.shape[0]
+    _vq_scalar_gemv_impl(A, B_packed_tiled, B_absmax_tiled, codebook, K_dim, N, p, out=out, tiled=True)
+    return out
+
+
 @register_kernel("bitsandbytes::repack_kbit", "cuda")
 def _(
     packed_flat: torch.Tensor,

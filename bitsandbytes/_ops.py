@@ -617,6 +617,106 @@ def _(
     return out
 
 
+# VQ scalar GEMV: byte-indexed codebook lookup GEMV for M=1-4
+
+torch.library.define(
+    "bitsandbytes::vq_scalar_gemv",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int p) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::vq_scalar_gemv")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
+    torch._check(A.shape[0] <= 4, lambda: f"vq_scalar_gemv supports M<=4, got {A.shape[0]}")
+    torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
+    M = A.shape[0]
+    return torch.empty(M, N, device=A.device, dtype=A.dtype)
+
+
+torch.library.define(
+    "bitsandbytes::vq_scalar_gemv.out",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int p, Tensor(a!) out) -> ()",
+)
+
+
+@register_fake("bitsandbytes::vq_scalar_gemv.out")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    out: torch.Tensor,
+) -> None:
+    pass
+
+
+# VQ scalar GEMV with tiled B layout
+
+torch.library.define(
+    "bitsandbytes::vq_scalar_gemv_tiled",
+    "(Tensor A, Tensor B_packed_tiled, Tensor B_absmax_tiled, Tensor codebook, int K_dim, int N, int p) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::vq_scalar_gemv_tiled")
+def _(
+    A: torch.Tensor,
+    B_packed_tiled: torch.Tensor,
+    B_absmax_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
+    torch._check(A.shape[0] <= 4, lambda: f"vq_scalar_gemv_tiled supports M<=4, got {A.shape[0]}")
+    torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
+    M = A.shape[0]
+    return torch.empty(M, N, device=A.device, dtype=A.dtype)
+
+
+# VQ scalar GEMV tiled with pre-allocated output (CUDA graph compatible)
+
+torch.library.define(
+    "bitsandbytes::vq_scalar_gemv_tiled_",
+    "(Tensor A, Tensor B_packed_tiled, Tensor B_absmax_tiled, Tensor codebook, int K_dim, int N, int p, "
+    "Tensor(a!) out) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::vq_scalar_gemv_tiled_")
+def _(
+    A: torch.Tensor,
+    B_packed_tiled: torch.Tensor,
+    B_absmax_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
+    torch._check(A.shape[0] <= 4, lambda: f"vq_scalar_gemv_tiled_ supports M<=4, got {A.shape[0]}")
+    torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
+    torch._check(out.dtype == A.dtype, lambda: f"out dtype {out.dtype} must match A dtype {A.dtype}")
+    return out
+
+
 # K-bit repack: flat bit-plane layout -> GEMM-tiled layout
 
 torch.library.define(
