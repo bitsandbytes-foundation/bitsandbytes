@@ -14,9 +14,9 @@ import time
 import torch
 
 sys.path.insert(0, ".")
-import bitsandbytes  # noqa: E402
-from bitsandbytes import _ops  # noqa: E402, F401
-from scipy.stats import norm  # noqa: E402
+from scipy.stats import norm
+
+from bitsandbytes import _ops  # noqa: F401
 
 
 def create_normal_float_codebook(k: int) -> torch.Tensor:
@@ -49,18 +49,19 @@ def main():
     ]
 
     print(f"Small-Batch MoE Strategy Analysis (K={k}, RTX 4090)")
-    print(f"Model: Qwen3-Coder-Next (512 experts, top-8)")
+    print("Model: Qwen3-Coder-Next (512 experts, top-8)")
     print()
 
     for K_dim, N, layer_name in shapes:
         N_padded = ((N + 127) // 128) * 128
-        print(f"{'='*90}")
+        print(f"{'=' * 90}")
         print(f"  Layer: {layer_name} ({K_dim} x {N_padded})")
-        print(f"{'='*90}")
+        print(f"{'=' * 90}")
         print()
 
-        hdr = (f"{'#exp':>4} {'M':>2} | {'kbit grp':>8} {'bmm fp16':>8} "
-               f"{'dq+bmm':>8} | {'grp/bmm':>8} {'dq+bmm/bmm':>11}")
+        hdr = (
+            f"{'#exp':>4} {'M':>2} | {'kbit grp':>8} {'bmm fp16':>8} {'dq+bmm':>8} | {'grp/bmm':>8} {'dq+bmm/bmm':>11}"
+        )
         print(hdr)
         print("-" * len(hdr))
 
@@ -77,9 +78,7 @@ def main():
 
             for _ in range(num_experts):
                 W = torch.randn(N_padded, K_dim, dtype=torch.float16, device="cuda")
-                packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(
-                    W.reshape(-1), codebook, k
-                )
+                packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(W.reshape(-1), codebook, k)
                 packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
                     packed_flat, absmax_flat.cuda(), K_dim, N_padded, k
                 )
@@ -104,10 +103,19 @@ def main():
             expert_offsets = torch.tensor(offsets, dtype=torch.int32, device="cuda")
 
             # --- 1. kbit grouped GEMM ---
-            t_grouped = bench(lambda: torch.ops.bitsandbytes.kbit_grouped_gemm(
-                A_concat, B_packed_all, B_absmax_all, codebook,
-                expert_offsets, K_dim, N_padded, k, num_experts,
-            ))
+            t_grouped = bench(
+                lambda: torch.ops.bitsandbytes.kbit_grouped_gemm(
+                    A_concat,
+                    B_packed_all,
+                    B_absmax_all,
+                    codebook,
+                    expert_offsets,
+                    K_dim,
+                    N_padded,
+                    k,
+                    num_experts,
+                )
+            )
 
             # --- 2. cuBLAS bmm (fp16 baseline) ---
             A_batched = torch.stack(A_list, dim=0)
@@ -118,8 +126,7 @@ def main():
             # --- 3. Dequant + bmm ---
             # Pre-allocate output buffer for dequantized weights
             n_elements = N_padded * K_dim
-            W_deq_flat = [torch.empty(n_elements, dtype=torch.float16, device="cuda")
-                          for _ in range(num_experts)]
+            W_deq_flat = [torch.empty(n_elements, dtype=torch.float16, device="cuda") for _ in range(num_experts)]
 
             n_elements = N_padded * K_dim
 
@@ -128,8 +135,12 @@ def main():
                 deq_list = []
                 for i in range(num_experts):
                     deq = torch.ops.bitsandbytes.dequantize_kbit(
-                        flat_packed_list[i], codebook, flat_absmax_list[i],
-                        k, n_elements, torch.float16,
+                        flat_packed_list[i],
+                        codebook,
+                        flat_absmax_list[i],
+                        k,
+                        n_elements,
+                        torch.float16,
                     )
                     deq_list.append(deq.view(N_padded, K_dim).T)
                 # Stack into batched tensor and run bmm
@@ -142,8 +153,12 @@ def main():
             def just_dequant():
                 for i in range(num_experts):
                     torch.ops.bitsandbytes.dequantize_kbit(
-                        flat_packed_list[i], codebook, flat_absmax_list[i],
-                        k, n_elements, torch.float16,
+                        flat_packed_list[i],
+                        codebook,
+                        flat_absmax_list[i],
+                        k,
+                        n_elements,
+                        torch.float16,
                     )
 
             t_dq_only = bench(just_dequant)
@@ -151,17 +166,19 @@ def main():
             ratio_grp = t_grouped / t_bmm
             ratio_dq = t_dq_bmm / t_bmm
 
-            print(f"{num_experts:4d} {M_per_expert:2d} | {t_grouped*1e6:7.0f}us "
-                  f"{t_bmm*1e6:7.0f}us {t_dq_bmm*1e6:7.0f}us | "
-                  f"{ratio_grp:7.2f}x {ratio_dq:10.2f}x"
-                  f"   (dq alone: {t_dq_only*1e6:.0f}us)")
+            print(
+                f"{num_experts:4d} {M_per_expert:2d} | {t_grouped * 1e6:7.0f}us "
+                f"{t_bmm * 1e6:7.0f}us {t_dq_bmm * 1e6:7.0f}us | "
+                f"{ratio_grp:7.2f}x {ratio_dq:10.2f}x"
+                f"   (dq alone: {t_dq_only * 1e6:.0f}us)"
+            )
 
         print()
 
     # Theoretical GEMV analysis
-    print(f"\n{'='*90}")
+    print(f"\n{'=' * 90}")
     print("  Theoretical: specialized kbit GEMV for batch=1")
-    print(f"{'='*90}")
+    print(f"{'=' * 90}")
     print()
     print("  For M=1 (one token per expert), the GEMM kernel wastes 93.75% of tensor")
     print("  core work (TILE_M=16 but only 1 row has data). A scalar GEMV avoids this.")
@@ -202,11 +219,13 @@ def main():
         t_estimated = max(t_bw_kbit, t_compute) * 1.5  # 1.5x for overhead
 
         print(f"  {name} ({K_dim}x{N_padded}), 8 experts, M=1:")
-        print(f"    kbit data:  {kbit_data/1e6:.2f} MB → L2 read: {t_bw_kbit:.1f} us")
-        print(f"    fp16 data:  {fp16_data/1e6:.1f} MB → L2 read: {t_bw_fp16:.1f} us")
-        print(f"    Compute (dequant+FMA): {total_elements/1e6:.1f}M elements × {ops_per_element} ops = {t_compute:.1f} us")
+        print(f"    kbit data:  {kbit_data / 1e6:.2f} MB → L2 read: {t_bw_kbit:.1f} us")
+        print(f"    fp16 data:  {fp16_data / 1e6:.1f} MB → L2 read: {t_bw_fp16:.1f} us")
+        print(
+            f"    Compute (dequant+FMA): {total_elements / 1e6:.1f}M elements × {ops_per_element} ops = {t_compute:.1f} us"
+        )
         print(f"    Estimated GEMV time: {t_estimated:.0f} us")
-        print(f"    vs cuBLAS bmm ~17 us → {17/t_estimated:.1f}x")
+        print(f"    vs cuBLAS bmm ~17 us → {17 / t_estimated:.1f}x")
         print()
 
 

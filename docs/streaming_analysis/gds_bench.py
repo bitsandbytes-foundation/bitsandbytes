@@ -12,29 +12,31 @@ Tests:
 
 import os
 import time
-import tempfile
-from collections import OrderedDict
 
 import torch
 import torch.cuda
 
 # ─── Helpers ───
 
+
 def fmt_bw(gb_per_s):
     if gb_per_s >= 1:
         return f"{gb_per_s:.2f} GB/s"
     return f"{gb_per_s * 1000:.1f} MB/s"
+
 
 def fmt_time(ms):
     if ms >= 1000:
         return f"{ms / 1000:.2f}s"
     return f"{ms:.1f}ms"
 
+
 def sync():
     torch.cuda.synchronize()
 
 
 # ─── Test 1: GDS status ───
+
 
 def test_gds_status():
     print(f"\n{'=' * 70}")
@@ -47,7 +49,7 @@ def test_gds_status():
     print(f"  kvikio version:     {kvikio.__version__}")
 
     # Check if GDS is available
-    gds_avail = kvikio.is_remote_file_available() if hasattr(kvikio, 'is_remote_file_available') else "N/A"
+    gds_avail = kvikio.is_remote_file_available() if hasattr(kvikio, "is_remote_file_available") else "N/A"
     print(f"  Remote file avail:  {gds_avail}")
 
     # Check compat mode vs GDS mode
@@ -71,7 +73,7 @@ def test_gds_status():
     # Task size
     try:
         ts = kvikio.defaults.task_size()
-        print(f"  Task size:          {ts / (1024*1024):.0f} MB")
+        print(f"  Task size:          {ts / (1024 * 1024):.0f} MB")
     except Exception:
         pass
 
@@ -79,6 +81,7 @@ def test_gds_status():
 
 
 # ─── Test 2: GDS NVMe → GPU bandwidth ───
+
 
 def test_gds_bandwidth(test_dir, size_mb=512, n_iter=5):
     print(f"\n{'=' * 70}")
@@ -129,7 +132,7 @@ def test_gds_bandwidth(test_dir, size_mb=512, n_iter=5):
 
         bw = (nbytes_read / (1024**3)) / elapsed
         bandwidths.append(bw)
-        print(f"  Run {i+1}: {fmt_bw(bw)}  ({nbytes_read / 1e6:.0f} MB in {elapsed*1000:.1f}ms)")
+        print(f"  Run {i + 1}: {fmt_bw(bw)}  ({nbytes_read / 1e6:.0f} MB in {elapsed * 1000:.1f}ms)")
 
     avg = sum(bandwidths) / len(bandwidths)
     peak = max(bandwidths)
@@ -154,6 +157,7 @@ def test_gds_bandwidth(test_dir, size_mb=512, n_iter=5):
 
 
 # ─── Test 3: Traditional mmap → pinned → GPU for comparison ───
+
 
 def test_traditional_bandwidth(test_dir, size_mb=512, n_iter=5):
     print(f"\n{'=' * 70}")
@@ -200,7 +204,7 @@ def test_traditional_bandwidth(test_dir, size_mb=512, n_iter=5):
 
         bw = (total_bytes / (1024**3)) / elapsed
         bandwidths.append(bw)
-        print(f"  Run {i+1}: {fmt_bw(bw)}  ({elapsed*1000:.1f}ms)")
+        print(f"  Run {i + 1}: {fmt_bw(bw)}  ({elapsed * 1000:.1f}ms)")
 
     avg = sum(bandwidths) / len(bandwidths)
     print(f"  Average: {fmt_bw(avg)}")
@@ -214,12 +218,20 @@ def test_traditional_bandwidth(test_dir, size_mb=512, n_iter=5):
 
 # ─── Test 4: Pipelined layer streaming comparison ───
 
-def test_pipeline_comparison(test_dir, n_layers=5, layer_mb=200, batch_tokens=4096,
-                              hidden=5120, intermediate=12288,
-                              expert_intermediate=1536, n_active_experts=8):
+
+def test_pipeline_comparison(
+    test_dir,
+    n_layers=5,
+    layer_mb=200,
+    batch_tokens=4096,
+    hidden=5120,
+    intermediate=12288,
+    expert_intermediate=1536,
+    n_active_experts=8,
+):
     print(f"\n{'=' * 70}")
     print(f"  TEST 4: Pipelined Streaming — {n_layers} layers × {layer_mb} MB")
-    print(f"  GDS (NVMe→GPU direct) vs Traditional (NVMe→CPU→GPU)")
+    print("  GDS (NVMe→GPU direct) vs Traditional (NVMe→CPU→GPU)")
     print(f"{'=' * 70}")
 
     import kvikio
@@ -358,7 +370,7 @@ def test_pipeline_comparison(test_dir, n_layers=5, layer_mb=200, batch_tokens=40
 
     def bg_load_mmap(layer_idx, pinned_idx):
         offset = layer_idx * nbytes_layer
-        src = torch.frombuffer(mm[offset:offset + nbytes_layer], dtype=torch.int32).clone()
+        src = torch.frombuffer(mm[offset : offset + nbytes_layer], dtype=torch.int32).clone()
         pinned_bufs[pinned_idx][:n_elem].copy_(src)
         del src
         load_ready[layer_idx].set()
@@ -417,13 +429,21 @@ def test_pipeline_comparison(test_dir, n_layers=5, layer_mb=200, batch_tokens=40
     trad_overhead = (trad_wall_ms / baseline_ms - 1) * 100
 
     print("\n  Results:")
-    print(f"  {'Compute only (baseline):':40s} {fmt_time(baseline_ms):>10s}  ({fmt_time(baseline_ms / n_layers)}/layer)")
+    print(
+        f"  {'Compute only (baseline):':40s} {fmt_time(baseline_ms):>10s}  ({fmt_time(baseline_ms / n_layers)}/layer)"
+    )
     print()
-    print(f"  {'GDS pipeline (wall clock):':40s} {fmt_time(gds_wall_ms):>10s}  ({fmt_time(gds_wall_ms / n_layers)}/layer)")
-    print(f"  {'GDS pipeline (GPU events):':40s} {fmt_time(gds_gpu_ms):>10s}  ({fmt_time(gds_gpu_ms / n_layers)}/layer)")
+    print(
+        f"  {'GDS pipeline (wall clock):':40s} {fmt_time(gds_wall_ms):>10s}  ({fmt_time(gds_wall_ms / n_layers)}/layer)"
+    )
+    print(
+        f"  {'GDS pipeline (GPU events):':40s} {fmt_time(gds_gpu_ms):>10s}  ({fmt_time(gds_gpu_ms / n_layers)}/layer)"
+    )
     print(f"  {'GDS overhead vs compute:':40s} {gds_overhead:+.1f}%")
     print()
-    print(f"  {'Traditional pipeline (wall clock):':40s} {fmt_time(trad_wall_ms):>10s}  ({fmt_time(trad_wall_ms / n_layers)}/layer)")
+    print(
+        f"  {'Traditional pipeline (wall clock):':40s} {fmt_time(trad_wall_ms):>10s}  ({fmt_time(trad_wall_ms / n_layers)}/layer)"
+    )
     print(f"  {'Traditional overhead vs compute:':40s} {trad_overhead:+.1f}%")
     print()
 
@@ -446,19 +466,21 @@ def test_pipeline_comparison(test_dir, n_layers=5, layer_mb=200, batch_tokens=40
 
 # ─── Main ───
 
+
 def main():
     import argparse
+
     parser = argparse.ArgumentParser(description="GPUDirect Storage Benchmark")
-    parser.add_argument("--test-dir", type=str, default="/home/tim",
-                        help="Directory on NVMe for test files (default: /home/tim = RAID0)")
-    parser.add_argument("--size-mb", type=int, default=512,
-                        help="Size for bandwidth tests (default: 512 MB)")
-    parser.add_argument("--layer-mb", type=int, default=200,
-                        help="Layer size for pipeline test (default: 200 MB)")
-    parser.add_argument("--n-layers", type=int, default=5,
-                        help="Layers for pipeline test (default: 5)")
-    parser.add_argument("--tokens", type=int, default=4096,
-                        help="Batch tokens for compute simulation (default: 4096)")
+    parser.add_argument(
+        "--test-dir",
+        type=str,
+        default="/home/tim",
+        help="Directory on NVMe for test files (default: /home/tim = RAID0)",
+    )
+    parser.add_argument("--size-mb", type=int, default=512, help="Size for bandwidth tests (default: 512 MB)")
+    parser.add_argument("--layer-mb", type=int, default=200, help="Layer size for pipeline test (default: 200 MB)")
+    parser.add_argument("--n-layers", type=int, default=5, help="Layers for pipeline test (default: 5)")
+    parser.add_argument("--tokens", type=int, default=4096, help="Batch tokens for compute simulation (default: 4096)")
     args = parser.parse_args()
 
     print(f"GPU: {torch.cuda.get_device_name(0)}")
@@ -470,7 +492,9 @@ def main():
     gds_avg, gds_peak = test_gds_bandwidth(args.test_dir, size_mb=args.size_mb)
     trad_avg = test_traditional_bandwidth(args.test_dir, size_mb=args.size_mb)
     gds_pipe, trad_pipe, compute = test_pipeline_comparison(
-        args.test_dir, n_layers=args.n_layers, layer_mb=args.layer_mb,
+        args.test_dir,
+        n_layers=args.n_layers,
+        layer_mb=args.layer_mb,
         batch_tokens=args.tokens,
     )
 

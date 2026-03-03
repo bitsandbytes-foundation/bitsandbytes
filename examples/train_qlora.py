@@ -76,7 +76,9 @@ def parse_args():
         "Required for optimal NVMe streaming (gives control over weight loading order). "
         "Implies --weight-streaming and --cpu-offload.",
     )
-    parser.add_argument("--k-experts", type=int, default=None, help="Quantization bits for MoE experts (default: same as --k)")
+    parser.add_argument(
+        "--k-experts", type=int, default=None, help="Quantization bits for MoE experts (default: same as --k)"
+    )
     parser.add_argument("--expert-chunk-size", type=int, default=32, help="Number of experts per chunk in MoE forward")
     return parser.parse_args()
 
@@ -290,7 +292,10 @@ def run_training_explicit(args, kbit_model, data_source, label):
             input_ids, labels = next(data_iter)
         else:
             input_ids, labels = generate_synthetic_batch(
-                args.batch_size, args.seq_len, vocab_size, "cuda",
+                args.batch_size,
+                args.seq_len,
+                vocab_size,
+                "cuda",
             )
 
         # Forward + backward via explicit autograd.grad() per layer

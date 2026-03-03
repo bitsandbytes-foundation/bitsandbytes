@@ -304,7 +304,9 @@ class TestCrossEntropy:
 
         # Reference: per-sample CE loss
         ref_losses = torch.nn.functional.cross_entropy(
-            logits.float(), labels, reduction="none",
+            logits.float(),
+            labels,
+            reduction="none",
         )
 
         torch.testing.assert_close(losses, ref_losses, atol=1e-3, rtol=1e-3)
@@ -337,7 +339,10 @@ class TestCrossEntropy:
         ref_loss.backward()
 
         torch.testing.assert_close(
-            logits.grad.float(), logits_ref.grad, atol=5e-3, rtol=5e-3,
+            logits.grad.float(),
+            logits_ref.grad,
+            atol=5e-3,
+            rtol=5e-3,
         )
 
     def test_ignore_index(self):
@@ -360,7 +365,10 @@ class TestCrossEntropy:
 
         torch.testing.assert_close(loss.float(), ref_loss, atol=1e-3, rtol=1e-3)
         torch.testing.assert_close(
-            logits.grad.float(), logits_ref.grad, atol=5e-3, rtol=5e-3,
+            logits.grad.float(),
+            logits_ref.grad,
+            atol=5e-3,
+            rtol=5e-3,
         )
 
     def test_all_ignored(self):
@@ -380,7 +388,9 @@ class TestCrossEntropy:
 
         losses, _ = torch.ops.bitsandbytes.cross_entropy_forward(logits, labels, -100)
         ref_losses = torch.nn.functional.cross_entropy(
-            logits.float(), labels, reduction="none",
+            logits.float(),
+            labels,
+            reduction="none",
         )
 
         torch.testing.assert_close(losses, ref_losses, atol=5e-2, rtol=5e-2)
@@ -399,5 +409,8 @@ class TestCrossEntropy:
         ref_loss.backward()
 
         torch.testing.assert_close(
-            logits.grad.float(), logits_ref.grad, atol=5e-2, rtol=5e-2,
+            logits.grad.float(),
+            logits_ref.grad,
+            atol=5e-2,
+            rtol=5e-2,
         )

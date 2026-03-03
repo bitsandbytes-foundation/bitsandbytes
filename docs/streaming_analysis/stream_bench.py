@@ -543,8 +543,8 @@ def test_nvme_pipeline(
         return None, None, None
 
     try:
-        from safetensors.torch import save_file
         from safetensors import safe_open
+        from safetensors.torch import save_file
     except ImportError:
         print("  Skipped (safetensors not installed: pip install safetensors)")
         return None, None, None
@@ -562,9 +562,7 @@ def test_nvme_pipeline(
     tensors = OrderedDict()
     for i in range(n_layers):
         # One flat tensor per layer (simulating concatenated packed weights)
-        tensors[f"layer.{i}.packed"] = torch.randint(
-            0, 2**31, (n_elem_layer,), dtype=torch.int32
-        )
+        tensors[f"layer.{i}.packed"] = torch.randint(0, 2**31, (n_elem_layer,), dtype=torch.int32)
     save_file(tensors, fpath)
     del tensors
 
@@ -654,9 +652,9 @@ def test_nvme_pipeline(
     for i in range(n_layers):
         # Stage 1: mmap → pinned (CPU work, triggers NVMe page faults)
         tensor = sf.get_tensor(f"layer.{i}.packed")
-        pinned_buf[:tensor.numel()].copy_(tensor)
+        pinned_buf[: tensor.numel()].copy_(tensor)
         # Stage 2: pinned → GPU (sync for measurement)
-        gpu_slot[0][:tensor.numel()].copy_(pinned_buf[:tensor.numel()])
+        gpu_slot[0][: tensor.numel()].copy_(pinned_buf[: tensor.numel()])
     sync()
     xfer_wall_end = time.perf_counter()
     xfer_only_ms = (xfer_wall_end - xfer_wall_start) * 1000
@@ -729,17 +727,13 @@ def test_nvme_pipeline(
             # Queue async pinned→GPU copy on copy stream
             n_next = load_numel[i + 1]
             with torch.cuda.stream(copy_stream):
-                gpu_slot[next_slot][:n_next].copy_(
-                    pinned_bufs[next_pinned][:n_next], non_blocking=True
-                )
+                gpu_slot[next_slot][:n_next].copy_(pinned_bufs[next_pinned][:n_next], non_blocking=True)
 
             # Start background load of layer i+2 (if any) into the
             # pinned buffer we're NOT currently copying from
             if i + 2 < n_layers:
                 future_pinned = (i + 2) % 2
-                bg_thread = threading.Thread(
-                    target=bg_load, args=(i + 2, future_pinned)
-                )
+                bg_thread = threading.Thread(target=bg_load, args=(i + 2, future_pinned))
                 bg_thread.start()
             else:
                 bg_thread = None
@@ -771,10 +765,7 @@ def test_nvme_pipeline(
         f"  ({fmt_time(xfer_only_ms / n_layers)}/layer)"
     )
     print(f"  {'Sequential (compute + transfer):':40s} {fmt_time(sequential_ms):>10s}")
-    print(
-        f"  {'Pipeline (GPU events):':40s} {fmt_time(pipeline_ms):>10s}"
-        f"  ({fmt_time(pipeline_ms / n_layers)}/layer)"
-    )
+    print(f"  {'Pipeline (GPU events):':40s} {fmt_time(pipeline_ms):>10s}  ({fmt_time(pipeline_ms / n_layers)}/layer)")
     print(
         f"  {'Pipeline (wall clock):':40s} {fmt_time(pipeline_wall_ms):>10s}"
         f"  ({fmt_time(pipeline_wall_ms / n_layers)}/layer)"
@@ -788,18 +779,11 @@ def test_nvme_pipeline(
     effective_overhead = max(overhead_gpu, overhead_wall)
 
     if effective_overhead < 5:
-        print(
-            "\n  → EXCELLENT: NVMe→CPU→GPU transfer fully hidden behind compute."
-        )
+        print("\n  → EXCELLENT: NVMe→CPU→GPU transfer fully hidden behind compute.")
     elif effective_overhead < 20:
-        print(
-            f"\n  → GOOD: Most NVMe transfer hidden. {effective_overhead:.0f}% overhead."
-        )
+        print(f"\n  → GOOD: Most NVMe transfer hidden. {effective_overhead:.0f}% overhead.")
     elif effective_overhead < 50:
-        print(
-            f"\n  → MODERATE: Partial overlap. {effective_overhead:.0f}% overhead."
-            f" Try increasing batch size."
-        )
+        print(f"\n  → MODERATE: Partial overlap. {effective_overhead:.0f}% overhead. Try increasing batch size.")
     else:
         print(
             f"\n  → POOR: NVMe transfer dominates. {effective_overhead:.0f}% overhead."
@@ -839,11 +823,15 @@ def main():
     parser.add_argument("--nvme", type=str, default=None, help="NVMe mount path for disk read test")
     parser.add_argument("--skip-matmul", action="store_true", help="Skip detailed matmul sweep")
     parser.add_argument(
-        "--moe-experts", type=int, default=8,
+        "--moe-experts",
+        type=int,
+        default=8,
         help="Number of active experts for MoE compute simulation (default: 8)",
     )
     parser.add_argument(
-        "--expert-intermediate", type=int, default=1536,
+        "--expert-intermediate",
+        type=int,
+        default=1536,
         help="Expert MLP intermediate dim (default: 1536 for GLM-4.7)",
     )
     args = parser.parse_args()

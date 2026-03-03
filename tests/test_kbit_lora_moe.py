@@ -58,7 +58,6 @@ def kbit_moe_model(tiny_moe_model):
 
 
 class TestMoEKbitLoraModel:
-
     def test_creation(self, kbit_moe_model):
         """MoE model should be created successfully."""
         assert kbit_moe_model is not None

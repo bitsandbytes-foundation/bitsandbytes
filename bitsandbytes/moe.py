@@ -99,8 +99,9 @@ def moe_router_dispatch(
     }
 
 
-def _dequant_expert_weight(packed_all, absmax_all, expert_idx, packed_per, absmax_per,
-                           codebook, k, n_elements, N, N_padded, K, dtype):
+def _dequant_expert_weight(
+    packed_all, absmax_all, expert_idx, packed_per, absmax_per, codebook, k, n_elements, N, N_padded, K, dtype
+):
     """Dequantize a single expert's weight from the concatenated flat-format tensors.
 
     Args:
@@ -120,8 +121,8 @@ def _dequant_expert_weight(packed_all, absmax_all, expert_idx, packed_per, absma
     Returns:
         Dequantized weight [N, K]
     """
-    packed_e = packed_all[expert_idx * packed_per: (expert_idx + 1) * packed_per]
-    absmax_e = absmax_all[expert_idx * absmax_per: (expert_idx + 1) * absmax_per]
+    packed_e = packed_all[expert_idx * packed_per : (expert_idx + 1) * packed_per]
+    absmax_e = absmax_all[expert_idx * absmax_per : (expert_idx + 1) * absmax_per]
     w_deq = dequantize_kbit(packed_e, absmax_e, codebook, k, n_elements, dtype)
     W = w_deq[:n_elements].reshape(N_padded, K)[:N, :]
     return W
@@ -149,20 +150,20 @@ class MoEExpertForward(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
-        hidden,                # [N_tokens, hidden_dim]
+        hidden,  # [N_tokens, hidden_dim]
         sorted_token_indices,  # [total_assignments] from router
-        sorted_weights,        # [total_assignments] from router
-        expert_offsets,        # [num_experts + 1] cumulative counts
-        gate_packed_all,       # flat-format packed gate weights, all experts concatenated
-        gate_absmax_all,       # flat-format absmax gate weights, all experts concatenated
+        sorted_weights,  # [total_assignments] from router
+        expert_offsets,  # [num_experts + 1] cumulative counts
+        gate_packed_all,  # flat-format packed gate weights, all experts concatenated
+        gate_absmax_all,  # flat-format absmax gate weights, all experts concatenated
         up_packed_all,
         up_absmax_all,
         down_packed_all,
         down_absmax_all,
         codebook,
-        k,                     # bit width
-        hidden_dim,            # input/output dim (K for gate/up, N for down)
-        intermediate_dim,      # MLP intermediate dim (N for gate/up, K for down)
+        k,  # bit width
+        hidden_dim,  # input/output dim (K for gate/up, N for down)
+        intermediate_dim,  # MLP intermediate dim (N for gate/up, K for down)
         num_experts,
         expert_chunk_size,
     ):
@@ -183,7 +184,7 @@ class MoEExpertForward(torch.autograd.Function):
         # Padded dims for dequantization
         inter_padded = ((intermediate_dim + 127) // 128) * 128
         hidden_padded = ((hidden_dim + 127) // 128) * 128
-        n_elements_gate = inter_padded * hidden_dim   # gate/up: [intermediate, hidden] mapped as [N_padded, K]
+        n_elements_gate = inter_padded * hidden_dim  # gate/up: [intermediate, hidden] mapped as [N_padded, K]
         n_elements_down = hidden_padded * intermediate_dim  # down: [hidden, intermediate] mapped as [N_padded, K]
 
         for chunk_start in range(0, num_experts, expert_chunk_size):
@@ -214,19 +215,35 @@ class MoEExpertForward(torch.autograd.Function):
 
                 # Gate projection
                 W_gate = _dequant_expert_weight(
-                    gate_packed_all, gate_absmax_all, e,
-                    gate_packed_per, gate_absmax_per,
-                    codebook, k, n_elements_gate,
-                    intermediate_dim, inter_padded, hidden_dim, dtype,
+                    gate_packed_all,
+                    gate_absmax_all,
+                    e,
+                    gate_packed_per,
+                    gate_absmax_per,
+                    codebook,
+                    k,
+                    n_elements_gate,
+                    intermediate_dim,
+                    inter_padded,
+                    hidden_dim,
+                    dtype,
                 )
                 gate_out = A_e @ W_gate.t()  # [n_e, intermediate_dim]
 
                 # Up projection
                 W_up = _dequant_expert_weight(
-                    up_packed_all, up_absmax_all, e,
-                    up_packed_per, up_absmax_per,
-                    codebook, k, n_elements_gate,
-                    intermediate_dim, inter_padded, hidden_dim, dtype,
+                    up_packed_all,
+                    up_absmax_all,
+                    e,
+                    up_packed_per,
+                    up_absmax_per,
+                    codebook,
+                    k,
+                    n_elements_gate,
+                    intermediate_dim,
+                    inter_padded,
+                    hidden_dim,
+                    dtype,
                 )
                 up_out = A_e @ W_up.t()  # [n_e, intermediate_dim]
 
@@ -235,10 +252,18 @@ class MoEExpertForward(torch.autograd.Function):
 
                 # Down projection
                 W_down = _dequant_expert_weight(
-                    down_packed_all, down_absmax_all, e,
-                    down_packed_per, down_absmax_per,
-                    codebook, k, n_elements_down,
-                    hidden_dim, hidden_padded, intermediate_dim, dtype,
+                    down_packed_all,
+                    down_absmax_all,
+                    e,
+                    down_packed_per,
+                    down_absmax_per,
+                    codebook,
+                    k,
+                    n_elements_down,
+                    hidden_dim,
+                    hidden_padded,
+                    intermediate_dim,
+                    dtype,
                 )
                 down_out = h @ W_down.t()  # [n_e, hidden_dim]
 
@@ -250,10 +275,16 @@ class MoEExpertForward(torch.autograd.Function):
 
         # Save for backward (recompute intermediates per chunk)
         ctx.save_for_backward(
-            hidden, sorted_token_indices, sorted_weights, expert_offsets,
-            gate_packed_all, gate_absmax_all,
-            up_packed_all, up_absmax_all,
-            down_packed_all, down_absmax_all,
+            hidden,
+            sorted_token_indices,
+            sorted_weights,
+            expert_offsets,
+            gate_packed_all,
+            gate_absmax_all,
+            up_packed_all,
+            up_absmax_all,
+            down_packed_all,
+            down_absmax_all,
             codebook,
         )
         ctx.k = k
@@ -278,10 +309,16 @@ class MoEExpertForward(torch.autograd.Function):
             where dL/ddown_out, dL/dup_out come from SwiGLU and down-projection backward.
         """
         (
-            hidden, sorted_token_indices, sorted_weights, expert_offsets,
-            gate_packed_all, gate_absmax_all,
-            up_packed_all, up_absmax_all,
-            down_packed_all, down_absmax_all,
+            hidden,
+            sorted_token_indices,
+            sorted_weights,
+            expert_offsets,
+            gate_packed_all,
+            gate_absmax_all,
+            up_packed_all,
+            up_absmax_all,
+            down_packed_all,
+            down_absmax_all,
             codebook,
         ) = ctx.saved_tensors
 
@@ -337,18 +374,34 @@ class MoEExpertForward(torch.autograd.Function):
 
                 # --- Recompute forward ---
                 W_gate = _dequant_expert_weight(
-                    gate_packed_all, gate_absmax_all, e,
-                    gate_packed_per, gate_absmax_per,
-                    codebook, k, n_elements_gate,
-                    intermediate_dim, inter_padded, hidden_dim, dtype,
+                    gate_packed_all,
+                    gate_absmax_all,
+                    e,
+                    gate_packed_per,
+                    gate_absmax_per,
+                    codebook,
+                    k,
+                    n_elements_gate,
+                    intermediate_dim,
+                    inter_padded,
+                    hidden_dim,
+                    dtype,
                 )
                 gate_out = A_e @ W_gate.t()
 
                 W_up = _dequant_expert_weight(
-                    up_packed_all, up_absmax_all, e,
-                    up_packed_per, up_absmax_per,
-                    codebook, k, n_elements_gate,
-                    intermediate_dim, inter_padded, hidden_dim, dtype,
+                    up_packed_all,
+                    up_absmax_all,
+                    e,
+                    up_packed_per,
+                    up_absmax_per,
+                    codebook,
+                    k,
+                    n_elements_gate,
+                    intermediate_dim,
+                    inter_padded,
+                    hidden_dim,
+                    dtype,
                 )
                 up_out = A_e @ W_up.t()
 
@@ -360,10 +413,18 @@ class MoEExpertForward(torch.autograd.Function):
                 h = silu_e * up_out
 
                 W_down = _dequant_expert_weight(
-                    down_packed_all, down_absmax_all, e,
-                    down_packed_per, down_absmax_per,
-                    codebook, k, n_elements_down,
-                    hidden_dim, hidden_padded, intermediate_dim, dtype,
+                    down_packed_all,
+                    down_absmax_all,
+                    e,
+                    down_packed_per,
+                    down_absmax_per,
+                    codebook,
+                    k,
+                    n_elements_down,
+                    hidden_dim,
+                    hidden_padded,
+                    intermediate_dim,
+                    dtype,
                 )
                 # Forward: down_out = h @ W_down^T
                 # Backward: dL/dh = grad_out_e @ W_down
@@ -435,9 +496,16 @@ def moe_expert_forward(
         router_result["sorted_token_indices"],
         router_result["sorted_weights"],
         router_result["expert_offsets"],
-        gate_packed_all, gate_absmax_all,
-        up_packed_all, up_absmax_all,
-        down_packed_all, down_absmax_all,
-        codebook, k, hidden_dim, intermediate_dim,
-        num_experts, expert_chunk_size,
+        gate_packed_all,
+        gate_absmax_all,
+        up_packed_all,
+        up_absmax_all,
+        down_packed_all,
+        down_absmax_all,
+        codebook,
+        k,
+        hidden_dim,
+        intermediate_dim,
+        num_experts,
+        expert_chunk_size,
     )

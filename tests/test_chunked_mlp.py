@@ -28,7 +28,9 @@ def _quantize_weight(N, K_dim, k=4, device="cuda"):
     else:
         W_padded = W
     packed, absmax, codebook = bnb.functional.quantize_kbit(
-        W_padded.reshape(-1).float(), k=k, absmax_format="fp32",
+        W_padded.reshape(-1).float(),
+        k=k,
+        absmax_format="fp32",
     )
     return packed, absmax, codebook, N_padded
 
@@ -60,11 +62,31 @@ def _setup_mlp(M=64, K_in=256, N_hidden=512, K_hidden=512, N_out=256, r=16, k=4)
     s = 0.5
     return (
         X,
-        pg, ag, cg, A_gate, B_gate, s,
-        pu, au, cu, A_up, B_up, s,
-        pd, ad, cd, A_down, B_down, s,
-        k, K_in, N_hidden, npg,
-        K_hidden, N_out, npd,
+        pg,
+        ag,
+        cg,
+        A_gate,
+        B_gate,
+        s,
+        pu,
+        au,
+        cu,
+        A_up,
+        B_up,
+        s,
+        pd,
+        ad,
+        cd,
+        A_down,
+        B_down,
+        s,
+        k,
+        K_in,
+        N_hidden,
+        npg,
+        K_hidden,
+        N_out,
+        npd,
         torch.float16,
     )
 
@@ -91,7 +113,7 @@ class TestChunkedMLP:
         X = args[0]
 
         ref = LoRA_MLP_Kbit.apply(*args)
-        out = chunked_mlp_forward(X,16, *args[1:], use_checkpoint=True)
+        out = chunked_mlp_forward(X, 16, *args[1:], use_checkpoint=True)
 
         torch.testing.assert_close(out, ref, atol=1e-3, rtol=1e-3)
 
@@ -102,7 +124,7 @@ class TestChunkedMLP:
         X = args[0]
 
         ref = LoRA_MLP_Kbit.apply(*args)
-        out = chunked_mlp_forward(X,chunk_size, *args[1:], use_checkpoint=False)
+        out = chunked_mlp_forward(X, chunk_size, *args[1:], use_checkpoint=False)
 
         torch.testing.assert_close(out, ref, atol=1e-3, rtol=1e-3)
 
@@ -119,7 +141,7 @@ class TestChunkedMLP:
         X.grad = None
 
         # Chunked (no checkpoint)
-        out = chunked_mlp_forward(X,8, *rest, use_checkpoint=False)
+        out = chunked_mlp_forward(X, 8, *rest, use_checkpoint=False)
         out.sum().backward()
 
         torch.testing.assert_close(X.grad, grad_X_ref, atol=1e-2, rtol=1e-2)
@@ -137,7 +159,7 @@ class TestChunkedMLP:
         X.grad = None
 
         # Chunked with checkpoint
-        out = chunked_mlp_forward(X,8, *rest, use_checkpoint=True)
+        out = chunked_mlp_forward(X, 8, *rest, use_checkpoint=True)
         out.sum().backward()
 
         torch.testing.assert_close(X.grad, grad_X_ref, atol=1e-2, rtol=1e-2)
@@ -183,26 +205,66 @@ class TestChunkedMLP:
         # Non-chunked
         out1 = LoRA_MLP_Kbit.apply(
             X1,
-            pg, ag, cg, A_g1, B_g1, s,
-            pu, au, cu, A_u1, B_u1, s,
-            pd, ad, cd, A_d1, B_d1, s,
-            k, K_in, N_hidden, npg,
-            K_hidden, N_out, npd, torch.float16,
+            pg,
+            ag,
+            cg,
+            A_g1,
+            B_g1,
+            s,
+            pu,
+            au,
+            cu,
+            A_u1,
+            B_u1,
+            s,
+            pd,
+            ad,
+            cd,
+            A_d1,
+            B_d1,
+            s,
+            k,
+            K_in,
+            N_hidden,
+            npg,
+            K_hidden,
+            N_out,
+            npd,
+            torch.float16,
         )
         out1.sum().backward()
 
         # Chunked
         out2 = chunked_mlp_forward(
-            X2, chunk_size=8,
-            packed_gate=pg, absmax_gate=ag, codebook_gate=cg,
-            A_gate=A_g2, B_gate=B_g2, s_gate=s,
-            packed_up=pu, absmax_up=au, codebook_up=cu,
-            A_up=A_u2, B_up=B_u2, s_up=s,
-            packed_down=pd, absmax_down=ad, codebook_down=cd,
-            A_down=A_d2, B_down=B_d2, s_down=s,
-            k=k, K_dim_in=K_in, N_hidden=N_hidden, N_hidden_padded=npg,
-            K_dim_hidden=K_hidden, N_out=N_out, N_out_padded=npd,
-            compute_dtype=torch.float16, use_checkpoint=False,
+            X2,
+            chunk_size=8,
+            packed_gate=pg,
+            absmax_gate=ag,
+            codebook_gate=cg,
+            A_gate=A_g2,
+            B_gate=B_g2,
+            s_gate=s,
+            packed_up=pu,
+            absmax_up=au,
+            codebook_up=cu,
+            A_up=A_u2,
+            B_up=B_u2,
+            s_up=s,
+            packed_down=pd,
+            absmax_down=ad,
+            codebook_down=cd,
+            A_down=A_d2,
+            B_down=B_d2,
+            s_down=s,
+            k=k,
+            K_dim_in=K_in,
+            N_hidden=N_hidden,
+            N_hidden_padded=npg,
+            K_dim_hidden=K_hidden,
+            N_out=N_out,
+            N_out_padded=npd,
+            compute_dtype=torch.float16,
+            use_checkpoint=False,
         )
         out2.sum().backward()
 
@@ -216,7 +278,10 @@ class TestChunkedMLP:
             ("B_down", B_d1.grad, B_d2.grad),
         ]:
             torch.testing.assert_close(
-                g1.float(), g2.float(), atol=5e-2, rtol=5e-2,
+                g1.float(),
+                g2.float(),
+                atol=5e-2,
+                rtol=5e-2,
                 msg=f"Gradient mismatch for {name}",
             )
 
@@ -226,7 +291,7 @@ class TestChunkedMLP:
         X = args[0]
 
         ref = LoRA_MLP_Kbit.apply(*args)
-        out = chunked_mlp_forward(X,16, *args[1:], use_checkpoint=False)
+        out = chunked_mlp_forward(X, 16, *args[1:], use_checkpoint=False)
 
         torch.testing.assert_close(out, ref, atol=1e-3, rtol=1e-3)
 
@@ -236,7 +301,7 @@ class TestChunkedMLP:
         X = args[0]
 
         ref = LoRA_MLP_Kbit.apply(*args)
-        out = chunked_mlp_forward(X,32, *args[1:], use_checkpoint=False)
+        out = chunked_mlp_forward(X, 32, *args[1:], use_checkpoint=False)
 
         torch.testing.assert_close(out, ref, atol=0, rtol=0)
 
@@ -269,16 +334,35 @@ class TestChunkedMLP:
 
         # Chunked + checkpoint forward+backward
         out = chunked_mlp_forward(
-            X, chunk_size=64,
-            packed_gate=pg, absmax_gate=ag, codebook_gate=cg,
-            A_gate=A_gate, B_gate=B_gate, s_gate=s,
-            packed_up=pu, absmax_up=au, codebook_up=cu,
-            A_up=A_up, B_up=B_up, s_up=s,
-            packed_down=pd, absmax_down=ad, codebook_down=cd,
-            A_down=A_down, B_down=B_down, s_down=s,
-            k=k, K_dim_in=K_in, N_hidden=N_hidden, N_hidden_padded=npg,
-            K_dim_hidden=K_hidden, N_out=N_out, N_out_padded=npd,
-            compute_dtype=torch.float16, use_checkpoint=True,
+            X,
+            chunk_size=64,
+            packed_gate=pg,
+            absmax_gate=ag,
+            codebook_gate=cg,
+            A_gate=A_gate,
+            B_gate=B_gate,
+            s_gate=s,
+            packed_up=pu,
+            absmax_up=au,
+            codebook_up=cu,
+            A_up=A_up,
+            B_up=B_up,
+            s_up=s,
+            packed_down=pd,
+            absmax_down=ad,
+            codebook_down=cd,
+            A_down=A_down,
+            B_down=B_down,
+            s_down=s,
+            k=k,
+            K_dim_in=K_in,
+            N_hidden=N_hidden,
+            N_hidden_padded=npg,
+            K_dim_hidden=K_hidden,
+            N_out=N_out,
+            N_out_padded=npd,
+            compute_dtype=torch.float16,
+            use_checkpoint=True,
         )
         out.sum().backward()
 

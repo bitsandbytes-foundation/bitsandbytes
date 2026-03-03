@@ -795,19 +795,19 @@ class ParamsKbit(torch.nn.Parameter):
     def cpu(self):
         return self.to(device="cpu")
 
-    def cuda(self, device: Optional[Union[int, device, str]] = None, non_blocking: bool = False):
+    def cuda(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
         return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
 
     @overload
     def to(
         self: T,
-        device: Optional[Union[int, device]] = ...,
-        dtype: Optional[Union[dtype, str]] = ...,
+        device: Optional[int | device] = ...,
+        dtype: Optional[dtype | str] = ...,
         non_blocking: bool = ...,
     ) -> T: ...
 
     @overload
-    def to(self: T, dtype: Union[dtype, str], non_blocking: bool = ...) -> T: ...
+    def to(self: T, dtype: dtype | str, non_blocking: bool = ...) -> T: ...
 
     @overload
     def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T: ...
@@ -892,25 +892,44 @@ class LinearKbit(nn.Linear):
         if M <= 4 and not self.training and not x.requires_grad:
             # Decode path: scalar GEMV (flat layout, float32 absmax)
             out = torch.ops.bitsandbytes.kbit_scalar_gemv(
-                x_2d, w.packed, w.absmax, w.codebook, w.K_dim, w.N_padded, w.k,
+                x_2d,
+                w.packed,
+                w.absmax,
+                w.codebook,
+                w.K_dim,
+                w.N_padded,
+                w.k,
             )
         elif x.requires_grad:
             # Training path: use autograd-aware MatMulKbit
             out = MatMulKbit.apply(
-                x_2d, w.packed, w.absmax, w.codebook, w.k, w.K_dim, w.N_padded, w.N, compute_dtype,
+                x_2d,
+                w.packed,
+                w.absmax,
+                w.codebook,
+                w.k,
+                w.K_dim,
+                w.N_padded,
+                w.N,
+                compute_dtype,
             )
         else:
             # Prefill path (no grad): dequantize + cuBLAS matmul
             n_elements = w.N_padded * w.K_dim
             w_deq = bnb.functional.dequantize_kbit(
-                w.packed, w.absmax, w.codebook, w.k, n_elements, compute_dtype,
+                w.packed,
+                w.absmax,
+                w.codebook,
+                w.k,
+                n_elements,
+                compute_dtype,
             )
             w_mat = w_deq[:n_elements].reshape(w.N_padded, w.K_dim)
-            out = torch.nn.functional.linear(x_2d, w_mat[:w.N, :])
+            out = torch.nn.functional.linear(x_2d, w_mat[: w.N, :])
 
         # Slice off N-padding (MatMulKbit handles this internally)
         if w.N_padded != w.N and not x.requires_grad:
-            out = out[:, :w.N]
+            out = out[:, : w.N]
 
         # Add bias
         if self.bias is not None:

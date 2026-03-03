@@ -29,7 +29,9 @@ def _quantize_weight(N, K_dim, k=4, device="cuda"):
     else:
         W_padded = W
     packed, absmax, codebook = bnb.functional.quantize_kbit(
-        W_padded.reshape(-1).float(), k=k, absmax_format="fp32",
+        W_padded.reshape(-1).float(),
+        k=k,
+        absmax_format="fp32",
     )
     return packed, absmax, codebook, N_padded, W
 
@@ -57,8 +59,15 @@ class TestChunkedCrossEntropy:
 
         # Chunked CE
         loss = chunked_cross_entropy(
-            hidden, packed, absmax, codebook, labels,
-            k, K, N_padded, V,
+            hidden,
+            packed,
+            absmax,
+            codebook,
+            labels,
+            k,
+            K,
+            N_padded,
+            V,
             compute_dtype=torch.float16,
             chunk_size=256,
         )
@@ -76,8 +85,15 @@ class TestChunkedCrossEntropy:
 
         # Chunked CE
         loss = chunked_cross_entropy(
-            hidden, packed, absmax, codebook, labels,
-            k, K, N_padded, V,
+            hidden,
+            packed,
+            absmax,
+            codebook,
+            labels,
+            k,
+            K,
+            N_padded,
+            V,
             compute_dtype=torch.float16,
             chunk_size=256,
         )
@@ -95,8 +111,15 @@ class TestChunkedCrossEntropy:
         hidden, packed, absmax, codebook, labels, k, K, N_padded, V = self._setup(V=1024)
 
         loss = chunked_cross_entropy(
-            hidden, packed, absmax, codebook, labels,
-            k, K, N_padded, V,
+            hidden,
+            packed,
+            absmax,
+            codebook,
+            labels,
+            k,
+            K,
+            N_padded,
+            V,
             compute_dtype=torch.float16,
             chunk_size=chunk_size,
         )
@@ -104,8 +127,14 @@ class TestChunkedCrossEntropy:
         # Reference with chunk_size=V (single chunk = no chunking)
         ref_loss = chunked_cross_entropy(
             hidden.detach().requires_grad_(True),
-            packed, absmax, codebook, labels,
-            k, K, N_padded, V,
+            packed,
+            absmax,
+            codebook,
+            labels,
+            k,
+            K,
+            N_padded,
+            V,
             compute_dtype=torch.float16,
             chunk_size=V,  # single chunk
         )
@@ -122,8 +151,15 @@ class TestChunkedCrossEntropy:
         # Chunked CE gradient
         hidden1 = torch.randn(B, K, dtype=torch.float16, device="cuda", requires_grad=True)
         loss1 = chunked_cross_entropy(
-            hidden1, packed, absmax, codebook, labels,
-            k, K, N_padded, V,
+            hidden1,
+            packed,
+            absmax,
+            codebook,
+            labels,
+            k,
+            K,
+            N_padded,
+            V,
             compute_dtype=torch.float16,
             chunk_size=128,
         )
@@ -138,8 +174,10 @@ class TestChunkedCrossEntropy:
 
         # Compare gradients
         torch.testing.assert_close(
-            hidden1.grad.float(), hidden2.grad.float(),
-            atol=5e-2, rtol=5e-2,
+            hidden1.grad.float(),
+            hidden2.grad.float(),
+            atol=5e-2,
+            rtol=5e-2,
         )
 
     def test_backward_gradient_matches_across_chunk_sizes(self):
@@ -155,8 +193,15 @@ class TestChunkedCrossEntropy:
         for cs in [64, 128, 256, 512]:
             h = hidden_base.clone().requires_grad_(True)
             loss = chunked_cross_entropy(
-                h, packed, absmax, codebook, labels,
-                k, K, N_padded, V,
+                h,
+                packed,
+                absmax,
+                codebook,
+                labels,
+                k,
+                K,
+                N_padded,
+                V,
                 compute_dtype=torch.float16,
                 chunk_size=cs,
             )
@@ -167,8 +212,10 @@ class TestChunkedCrossEntropy:
         # (small fp16 accumulation order differences across chunk boundaries)
         for i in range(1, len(grads)):
             torch.testing.assert_close(
-                grads[0].float(), grads[i].float(),
-                atol=1e-3, rtol=1e-3,
+                grads[0].float(),
+                grads[i].float(),
+                atol=1e-3,
+                rtol=1e-3,
             )
 
     def test_ignore_index(self):
@@ -181,8 +228,15 @@ class TestChunkedCrossEntropy:
         labels[10] = -100
 
         loss = chunked_cross_entropy(
-            hidden, packed, absmax, codebook, labels,
-            k, K, N_padded, V,
+            hidden,
+            packed,
+            absmax,
+            codebook,
+            labels,
+            k,
+            K,
+            N_padded,
+            V,
             compute_dtype=torch.float16,
             chunk_size=256,
         )
@@ -200,8 +254,15 @@ class TestChunkedCrossEntropy:
         labels = torch.full((8,), -100, device="cuda", dtype=torch.long)
 
         loss = chunked_cross_entropy(
-            hidden, packed, absmax, codebook, labels,
-            k, K, N_padded, V,
+            hidden,
+            packed,
+            absmax,
+            codebook,
+            labels,
+            k,
+            K,
+            N_padded,
+            V,
             compute_dtype=torch.float16,
             chunk_size=256,
         )
@@ -219,8 +280,15 @@ class TestChunkedCrossEntropy:
 
         hidden = torch.randn(B, K, dtype=torch.float16, device="cuda", requires_grad=True)
         loss = chunked_cross_entropy(
-            hidden, packed, absmax, codebook, labels,
-            k, K, N_padded, V,
+            hidden,
+            packed,
+            absmax,
+            codebook,
+            labels,
+            k,
+            K,
+            N_padded,
+            V,
             compute_dtype=torch.float16,
             chunk_size=64,
         )
@@ -234,8 +302,10 @@ class TestChunkedCrossEntropy:
         ref_loss.backward()
 
         torch.testing.assert_close(
-            hidden.grad.float(), hidden_ref.grad.float(),
-            atol=5e-2, rtol=5e-2,
+            hidden.grad.float(),
+            hidden_ref.grad.float(),
+            atol=5e-2,
+            rtol=5e-2,
         )
 
     @pytest.mark.parametrize("k", [2, 3, 4])
@@ -247,8 +317,15 @@ class TestChunkedCrossEntropy:
         labels = torch.randint(0, V, (B,), device="cuda")
 
         loss = chunked_cross_entropy(
-            hidden, packed, absmax, codebook, labels,
-            k, K, N_padded, V,
+            hidden,
+            packed,
+            absmax,
+            codebook,
+            labels,
+            k,
+            K,
+            N_padded,
+            V,
             compute_dtype=torch.float16,
             chunk_size=128,
         )
@@ -271,8 +348,15 @@ class TestChunkedCrossEntropy:
         labels = torch.randint(0, V, (B,), device="cuda")
 
         loss = chunked_cross_entropy(
-            hidden, packed, absmax, codebook, labels,
-            k, K, N_padded, V,
+            hidden,
+            packed,
+            absmax,
+            codebook,
+            labels,
+            k,
+            K,
+            N_padded,
+            V,
             compute_dtype=torch.float16,
             chunk_size=4096,
         )
@@ -294,8 +378,15 @@ class TestChunkedCrossEntropy:
         labels = torch.randint(0, V, (B,), device="cuda")
 
         loss = chunked_cross_entropy(
-            hidden, packed, absmax, codebook, labels,
-            k, K, N_padded, V,
+            hidden,
+            packed,
+            absmax,
+            codebook,
+            labels,
+            k,
+            K,
+            N_padded,
+            V,
             compute_dtype=dtype,
             chunk_size=128,
         )

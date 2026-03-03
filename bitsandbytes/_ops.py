@@ -486,7 +486,9 @@ torch.library.define(
 
 
 @register_fake("bitsandbytes::repack_kbit")
-def _(packed_flat: torch.Tensor, absmax_flat: torch.Tensor, K_dim: int, N: int, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+def _(
+    packed_flat: torch.Tensor, absmax_flat: torch.Tensor, K_dim: int, N: int, k: int
+) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     TILE_K, TILE_N, BLOCKSIZE = 64, 128, 32
     torch._check(N % TILE_N == 0, lambda: f"N ({N}) must be divisible by {TILE_N}")
@@ -640,8 +642,7 @@ torch.library.define(
 
 torch.library.define(
     "bitsandbytes::kbit_scalar_gemv.out",
-    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int k, "
-    "Tensor(a!) out) -> ()",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int k, Tensor(a!) out) -> ()",
 )
 
 

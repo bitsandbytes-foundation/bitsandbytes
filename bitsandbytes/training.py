@@ -39,7 +39,10 @@ class _CPUOffloadCheckpointFunction(torch.autograd.Function):
                 ctx.input_requires_grad.append(arg.requires_grad)
                 # Async copy to CPU, pin memory for faster D2H transfer
                 cpu_tensor = torch.empty(
-                    arg.shape, dtype=arg.dtype, device="cpu", pin_memory=True,
+                    arg.shape,
+                    dtype=arg.dtype,
+                    device="cpu",
+                    pin_memory=True,
                 )
                 cpu_tensor.copy_(arg, non_blocking=True)
                 ctx.cpu_inputs.append(cpu_tensor)

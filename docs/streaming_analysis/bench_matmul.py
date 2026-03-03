@@ -9,13 +9,12 @@ of 50% peak utilization (= 82.5 TFLOPS out of 165 peak).
 This lets us validate or correct the GPU_UTILIZATION parameter.
 """
 
-import torch
-import time
 import sys
 
+import torch
 
-def benchmark_matmul(M, K, N, dtype=torch.bfloat16, warmup=20, iters=100,
-                     use_cuda_graph=True, label=""):
+
+def benchmark_matmul(M, K, N, dtype=torch.bfloat16, warmup=20, iters=100, use_cuda_graph=True, label=""):
     """
     Benchmark a single matmul: [M, K] @ [K, N] → [M, N].
 
@@ -81,26 +80,26 @@ def main():
     print()
 
     # GLM-4.7 dimensions
-    H = 5120        # hidden_size
-    QD = 12288      # num_attention_heads * head_dim = 96 * 128
-    KVD = 1024      # num_kv_heads * head_dim = 8 * 128
+    H = 5120  # hidden_size
+    QD = 12288  # num_attention_heads * head_dim = 96 * 128
+    KVD = 1024  # num_kv_heads * head_dim = 8 * 128
     SHARED_I = 12288  # shared_intermediate_size
-    EXPERT_I = 1536   # moe_intermediate_size
-    S = 1024        # seq_len
+    EXPERT_I = 1536  # moe_intermediate_size
+    S = 1024  # seq_len
 
     # Representative projections in one transformer layer
     projections = [
         # (label, M_factor, K, N) — M = B * S
         ("Attn Q proj   [B*S, 5120] → [B*S, 12288]", H, QD),
-        ("Attn K proj   [B*S, 5120] → [B*S, 1024]",  H, KVD),
-        ("Attn V proj   [B*S, 5120] → [B*S, 1024]",  H, KVD),
+        ("Attn K proj   [B*S, 5120] → [B*S, 1024]", H, KVD),
+        ("Attn V proj   [B*S, 5120] → [B*S, 1024]", H, KVD),
         ("Attn O proj   [B*S, 12288] → [B*S, 5120]", QD, H),
         ("Shared gate   [B*S, 5120] → [B*S, 12288]", H, SHARED_I),
         ("Shared up     [B*S, 5120] → [B*S, 12288]", H, SHARED_I),
         ("Shared down   [B*S, 12288] → [B*S, 5120]", SHARED_I, H),
-        ("Expert gate   [B*S, 5120] → [B*S, 1536]",  H, EXPERT_I),
-        ("Expert up     [B*S, 5120] → [B*S, 1536]",  H, EXPERT_I),
-        ("Expert down   [B*S, 1536] → [B*S, 5120]",  EXPERT_I, H),
+        ("Expert gate   [B*S, 5120] → [B*S, 1536]", H, EXPERT_I),
+        ("Expert up     [B*S, 5120] → [B*S, 1536]", H, EXPERT_I),
+        ("Expert down   [B*S, 1536] → [B*S, 5120]", EXPERT_I, H),
     ]
 
     batch_sizes = [1, 2, 4, 8, 16, 32]
@@ -150,8 +149,7 @@ def main():
         sim_time_ms = total_flops / (82.5e12) * 1000
         ratio = sim_time_ms / total_ms
 
-        print(f"{B:>3d}  {M:>7d}  {total_ms:>8.2f}ms  {measured_tflops:>7.1f}T  "
-              f"{utilization:>5.1f}%  {ratio:>6.2f}x")
+        print(f"{B:>3d}  {M:>7d}  {total_ms:>8.2f}ms  {measured_tflops:>7.1f}T  {utilization:>5.1f}%  {ratio:>6.2f}x")
 
     print()
     print("Util% = measured TFLOPS / 165 peak")
@@ -171,8 +169,7 @@ def main():
         ms, tflops = benchmark_matmul(M, K, N, use_cuda_graph=True)
         util = tflops / 165 * 100
         dims = f"[{M},{K}]x[{K},{N}]"
-        print(f"{label:40s}  {dims:>20s}  "
-              f"{ms:>6.3f}ms  {tflops:>7.1f}T  {util:>5.1f}%")
+        print(f"{label:40s}  {dims:>20s}  {ms:>6.3f}ms  {tflops:>7.1f}T  {util:>5.1f}%")
 
     print()
 
@@ -183,9 +180,11 @@ def main():
     ms_graph, tflops_graph = benchmark_matmul(M, K, N, use_cuda_graph=True)
     ms_no_graph, tflops_no_graph = benchmark_matmul(M, K, N, use_cuda_graph=False)
     print(f"Q proj [{M},{K}]→[{M},{N}]:")
-    print(f"  With CUDA graph:    {ms_graph:.3f} ms, {tflops_graph:.1f} TFLOPS ({tflops_graph/165*100:.1f}% peak)")
-    print(f"  Without CUDA graph: {ms_no_graph:.3f} ms, {tflops_no_graph:.1f} TFLOPS ({tflops_no_graph/165*100:.1f}% peak)")
-    print(f"  Graph speedup: {ms_no_graph/ms_graph:.2f}x")
+    print(f"  With CUDA graph:    {ms_graph:.3f} ms, {tflops_graph:.1f} TFLOPS ({tflops_graph / 165 * 100:.1f}% peak)")
+    print(
+        f"  Without CUDA graph: {ms_no_graph:.3f} ms, {tflops_no_graph:.1f} TFLOPS ({tflops_no_graph / 165 * 100:.1f}% peak)"
+    )
+    print(f"  Graph speedup: {ms_no_graph / ms_graph:.2f}x")
     print()
 
     # Summary recommendation
@@ -211,17 +210,17 @@ def main():
     measured_tflops = total_flops / (total_ms * 1e-3) / 1e12
     utilization = measured_tflops / 165
 
-    print(f"Measured effective utilization at B=8: {utilization*100:.1f}%")
-    print(f"Simulation assumes: 50.0%")
+    print(f"Measured effective utilization at B=8: {utilization * 100:.1f}%")
+    print("Simulation assumes: 50.0%")
     print()
     if utilization > 0.55:
-        print(f"Simulation is CONSERVATIVE — real throughput is {utilization/0.5:.2f}x what sim predicts.")
+        print(f"Simulation is CONSERVATIVE — real throughput is {utilization / 0.5:.2f}x what sim predicts.")
         print(f"Consider increasing GPU_UTILIZATION to {utilization:.2f}")
     elif utilization < 0.45:
-        print(f"Simulation is OPTIMISTIC — real throughput is {utilization/0.5:.2f}x what sim predicts.")
+        print(f"Simulation is OPTIMISTIC — real throughput is {utilization / 0.5:.2f}x what sim predicts.")
         print(f"Consider decreasing GPU_UTILIZATION to {utilization:.2f}")
     else:
-        print(f"Simulation's 50% assumption is reasonable (measured {utilization*100:.1f}%).")
+        print(f"Simulation's 50% assumption is reasonable (measured {utilization * 100:.1f}%).")
 
     print()
     print("NOTE: This benchmarks BF16 matmuls, not NF4 quantized matmuls.")

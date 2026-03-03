@@ -6,8 +6,8 @@ kbit_gemm_prod calls for each expert.
 """
 
 import pytest
-import torch
 from scipy.stats import norm
+import torch
 
 import bitsandbytes  # noqa: F401
 from bitsandbytes import _ops  # noqa: F401
@@ -36,12 +36,8 @@ def prepare_expert_weights(K_dim, N, k, num_experts):
 
     for _ in range(num_experts):
         W = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
-        packed_flat, absmax = torch.ops.bitsandbytes.quantize_kbit(
-            W.reshape(-1), codebook, k
-        )
-        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat, absmax.cuda(), K_dim, N, k
-        )
+        packed_flat, absmax = torch.ops.bitsandbytes.quantize_kbit(W.reshape(-1), codebook, k)
+        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat, absmax.cuda(), K_dim, N, k)
         packed_list.append(packed_tiled)
         absmax_list.append(absmax_tiled)
         W_list.append(W)
@@ -62,8 +58,8 @@ class TestGroupedGemm:
         num_experts = 8
         M_per_expert = 4
 
-        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = (
-            prepare_expert_weights(K_dim, N, k, num_experts)
+        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = prepare_expert_weights(
+            K_dim, N, k, num_experts
         )
 
         # Build activations and expert_offsets
@@ -79,24 +75,35 @@ class TestGroupedGemm:
 
         # Grouped GEMM
         C_grouped = torch.ops.bitsandbytes.kbit_grouped_gemm(
-            A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, num_experts,
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            k,
+            num_experts,
         )
 
         # Individual GEMM for each expert
         C_individual_list = []
         for i in range(num_experts):
             C_i = torch.ops.bitsandbytes.kbit_gemm_prod(
-                A_list[i], packed_list[i], absmax_list[i], codebook,
-                K_dim, N, k, 1,
+                A_list[i],
+                packed_list[i],
+                absmax_list[i],
+                codebook,
+                K_dim,
+                N,
+                k,
+                1,
             )
             C_individual_list.append(C_i)
         C_individual = torch.cat(C_individual_list, dim=0)
 
         # Compare
-        assert C_grouped.shape == C_individual.shape, (
-            f"Shape mismatch: {C_grouped.shape} vs {C_individual.shape}"
-        )
+        assert C_grouped.shape == C_individual.shape, f"Shape mismatch: {C_grouped.shape} vs {C_individual.shape}"
         assert torch.allclose(C_grouped, C_individual, rtol=1e-3, atol=1e-3), (
             f"Max diff: {(C_grouped - C_individual).abs().max().item():.6f}, "
             f"Mean diff: {(C_grouped - C_individual).abs().mean().item():.6f}"
@@ -109,8 +116,8 @@ class TestGroupedGemm:
         num_experts = 8
         M_values = [1, 3, 7, 2, 5, 1, 4, 8]
 
-        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = (
-            prepare_expert_weights(K_dim, N, k, num_experts)
+        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = prepare_expert_weights(
+            K_dim, N, k, num_experts
         )
 
         A_list = []
@@ -124,15 +131,28 @@ class TestGroupedGemm:
         expert_offsets = torch.tensor(offsets, dtype=torch.int32, device="cuda")
 
         C_grouped = torch.ops.bitsandbytes.kbit_grouped_gemm(
-            A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, num_experts,
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            k,
+            num_experts,
         )
 
         C_individual_list = []
         for i in range(num_experts):
             C_i = torch.ops.bitsandbytes.kbit_gemm_prod(
-                A_list[i], packed_list[i], absmax_list[i], codebook,
-                K_dim, N, k, 1,
+                A_list[i],
+                packed_list[i],
+                absmax_list[i],
+                codebook,
+                K_dim,
+                N,
+                k,
+                1,
             )
             C_individual_list.append(C_i)
         C_individual = torch.cat(C_individual_list, dim=0)
@@ -148,21 +168,32 @@ class TestGroupedGemm:
         K_dim, N = 2048, 512
         M = 8
 
-        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = (
-            prepare_expert_weights(K_dim, N, k, 1)
-        )
+        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = prepare_expert_weights(K_dim, N, k, 1)
 
         A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
         expert_offsets = torch.tensor([0, M], dtype=torch.int32, device="cuda")
 
         C_grouped = torch.ops.bitsandbytes.kbit_grouped_gemm(
-            A, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, 1,
+            A,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            k,
+            1,
         )
 
         C_prod = torch.ops.bitsandbytes.kbit_gemm_prod(
-            A, packed_list[0], absmax_list[0], codebook,
-            K_dim, N, k, 1,
+            A,
+            packed_list[0],
+            absmax_list[0],
+            codebook,
+            K_dim,
+            N,
+            k,
+            1,
         )
 
         assert torch.allclose(C_grouped, C_prod, rtol=1e-3, atol=1e-3), (
@@ -175,8 +206,8 @@ class TestGroupedGemm:
         K_dim, N = 2048, 512
         num_experts = 64
 
-        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = (
-            prepare_expert_weights(K_dim, N, k, num_experts)
+        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = prepare_expert_weights(
+            K_dim, N, k, num_experts
         )
 
         A_list = []
@@ -190,15 +221,28 @@ class TestGroupedGemm:
         expert_offsets = torch.tensor(offsets, dtype=torch.int32, device="cuda")
 
         C_grouped = torch.ops.bitsandbytes.kbit_grouped_gemm(
-            A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, num_experts,
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            k,
+            num_experts,
         )
 
         C_individual_list = []
         for i in range(num_experts):
             C_i = torch.ops.bitsandbytes.kbit_gemm_prod(
-                A_list[i], packed_list[i], absmax_list[i], codebook,
-                K_dim, N, k, 1,
+                A_list[i],
+                packed_list[i],
+                absmax_list[i],
+                codebook,
+                K_dim,
+                N,
+                k,
+                1,
             )
             C_individual_list.append(C_i)
         C_individual = torch.cat(C_individual_list, dim=0)
@@ -214,8 +258,8 @@ class TestGroupedGemm:
         num_experts = 8
         M_per_expert = 4
 
-        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = (
-            prepare_expert_weights(K_dim, N, k, num_experts)
+        B_packed_all, B_absmax_all, codebook, W_list, packed_list, absmax_list = prepare_expert_weights(
+            K_dim, N, k, num_experts
         )
 
         A_list = []
@@ -229,15 +273,28 @@ class TestGroupedGemm:
         expert_offsets = torch.tensor(offsets, dtype=torch.int32, device="cuda")
 
         C_grouped = torch.ops.bitsandbytes.kbit_grouped_gemm(
-            A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, num_experts,
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            k,
+            num_experts,
         )
 
         C_individual_list = []
         for i in range(num_experts):
             C_i = torch.ops.bitsandbytes.kbit_gemm_prod(
-                A_list[i], packed_list[i], absmax_list[i], codebook,
-                K_dim, N, k, 1,
+                A_list[i],
+                packed_list[i],
+                absmax_list[i],
+                codebook,
+                K_dim,
+                N,
+                k,
+                1,
             )
             C_individual_list.append(C_i)
         C_individual = torch.cat(C_individual_list, dim=0)
@@ -260,12 +317,8 @@ class TestGroupedGemm:
         absmax_list = []
         for _ in range(num_experts):
             W = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
-            packed_flat, absmax = torch.ops.bitsandbytes.quantize_kbit(
-                W.reshape(-1), codebook, k
-            )
-            packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-                packed_flat, absmax.cuda(), K_dim, N, k
-            )
+            packed_flat, absmax = torch.ops.bitsandbytes.quantize_kbit(W.reshape(-1), codebook, k)
+            packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat, absmax.cuda(), K_dim, N, k)
             packed_list.append(packed_tiled)
             absmax_list.append(absmax_tiled)
 
@@ -283,15 +336,28 @@ class TestGroupedGemm:
         expert_offsets = torch.tensor(offsets, dtype=torch.int32, device="cuda")
 
         C_grouped = torch.ops.bitsandbytes.kbit_grouped_gemm(
-            A_concat, B_packed_all, B_absmax_all, codebook,
-            expert_offsets, K_dim, N, k, num_experts,
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            k,
+            num_experts,
         )
 
         C_individual_list = []
         for i in range(num_experts):
             C_i = torch.ops.bitsandbytes.kbit_gemm_prod(
-                A_list[i], packed_list[i], absmax_list[i], codebook,
-                K_dim, N, k, 1,
+                A_list[i],
+                packed_list[i],
+                absmax_list[i],
+                codebook,
+                K_dim,
+                N,
+                k,
+                1,
             )
             C_individual_list.append(C_i)
         C_individual = torch.cat(C_individual_list, dim=0)

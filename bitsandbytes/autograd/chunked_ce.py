@@ -34,18 +34,18 @@ class ChunkedCrossEntropy(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
-        hidden,       # [N_tokens, hidden_dim], bf16/fp16
-        packed,       # int32, kbit packed LM head weight
-        absmax,       # per-block absmax
-        codebook,     # codebook for dequantization
-        labels,       # [N_tokens], int64
-        k,            # bit width
-        K_dim,        # hidden dimension
-        N_padded,     # vocab_size padded to 128
-        N,            # actual vocab_size
+        hidden,  # [N_tokens, hidden_dim], bf16/fp16
+        packed,  # int32, kbit packed LM head weight
+        absmax,  # per-block absmax
+        codebook,  # codebook for dequantization
+        labels,  # [N_tokens], int64
+        k,  # bit width
+        K_dim,  # hidden dimension
+        N_padded,  # vocab_size padded to 128
+        N,  # actual vocab_size
         compute_dtype,
-        chunk_size,   # vocab chunk size (e.g. 8192)
-        ignore_index, # label to ignore (default -100)
+        chunk_size,  # vocab chunk size (e.g. 8192)
+        ignore_index,  # label to ignore (default -100)
     ):
         # Dequantize full LM head weight [vocab_size, hidden_dim]
         n_elements = N_padded * K_dim
@@ -69,9 +69,8 @@ class ChunkedCrossEntropy(torch.autograd.Function):
             # Online logsumexp update (numerically stable)
             chunk_max = partial_f.max(dim=-1).values
             new_max = torch.max(max_logit, chunk_max)
-            sum_exp = (
-                sum_exp * torch.exp(max_logit - new_max)
-                + torch.exp(partial_f - new_max.unsqueeze(-1)).sum(dim=-1)
+            sum_exp = sum_exp * torch.exp(max_logit - new_max) + torch.exp(partial_f - new_max.unsqueeze(-1)).sum(
+                dim=-1
             )
             max_logit = new_max
 
@@ -111,9 +110,14 @@ class ChunkedCrossEntropy(torch.autograd.Function):
         # Re-dequantize LM head weight
         n_elements = ctx.N_padded * ctx.K_dim
         w_deq = F.dequantize_kbit(
-            packed, absmax, codebook, ctx.k, n_elements, ctx.compute_dtype,
+            packed,
+            absmax,
+            codebook,
+            ctx.k,
+            n_elements,
+            ctx.compute_dtype,
         )
-        W = w_deq[:n_elements].reshape(ctx.N_padded, ctx.K_dim)[:ctx.N, :]
+        W = w_deq[:n_elements].reshape(ctx.N_padded, ctx.K_dim)[: ctx.N, :]
 
         B = hidden.shape[0]
         grad_hidden = torch.zeros_like(hidden)
@@ -188,6 +192,16 @@ def chunked_cross_entropy(
         Scalar mean loss.
     """
     return ChunkedCrossEntropy.apply(
-        hidden, packed, absmax, codebook, labels,
-        k, K_dim, N_padded, N, compute_dtype, chunk_size, ignore_index,
+        hidden,
+        packed,
+        absmax,
+        codebook,
+        labels,
+        k,
+        K_dim,
+        N_padded,
+        N,
+        compute_dtype,
+        chunk_size,
+        ignore_index,
     )

@@ -9,10 +9,9 @@ Verifies:
 - Full chunking (Q+K/V) matches Q-only chunking
 """
 
+from flash_attn import flash_attn_func
 import pytest
 import torch
-
-from flash_attn import flash_attn_func
 
 from bitsandbytes.attention import chunked_flash_attention, chunked_flash_attention_full
 
@@ -75,8 +74,10 @@ class TestChunkedFlashAttention:
 
         # Positions 0-128 should be identical (they can't see positions 200+)
         torch.testing.assert_close(
-            out1[:, :129], out2[:, :129],
-            atol=0, rtol=0,
+            out1[:, :129],
+            out2[:, :129],
+            atol=0,
+            rtol=0,
             msg="Causal masking violated at chunk boundary",
         )
 
@@ -210,7 +211,12 @@ class TestChunkedFlashAttentionFull:
 
         ref = flash_attn_func(Q, K, V, causal=True)
         out = chunked_flash_attention_full(
-            Q, K, V, q_chunk_size=64, kv_chunk_size=64, causal=True,
+            Q,
+            K,
+            V,
+            q_chunk_size=64,
+            kv_chunk_size=64,
+            causal=True,
         )
 
         torch.testing.assert_close(out, ref, atol=1e-2, rtol=1e-2)
@@ -224,7 +230,12 @@ class TestChunkedFlashAttentionFull:
 
         ref = chunked_flash_attention(Q, K, V, chunk_size=64, causal=True)
         out = chunked_flash_attention_full(
-            Q, K, V, q_chunk_size=64, kv_chunk_size=64, causal=True,
+            Q,
+            K,
+            V,
+            q_chunk_size=64,
+            kv_chunk_size=64,
+            causal=True,
         )
 
         torch.testing.assert_close(out, ref, atol=1e-2, rtol=1e-2)
@@ -238,7 +249,12 @@ class TestChunkedFlashAttentionFull:
 
         ref = flash_attn_func(Q, K, V, causal=True)
         out = chunked_flash_attention_full(
-            Q, K, V, q_chunk_size=64, kv_chunk_size=64, causal=True,
+            Q,
+            K,
+            V,
+            q_chunk_size=64,
+            kv_chunk_size=64,
+            causal=True,
         )
 
         torch.testing.assert_close(out, ref, atol=1e-2, rtol=1e-2)

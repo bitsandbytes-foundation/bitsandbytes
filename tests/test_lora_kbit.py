@@ -27,7 +27,9 @@ def _quantize_weight(N, K_dim, k=4, device="cuda"):
     else:
         W_padded = W
     packed, absmax, codebook = bnb.functional.quantize_kbit(
-        W_padded.reshape(-1).float(), k=k, absmax_format="fp32",
+        W_padded.reshape(-1).float(),
+        k=k,
+        absmax_format="fp32",
     )
     return packed, absmax, codebook, N_padded
 
@@ -55,7 +57,18 @@ class TestLoRA_W_Kbit:
         X, packed, absmax, codebook, A, B, s, k, K, N_padded, N = self._setup()
 
         out = LoRA_W_Kbit.apply(
-            X, packed, absmax, codebook, A, B, s, k, K, N_padded, N, torch.float16,
+            X,
+            packed,
+            absmax,
+            codebook,
+            A,
+            B,
+            s,
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
         )
 
         # Reference
@@ -70,7 +83,18 @@ class TestLoRA_W_Kbit:
         X, packed, absmax, codebook, A, B, s, k, K, N_padded, N = self._setup()
 
         out = LoRA_W_Kbit.apply(
-            X, packed, absmax, codebook, A, B, s, k, K, N_padded, N, torch.float16,
+            X,
+            packed,
+            absmax,
+            codebook,
+            A,
+            B,
+            s,
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
         )
         out.sum().backward()
 
@@ -88,7 +112,18 @@ class TestLoRA_W_Kbit:
         X, packed, absmax, codebook, A, B, s, k, K, N_padded, N = self._setup()
 
         out = LoRA_W_Kbit.apply(
-            X, packed, absmax, codebook, A, B, s, k, K, N_padded, N, torch.float16,
+            X,
+            packed,
+            absmax,
+            codebook,
+            A,
+            B,
+            s,
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
         )
         out.sum().backward()
 
@@ -107,7 +142,18 @@ class TestLoRA_W_Kbit:
         X, packed, absmax, codebook, A, B, s, k, K, N_padded, N = self._setup()
 
         out = LoRA_W_Kbit.apply(
-            X, packed, absmax, codebook, A, B, s, k, K, N_padded, N, torch.float16,
+            X,
+            packed,
+            absmax,
+            codebook,
+            A,
+            B,
+            s,
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
         )
         out.sum().backward()
 
@@ -126,7 +172,18 @@ class TestLoRA_W_Kbit:
         """Gradients should work for all bit widths."""
         X, packed, absmax, codebook, A, B, s, _, K, N_padded, N = self._setup(k=k)
         out = LoRA_W_Kbit.apply(
-            X, packed, absmax, codebook, A, B, s, k, K, N_padded, N, torch.float16,
+            X,
+            packed,
+            absmax,
+            codebook,
+            A,
+            B,
+            s,
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
         )
         out.sum().backward()
         assert A.grad is not None
@@ -138,7 +195,18 @@ class TestLoRA_W_Kbit:
         M, K, N, r = 8, 512, 256, 32
         X, packed, absmax, codebook, A, B, s, k, _, N_padded, _ = self._setup(M=M, K=K, N=N, r=r)
         out = LoRA_W_Kbit.apply(
-            X, packed, absmax, codebook, A, B, s, k, K, N_padded, N, torch.float16,
+            X,
+            packed,
+            absmax,
+            codebook,
+            A,
+            B,
+            s,
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
         )
         assert out.shape == (M, N)
         out.sum().backward()
@@ -167,10 +235,23 @@ class TestLoRA_QKV_Kbit:
 
         Q, Kp, V = LoRA_QKV_Kbit.apply(
             X,
-            *projs[0][:3], projs[0][3], projs[0][4], projs[0][5],
-            *projs[1][:3], projs[1][3], projs[1][4], projs[1][5],
-            *projs[2][:3], projs[2][3], projs[2][4], projs[2][5],
-            k, K, N_padded, N, torch.float16,
+            *projs[0][:3],
+            projs[0][3],
+            projs[0][4],
+            projs[0][5],
+            *projs[1][:3],
+            projs[1][3],
+            projs[1][4],
+            projs[1][5],
+            *projs[2][:3],
+            projs[2][3],
+            projs[2][4],
+            projs[2][5],
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
         )
 
         # Reference: three separate calls
@@ -201,10 +282,23 @@ class TestLoRA_QKV_Kbit:
 
         Q, Kp, V = LoRA_QKV_Kbit.apply(
             X_fused,
-            *projs_fused[0][:3], projs_fused[0][3], projs_fused[0][4], projs_fused[0][5],
-            *projs_fused[1][:3], projs_fused[1][3], projs_fused[1][4], projs_fused[1][5],
-            *projs_fused[2][:3], projs_fused[2][3], projs_fused[2][4], projs_fused[2][5],
-            k, K, N_padded, N, torch.float16,
+            *projs_fused[0][:3],
+            projs_fused[0][3],
+            projs_fused[0][4],
+            projs_fused[0][5],
+            *projs_fused[1][:3],
+            projs_fused[1][3],
+            projs_fused[1][4],
+            projs_fused[1][5],
+            *projs_fused[2][:3],
+            projs_fused[2][3],
+            projs_fused[2][4],
+            projs_fused[2][5],
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
         )
         (Q.sum() + Kp.sum() + V.sum()).backward()
 
@@ -213,7 +307,18 @@ class TestLoRA_QKV_Kbit:
         total = torch.zeros(1, device="cuda")
         for packed, absmax, codebook, A, B, s in projs_sep:
             out = LoRA_W_Kbit.apply(
-                X_sep, packed, absmax, codebook, A, B, s, k, K, N_padded, N, torch.float16,
+                X_sep,
+                packed,
+                absmax,
+                codebook,
+                A,
+                B,
+                s,
+                k,
+                K,
+                N_padded,
+                N,
+                torch.float16,
             )
             total = total + out.sum()
         total.backward()
@@ -261,10 +366,31 @@ class TestLoRA_MLP_Kbit:
         s = 0.5
         return (
             X,
-            packed_gate, absmax_gate, codebook_gate, A_gate, B_gate, s,
-            packed_up, absmax_up, codebook_up, A_up, B_up, s,
-            packed_down, absmax_down, codebook_down, A_down, B_down, s,
-            k, K_in, N_hidden, N_hidden_padded, K_hidden, N_out, N_out_padded,
+            packed_gate,
+            absmax_gate,
+            codebook_gate,
+            A_gate,
+            B_gate,
+            s,
+            packed_up,
+            absmax_up,
+            codebook_up,
+            A_up,
+            B_up,
+            s,
+            packed_down,
+            absmax_down,
+            codebook_down,
+            A_down,
+            B_down,
+            s,
+            k,
+            K_in,
+            N_hidden,
+            N_hidden_padded,
+            K_hidden,
+            N_out,
+            N_out_padded,
         )
 
     def test_forward_correctness(self):
@@ -272,18 +398,43 @@ class TestLoRA_MLP_Kbit:
         args = self._setup()
         (
             X,
-            packed_gate, absmax_gate, codebook_gate, A_gate, B_gate, s_gate,
-            packed_up, absmax_up, codebook_up, A_up, B_up, s_up,
-            packed_down, absmax_down, codebook_down, A_down, B_down, s_down,
-            k, K_in, N_hidden, N_hidden_padded, K_hidden, N_out, N_out_padded,
+            packed_gate,
+            absmax_gate,
+            codebook_gate,
+            A_gate,
+            B_gate,
+            s_gate,
+            packed_up,
+            absmax_up,
+            codebook_up,
+            A_up,
+            B_up,
+            s_up,
+            packed_down,
+            absmax_down,
+            codebook_down,
+            A_down,
+            B_down,
+            s_down,
+            k,
+            K_in,
+            N_hidden,
+            N_hidden_padded,
+            K_hidden,
+            N_out,
+            N_out_padded,
         ) = args
 
         out = LoRA_MLP_Kbit.apply(*args, torch.float16)
 
         # Reference
-        W_gate = _dequant_weight(packed_gate, absmax_gate, codebook_gate, k, K_in, N_hidden_padded, N_hidden, torch.float16)
+        W_gate = _dequant_weight(
+            packed_gate, absmax_gate, codebook_gate, k, K_in, N_hidden_padded, N_hidden, torch.float16
+        )
         W_up = _dequant_weight(packed_up, absmax_up, codebook_up, k, K_in, N_hidden_padded, N_hidden, torch.float16)
-        W_down = _dequant_weight(packed_down, absmax_down, codebook_down, k, K_hidden, N_out_padded, N_out, torch.float16)
+        W_down = _dequant_weight(
+            packed_down, absmax_down, codebook_down, k, K_hidden, N_out_padded, N_out, torch.float16
+        )
 
         X_det = X.detach()
         e_ref = X_det @ W_gate.t() + (X_det @ A_gate.detach().t()) @ B_gate.detach().t() * s_gate
@@ -299,9 +450,24 @@ class TestLoRA_MLP_Kbit:
         args = self._setup()
         (
             X,
-            _, _, _, A_gate, B_gate, _,
-            _, _, _, A_up, B_up, _,
-            _, _, _, A_down, B_down, _,
+            _,
+            _,
+            _,
+            A_gate,
+            B_gate,
+            _,
+            _,
+            _,
+            _,
+            A_up,
+            B_up,
+            _,
+            _,
+            _,
+            _,
+            A_down,
+            B_down,
+            _,
             *_rest,
         ) = args
 
@@ -309,9 +475,12 @@ class TestLoRA_MLP_Kbit:
         out.sum().backward()
 
         for name, param in [
-            ("A_gate", A_gate), ("B_gate", B_gate),
-            ("A_up", A_up), ("B_up", B_up),
-            ("A_down", A_down), ("B_down", B_down),
+            ("A_gate", A_gate),
+            ("B_gate", B_gate),
+            ("A_up", A_up),
+            ("B_up", B_up),
+            ("A_down", A_down),
+            ("B_down", B_down),
             ("X", X),
         ]:
             assert param.grad is not None, f"{name} gradient is None"
@@ -353,21 +522,42 @@ class TestInPlaceOutput:
 
         # Without out=
         ref = LoRA_W_Kbit.apply(
-            X.detach().requires_grad_(True), packed, absmax, codebook,
+            X.detach().requires_grad_(True),
+            packed,
+            absmax,
+            codebook,
             A.detach().clone().requires_grad_(True),
             B.detach().clone().requires_grad_(True),
-            s, k, K, N_padded, N, torch.float16,
+            s,
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
         )
 
         # With out=
         out_buf = torch.empty(M, N, dtype=torch.float16, device="cuda")
         result = LoRA_W_Kbit.apply(
-            X, packed, absmax, codebook, A, B, s, k, K, N_padded, N, torch.float16, out_buf,
+            X,
+            packed,
+            absmax,
+            codebook,
+            A,
+            B,
+            s,
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
+            out_buf,
         )
 
         assert result.data_ptr() == out_buf.data_ptr(), "Result should be the same tensor as out_buf"
-        assert torch.allclose(result.float(), ref.float(), atol=0.1, rtol=0.02), \
+        assert torch.allclose(result.float(), ref.float(), atol=0.1, rtol=0.02), (
             f"out= max abs diff: {(result.float() - ref.float()).abs().max().item()}"
+        )
 
     def test_lora_w_kbit_out_backward(self):
         """Gradients should be identical with and without out=."""
@@ -411,10 +601,23 @@ class TestInPlaceOutput:
         # Without out=
         Q_ref, K_ref, V_ref = LoRA_QKV_Kbit.apply(
             X.detach().requires_grad_(True),
-            *projs[0][:3], projs[0][3].detach().clone().requires_grad_(True), projs[0][4].detach().clone().requires_grad_(True), projs[0][5],
-            *projs[1][:3], projs[1][3].detach().clone().requires_grad_(True), projs[1][4].detach().clone().requires_grad_(True), projs[1][5],
-            *projs[2][:3], projs[2][3].detach().clone().requires_grad_(True), projs[2][4].detach().clone().requires_grad_(True), projs[2][5],
-            k, K, N_padded, N, torch.float16,
+            *projs[0][:3],
+            projs[0][3].detach().clone().requires_grad_(True),
+            projs[0][4].detach().clone().requires_grad_(True),
+            projs[0][5],
+            *projs[1][:3],
+            projs[1][3].detach().clone().requires_grad_(True),
+            projs[1][4].detach().clone().requires_grad_(True),
+            projs[1][5],
+            *projs[2][:3],
+            projs[2][3].detach().clone().requires_grad_(True),
+            projs[2][4].detach().clone().requires_grad_(True),
+            projs[2][5],
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
         )
 
         # With out=
@@ -423,11 +626,26 @@ class TestInPlaceOutput:
         out_v = torch.empty(M, N, dtype=torch.float16, device="cuda")
         Q, Kp, V = LoRA_QKV_Kbit.apply(
             X,
-            *projs[0][:3], projs[0][3], projs[0][4], projs[0][5],
-            *projs[1][:3], projs[1][3], projs[1][4], projs[1][5],
-            *projs[2][:3], projs[2][3], projs[2][4], projs[2][5],
-            k, K, N_padded, N, torch.float16,
-            out_q, out_k, out_v,
+            *projs[0][:3],
+            projs[0][3],
+            projs[0][4],
+            projs[0][5],
+            *projs[1][:3],
+            projs[1][3],
+            projs[1][4],
+            projs[1][5],
+            *projs[2][:3],
+            projs[2][3],
+            projs[2][4],
+            projs[2][5],
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
+            out_q,
+            out_k,
+            out_v,
         )
 
         assert Q.data_ptr() == out_q.data_ptr(), "Q should be the same tensor as out_q"
@@ -435,8 +653,9 @@ class TestInPlaceOutput:
         assert V.data_ptr() == out_v.data_ptr(), "V should be the same tensor as out_v"
 
         for name, result, ref in [("Q", Q, Q_ref), ("K", Kp, K_ref), ("V", V, V_ref)]:
-            assert torch.allclose(result.float(), ref.float(), atol=0.1, rtol=0.02), \
+            assert torch.allclose(result.float(), ref.float(), atol=0.1, rtol=0.02), (
                 f"{name} out= max abs diff: {(result.float() - ref.float()).abs().max().item()}"
+            )
 
     def test_lora_qkv_kbit_out_backward(self):
         """QKV gradients should be identical with and without out=."""
@@ -455,10 +674,29 @@ class TestInPlaceOutput:
         Bs1 = [torch.randn(N, r, dtype=torch.float16, device="cuda", requires_grad=True) for _ in range(3)]
         Q1, K1, V1 = LoRA_QKV_Kbit.apply(
             X1,
-            packed_list[0][0], packed_list[0][1], packed_list[0][2], As1[0], Bs1[0], s,
-            packed_list[1][0], packed_list[1][1], packed_list[1][2], As1[1], Bs1[1], s,
-            packed_list[2][0], packed_list[2][1], packed_list[2][2], As1[2], Bs1[2], s,
-            k, K, N_padded, N, torch.float16,
+            packed_list[0][0],
+            packed_list[0][1],
+            packed_list[0][2],
+            As1[0],
+            Bs1[0],
+            s,
+            packed_list[1][0],
+            packed_list[1][1],
+            packed_list[1][2],
+            As1[1],
+            Bs1[1],
+            s,
+            packed_list[2][0],
+            packed_list[2][1],
+            packed_list[2][2],
+            As1[2],
+            Bs1[2],
+            s,
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
         )
         (Q1.sum() + K1.sum() + V1.sum()).backward()
 
@@ -469,11 +707,32 @@ class TestInPlaceOutput:
         bufs = [torch.empty(M, N, dtype=torch.float16, device="cuda") for _ in range(3)]
         Q2, K2, V2 = LoRA_QKV_Kbit.apply(
             X2,
-            packed_list[0][0], packed_list[0][1], packed_list[0][2], As2[0], Bs2[0], s,
-            packed_list[1][0], packed_list[1][1], packed_list[1][2], As2[1], Bs2[1], s,
-            packed_list[2][0], packed_list[2][1], packed_list[2][2], As2[2], Bs2[2], s,
-            k, K, N_padded, N, torch.float16,
-            bufs[0], bufs[1], bufs[2],
+            packed_list[0][0],
+            packed_list[0][1],
+            packed_list[0][2],
+            As2[0],
+            Bs2[0],
+            s,
+            packed_list[1][0],
+            packed_list[1][1],
+            packed_list[1][2],
+            As2[1],
+            Bs2[1],
+            s,
+            packed_list[2][0],
+            packed_list[2][1],
+            packed_list[2][2],
+            As2[2],
+            Bs2[2],
+            s,
+            k,
+            K,
+            N_padded,
+            N,
+            torch.float16,
+            bufs[0],
+            bufs[1],
+            bufs[2],
         )
         (Q2.sum() + K2.sum() + V2.sum()).backward()
 
@@ -506,10 +765,31 @@ class TestInPlaceOutput:
 
         s = 0.5
         common_args = (
-            packed_gate, absmax_gate, codebook_gate, A_gate, B_gate, s,
-            packed_up, absmax_up, codebook_up, A_up, B_up, s,
-            packed_down, absmax_down, codebook_down, A_down, B_down, s,
-            k, K_in, N_hidden, N_hidden_padded, K_hidden, N_out, N_out_padded,
+            packed_gate,
+            absmax_gate,
+            codebook_gate,
+            A_gate,
+            B_gate,
+            s,
+            packed_up,
+            absmax_up,
+            codebook_up,
+            A_up,
+            B_up,
+            s,
+            packed_down,
+            absmax_down,
+            codebook_down,
+            A_down,
+            B_down,
+            s,
+            k,
+            K_in,
+            N_hidden,
+            N_hidden_padded,
+            K_hidden,
+            N_out,
+            N_out_padded,
             torch.float16,
         )
 
@@ -546,10 +826,31 @@ class TestInPlaceOutput:
 
         out1 = LoRA_MLP_Kbit.apply(
             X1,
-            packed_gate, absmax_gate, codebook_gate, A_gate1, B_gate1, s,
-            packed_up, absmax_up, codebook_up, A_up1, B_up1, s,
-            packed_down, absmax_down, codebook_down, A_down1, B_down1, s,
-            k, K_in, N_hidden, N_hidden_padded, K_hidden, N_out, N_out_padded,
+            packed_gate,
+            absmax_gate,
+            codebook_gate,
+            A_gate1,
+            B_gate1,
+            s,
+            packed_up,
+            absmax_up,
+            codebook_up,
+            A_up1,
+            B_up1,
+            s,
+            packed_down,
+            absmax_down,
+            codebook_down,
+            A_down1,
+            B_down1,
+            s,
+            k,
+            K_in,
+            N_hidden,
+            N_hidden_padded,
+            K_hidden,
+            N_out,
+            N_out_padded,
             torch.float16,
         )
         out1.sum().backward()
@@ -566,10 +867,31 @@ class TestInPlaceOutput:
         out_buf = torch.empty(M, N_out, dtype=torch.float16, device="cuda")
         out2 = LoRA_MLP_Kbit.apply(
             X2,
-            packed_gate, absmax_gate, codebook_gate, A_gate2, B_gate2, s,
-            packed_up, absmax_up, codebook_up, A_up2, B_up2, s,
-            packed_down, absmax_down, codebook_down, A_down2, B_down2, s,
-            k, K_in, N_hidden, N_hidden_padded, K_hidden, N_out, N_out_padded,
+            packed_gate,
+            absmax_gate,
+            codebook_gate,
+            A_gate2,
+            B_gate2,
+            s,
+            packed_up,
+            absmax_up,
+            codebook_up,
+            A_up2,
+            B_up2,
+            s,
+            packed_down,
+            absmax_down,
+            codebook_down,
+            A_down2,
+            B_down2,
+            s,
+            k,
+            K_in,
+            N_hidden,
+            N_hidden_padded,
+            K_hidden,
+            N_out,
+            N_out_padded,
             torch.float16,
             out_buf,
         )
@@ -579,9 +901,12 @@ class TestInPlaceOutput:
         rel_err = (diff / X1.grad.float().abs().clamp(min=1e-3)).max().item()
         assert rel_err < 0.02, f"MLP grad_X relative error with out=: {rel_err}"
         for name, g1, g2 in [
-            ("A_gate", A_gate1.grad, A_gate2.grad), ("B_gate", B_gate1.grad, B_gate2.grad),
-            ("A_up", A_up1.grad, A_up2.grad), ("B_up", B_up1.grad, B_up2.grad),
-            ("A_down", A_down1.grad, A_down2.grad), ("B_down", B_down1.grad, B_down2.grad),
+            ("A_gate", A_gate1.grad, A_gate2.grad),
+            ("B_gate", B_gate1.grad, B_gate2.grad),
+            ("A_up", A_up1.grad, A_up2.grad),
+            ("B_up", B_up1.grad, B_up2.grad),
+            ("A_down", A_down1.grad, A_down2.grad),
+            ("B_down", B_down1.grad, B_down2.grad),
         ]:
             diff = (g1.float() - g2.float()).abs()
             rel_err = (diff / g1.float().abs().clamp(min=1e-3)).max().item()

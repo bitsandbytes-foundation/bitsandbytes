@@ -418,8 +418,6 @@ class MatMulKbit(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, X, packed, absmax, codebook, k, K_dim, N_padded, N, compute_dtype):
-        from bitsandbytes.nn.modules import _GlobalWeightBuffer
-
         n_elements = N_padded * K_dim
         w_deq = F.dequantize_kbit(packed, absmax, codebook, k, n_elements, compute_dtype)
         W = w_deq[:n_elements].reshape(N_padded, K_dim)
@@ -443,10 +441,15 @@ class MatMulKbit(torch.autograd.Function):
         if ctx.needs_input_grad[0]:
             n_elements = ctx.N_padded * ctx.K_dim
             w_deq = F.dequantize_kbit(
-                packed, absmax, codebook, ctx.k, n_elements, ctx.compute_dtype,
+                packed,
+                absmax,
+                codebook,
+                ctx.k,
+                n_elements,
+                ctx.compute_dtype,
             )
             W = w_deq[:n_elements].reshape(ctx.N_padded, ctx.K_dim)
-            grad_X = grad_output @ W[:ctx.N, :]
+            grad_X = grad_output @ W[: ctx.N, :]
 
         # No gradient for packed weights, absmax, codebook, or scalar params
         return grad_X, None, None, None, None, None, None, None, None

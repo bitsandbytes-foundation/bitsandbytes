@@ -31,7 +31,12 @@ def _dequant_reference_forward(layer, x, bias=None):
     w = layer.weight
     n_elements = w.N_padded * w.K_dim
     w_deq = bnb.functional.dequantize_kbit(
-        w.packed, w.absmax, w.codebook, w.k, n_elements, x.dtype,
+        w.packed,
+        w.absmax,
+        w.codebook,
+        w.k,
+        n_elements,
+        x.dtype,
     )
     w_deq = w_deq[:n_elements].reshape(w.N_padded, w.K_dim)
     if w.N_padded != w.N:
@@ -265,9 +270,14 @@ class TestMatMulKbit:
         # Manual gradient: dequant W, compute grad_X = grad_output @ W
         n_elements = w.N_padded * w.K_dim
         w_deq = bnb.functional.dequantize_kbit(
-            w.packed, w.absmax, w.codebook, w.k, n_elements, torch.float16,
+            w.packed,
+            w.absmax,
+            w.codebook,
+            w.k,
+            n_elements,
+            torch.float16,
         )
-        W = w_deq[:n_elements].reshape(w.N_padded, w.K_dim)[:w.N, :]
+        W = w_deq[:n_elements].reshape(w.N_padded, w.K_dim)[: w.N, :]
         # grad_output is all ones (from loss = out.sum())
         grad_manual = torch.ones(2, 128, dtype=torch.float16, device="cuda") @ W
 

@@ -95,7 +95,8 @@ class KbitLastStage(nn.Module):
         # Final norm
         hidden_2d = hidden.reshape(-1, self.km.hidden_size)
         hidden_2d = rmsnorm(
-            hidden_2d, self.km._norm_weights["final_norm_weight"],
+            hidden_2d,
+            self.km._norm_weights["final_norm_weight"],
             eps=self.km.rms_norm_eps,
         )
         return hidden_2d
@@ -112,10 +113,17 @@ def make_loss_fn(kbit_model):
         shift_hidden = hidden_2d[:-1]
         shift_labels = labels.reshape(-1)[1:]
         loss = chunked_cross_entropy(
-            shift_hidden, lm["packed"], lm["absmax"], lm["codebook"],
+            shift_hidden,
+            lm["packed"],
+            lm["absmax"],
+            lm["codebook"],
             shift_labels,
-            lm["k"], lm["K"], lm["N_padded"], lm["N"],
-            km.compute_dtype, km.ce_chunk_size,
+            lm["k"],
+            lm["K"],
+            lm["N_padded"],
+            lm["N"],
+            km.compute_dtype,
+            km.ce_chunk_size,
         )
         return loss
 
@@ -131,8 +139,8 @@ def main():
     device = torch.device(f"cuda:{rank}")
     torch.cuda.set_device(device)
 
-    is_first = (rank == 0)
-    is_last = (rank == world_size - 1)
+    is_first = rank == 0
+    is_last = rank == world_size - 1
 
     if rank == 0:
         print(f"{'=' * 60}")
@@ -147,7 +155,7 @@ def main():
     # Load model on CPU, then stream weights to GPU layer by layer.
     # This avoids the full model ever being on GPU — peak GPU memory is
     # just ~1 fp16 layer at a time plus the growing quantized data.
-    from transformers import AutoModelForCausalLM, AutoConfig
+    from transformers import AutoConfig, AutoModelForCausalLM
 
     config = AutoConfig.from_pretrained(args.model, trust_remote_code=True)
     num_layers = config.num_hidden_layers
@@ -156,10 +164,10 @@ def main():
     layer_end = (rank + 1) * layers_per_stage if rank < world_size - 1 else num_layers
 
     role = "first" if is_first else ("last" if is_last else "mid")
-    print(f"  GPU {rank}: layers {layer_start}-{layer_end-1} ({role} stage)")
+    print(f"  GPU {rank}: layers {layer_start}-{layer_end - 1} ({role} stage)")
 
     if rank == 0:
-        print(f"\nLoading HF model on CPU, streaming to GPU...")
+        print("\nLoading HF model on CPU, streaming to GPU...")
     torch.cuda.reset_peak_memory_stats()
 
     # Load on CPU — no GPU memory used yet
@@ -191,11 +199,13 @@ def main():
 
     mem_after_quant = torch.cuda.memory_allocated() / 1024 / 1024
     peak_during_quant = torch.cuda.max_memory_allocated() / 1024 / 1024
-    print(f"  GPU {rank}: {mem_after_quant:.0f} MB after quantize "
-          f"(peak during load: {peak_during_quant:.0f} MB, "
-          f"{kbit_model._num_loaded_layers} layers, "
-          f"embed={'yes' if is_first else 'no'}, "
-          f"lm_head={'yes' if is_last else 'no'})")
+    print(
+        f"  GPU {rank}: {mem_after_quant:.0f} MB after quantize "
+        f"(peak during load: {peak_during_quant:.0f} MB, "
+        f"{kbit_model._num_loaded_layers} layers, "
+        f"embed={'yes' if is_first else 'no'}, "
+        f"lm_head={'yes' if is_last else 'no'})"
+    )
 
     if rank == 0:
         print(f"  Trainable params (rank 0): {kbit_model.num_trainable_parameters():,}")
@@ -276,7 +286,7 @@ def main():
                 f"  Step {step:3d}/{args.steps} | "
                 f"Loss: {loss_val:.4f} | "
                 f"Time: {dt:.2f}s | "
-                f"Tok/s: {tokens/dt:.0f} | "
+                f"Tok/s: {tokens / dt:.0f} | "
                 f"Peak mem: {peak_mb:.0f} MB"
             )
 

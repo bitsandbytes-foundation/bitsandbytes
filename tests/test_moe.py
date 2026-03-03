@@ -8,17 +8,18 @@ Verifies:
 """
 
 import pytest
-import torch
 from scipy.stats import norm
+import torch
 
 import bitsandbytes  # noqa: F401 (loads CUDA ops)
 from bitsandbytes.functional import quantize_kbit
-from bitsandbytes.moe import moe_router_dispatch, moe_expert_forward
+from bitsandbytes.moe import moe_expert_forward, moe_router_dispatch
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────
+
 
 def create_normal_float_codebook(k: int) -> torch.Tensor:
     n_levels = 1 << k
@@ -70,20 +71,34 @@ def setup_moe_expert_weights(num_experts, hidden_dim, intermediate_dim, k):
     Returns a dict with all the quantized expert weights and reference weights.
     """
     gate_packed, gate_absmax, codebook, gate_W = quantize_expert_weights(
-        num_experts, intermediate_dim, hidden_dim, k,
+        num_experts,
+        intermediate_dim,
+        hidden_dim,
+        k,
     )
     up_packed, up_absmax, _, up_W = quantize_expert_weights(
-        num_experts, intermediate_dim, hidden_dim, k,
+        num_experts,
+        intermediate_dim,
+        hidden_dim,
+        k,
     )
     down_packed, down_absmax, _, down_W = quantize_expert_weights(
-        num_experts, hidden_dim, intermediate_dim, k,
+        num_experts,
+        hidden_dim,
+        intermediate_dim,
+        k,
     )
     return {
-        "gate_packed": gate_packed, "gate_absmax": gate_absmax,
-        "up_packed": up_packed, "up_absmax": up_absmax,
-        "down_packed": down_packed, "down_absmax": down_absmax,
+        "gate_packed": gate_packed,
+        "gate_absmax": gate_absmax,
+        "up_packed": up_packed,
+        "up_absmax": up_absmax,
+        "down_packed": down_packed,
+        "down_absmax": down_absmax,
         "codebook": codebook,
-        "gate_W": gate_W, "up_W": up_W, "down_W": down_W,
+        "gate_W": gate_W,
+        "up_W": up_W,
+        "down_W": down_W,
     }
 
 
@@ -122,8 +137,8 @@ def naive_moe_forward(hidden, router_result, gate_W, up_W, down_W):
 
 # ─── Router Dispatch Tests ────────────────────────────────────────────────
 
-class TestMoERouterDispatch:
 
+class TestMoERouterDispatch:
     def test_basic_routing(self):
         """Basic routing with 8 experts, top-2."""
         N, D = 32, 128
@@ -170,7 +185,8 @@ class TestMoERouterDispatch:
         torch.testing.assert_close(
             weight_sums,
             torch.ones(N, device="cuda"),
-            atol=1e-3, rtol=1e-3,
+            atol=1e-3,
+            rtol=1e-3,
         )
 
     def test_expert_weights_positive(self):
@@ -199,8 +215,7 @@ class TestMoERouterDispatch:
         for e in range(num_experts):
             expected_count = len(result["token_indices_per_expert"][e])
             actual_count = (offsets[e + 1] - offsets[e]).item()
-            assert expected_count == actual_count, \
-                f"Expert {e}: expected {expected_count}, got {actual_count}"
+            assert expected_count == actual_count, f"Expert {e}: expected {expected_count}, got {actual_count}"
 
     def test_gather_scatter_round_trip(self):
         """Gathering and scattering should recover all token contributions."""
@@ -226,8 +241,10 @@ class TestMoERouterDispatch:
                 output[idx] += hidden[idx] * weight
 
         torch.testing.assert_close(
-            output.float(), hidden.float(),
-            atol=1e-3, rtol=1e-3,
+            output.float(),
+            hidden.float(),
+            atol=1e-3,
+            rtol=1e-3,
         )
 
     @pytest.mark.parametrize("top_k", [1, 2, 4, 8])
@@ -276,8 +293,9 @@ class TestMoERouterDispatch:
             slot = (result["expert_indices"][tok] == exp).nonzero(as_tuple=True)[0]
             expected_w = result["expert_weights"][tok, slot].item()
             actual_w = sorted_w[i].item()
-            assert abs(expected_w - actual_w) < 1e-3, \
+            assert abs(expected_w - actual_w) < 1e-3, (
                 f"Weight mismatch at sorted pos {i}: expected {expected_w}, got {actual_w}"
+            )
 
     def test_single_token(self):
         """Edge case: single token."""
@@ -307,8 +325,8 @@ class TestMoERouterDispatch:
 
 # ─── Expert Forward Tests ─────────────────────────────────────────────────
 
-class TestMoEExpertForward:
 
+class TestMoEExpertForward:
     @pytest.fixture
     def moe_setup(self):
         """Set up MoE expert weights and router for testing."""
@@ -341,13 +359,20 @@ class TestMoEExpertForward:
         """Output should have same shape as input."""
         s = moe_setup
         output = moe_expert_forward(
-            s["hidden"], s["router_result"],
-            s["weights"]["gate_packed"], s["weights"]["gate_absmax"],
-            s["weights"]["up_packed"], s["weights"]["up_absmax"],
-            s["weights"]["down_packed"], s["weights"]["down_absmax"],
-            s["weights"]["codebook"], s["k"],
-            s["hidden_dim"], s["intermediate_dim"],
-            s["num_experts"], expert_chunk_size=2,
+            s["hidden"],
+            s["router_result"],
+            s["weights"]["gate_packed"],
+            s["weights"]["gate_absmax"],
+            s["weights"]["up_packed"],
+            s["weights"]["up_absmax"],
+            s["weights"]["down_packed"],
+            s["weights"]["down_absmax"],
+            s["weights"]["codebook"],
+            s["k"],
+            s["hidden_dim"],
+            s["intermediate_dim"],
+            s["num_experts"],
+            expert_chunk_size=2,
         )
         assert output.shape == (s["N_tokens"], s["hidden_dim"])
         assert output.dtype == torch.float16
@@ -365,6 +390,7 @@ class TestMoEExpertForward:
 
         # Get dequantized weights for naive reference
         from bitsandbytes.functional import dequantize_kbit
+
         inter_padded = ((s["intermediate_dim"] + 127) // 128) * 128
         hidden_padded = ((s["hidden_dim"] + 127) // 128) * 128
         n_gate = inter_padded * s["hidden_dim"]
@@ -380,40 +406,53 @@ class TestMoEExpertForward:
         deq_down = []
         for e in range(s["num_experts"]):
             # Gate
-            p = w["gate_packed"][e * packed_per_gate: (e + 1) * packed_per_gate]
-            a = w["gate_absmax"][e * absmax_per_gate: (e + 1) * absmax_per_gate]
+            p = w["gate_packed"][e * packed_per_gate : (e + 1) * packed_per_gate]
+            a = w["gate_absmax"][e * absmax_per_gate : (e + 1) * absmax_per_gate]
             W = dequantize_kbit(p, a, w["codebook"], s["k"], n_gate, torch.float16)
-            deq_gate.append(W[:n_gate].reshape(inter_padded, s["hidden_dim"])[:s["intermediate_dim"]])
+            deq_gate.append(W[:n_gate].reshape(inter_padded, s["hidden_dim"])[: s["intermediate_dim"]])
             # Up
-            p = w["up_packed"][e * packed_per_gate: (e + 1) * packed_per_gate]
-            a = w["up_absmax"][e * absmax_per_gate: (e + 1) * absmax_per_gate]
+            p = w["up_packed"][e * packed_per_gate : (e + 1) * packed_per_gate]
+            a = w["up_absmax"][e * absmax_per_gate : (e + 1) * absmax_per_gate]
             W = dequantize_kbit(p, a, w["codebook"], s["k"], n_gate, torch.float16)
-            deq_up.append(W[:n_gate].reshape(inter_padded, s["hidden_dim"])[:s["intermediate_dim"]])
+            deq_up.append(W[:n_gate].reshape(inter_padded, s["hidden_dim"])[: s["intermediate_dim"]])
             # Down
-            p = w["down_packed"][e * packed_per_down: (e + 1) * packed_per_down]
-            a = w["down_absmax"][e * absmax_per_down: (e + 1) * absmax_per_down]
+            p = w["down_packed"][e * packed_per_down : (e + 1) * packed_per_down]
+            a = w["down_absmax"][e * absmax_per_down : (e + 1) * absmax_per_down]
             W = dequantize_kbit(p, a, w["codebook"], s["k"], n_down, torch.float16)
-            deq_down.append(W[:n_down].reshape(hidden_padded, s["intermediate_dim"])[:s["hidden_dim"]])
+            deq_down.append(W[:n_down].reshape(hidden_padded, s["intermediate_dim"])[: s["hidden_dim"]])
 
         # Naive forward with dequantized weights
         naive_out = naive_moe_forward(
-            s["hidden"], s["router_result"], deq_gate, deq_up, deq_down,
+            s["hidden"],
+            s["router_result"],
+            deq_gate,
+            deq_up,
+            deq_down,
         )
 
         # Chunked forward
         chunked_out = moe_expert_forward(
-            s["hidden"], s["router_result"],
-            w["gate_packed"], w["gate_absmax"],
-            w["up_packed"], w["up_absmax"],
-            w["down_packed"], w["down_absmax"],
-            w["codebook"], s["k"],
-            s["hidden_dim"], s["intermediate_dim"],
-            s["num_experts"], expert_chunk_size=2,
+            s["hidden"],
+            s["router_result"],
+            w["gate_packed"],
+            w["gate_absmax"],
+            w["up_packed"],
+            w["up_absmax"],
+            w["down_packed"],
+            w["down_absmax"],
+            w["codebook"],
+            s["k"],
+            s["hidden_dim"],
+            s["intermediate_dim"],
+            s["num_experts"],
+            expert_chunk_size=2,
         )
 
         torch.testing.assert_close(
-            chunked_out.float(), naive_out.float(),
-            atol=1e-2, rtol=1e-2,
+            chunked_out.float(),
+            naive_out.float(),
+            atol=1e-2,
+            rtol=1e-2,
         )
 
     def test_chunk_size_invariance(self, moe_setup):
@@ -424,20 +463,29 @@ class TestMoEExpertForward:
         results = []
         for chunk_size in [1, 2, 4, s["num_experts"]]:
             out = moe_expert_forward(
-                s["hidden"], s["router_result"],
-                w["gate_packed"], w["gate_absmax"],
-                w["up_packed"], w["up_absmax"],
-                w["down_packed"], w["down_absmax"],
-                w["codebook"], s["k"],
-                s["hidden_dim"], s["intermediate_dim"],
-                s["num_experts"], expert_chunk_size=chunk_size,
+                s["hidden"],
+                s["router_result"],
+                w["gate_packed"],
+                w["gate_absmax"],
+                w["up_packed"],
+                w["up_absmax"],
+                w["down_packed"],
+                w["down_absmax"],
+                w["codebook"],
+                s["k"],
+                s["hidden_dim"],
+                s["intermediate_dim"],
+                s["num_experts"],
+                expert_chunk_size=chunk_size,
             )
             results.append(out)
 
         for i in range(1, len(results)):
             torch.testing.assert_close(
-                results[0].float(), results[i].float(),
-                atol=1e-4, rtol=1e-4,
+                results[0].float(),
+                results[i].float(),
+                atol=1e-4,
+                rtol=1e-4,
                 msg=f"chunk_size={[1, 2, 4, s['num_experts']][i]} differs from chunk_size=1",
             )
 
@@ -450,17 +498,25 @@ class TestMoEExpertForward:
         router_result = moe_router_dispatch(
             hidden.detach(),
             torch.randn(s["num_experts"], s["hidden_dim"], device="cuda", dtype=torch.float16),
-            s["num_experts"], s["top_k"],
+            s["num_experts"],
+            s["top_k"],
         )
 
         output = moe_expert_forward(
-            hidden, router_result,
-            w["gate_packed"], w["gate_absmax"],
-            w["up_packed"], w["up_absmax"],
-            w["down_packed"], w["down_absmax"],
-            w["codebook"], s["k"],
-            s["hidden_dim"], s["intermediate_dim"],
-            s["num_experts"], expert_chunk_size=2,
+            hidden,
+            router_result,
+            w["gate_packed"],
+            w["gate_absmax"],
+            w["up_packed"],
+            w["up_absmax"],
+            w["down_packed"],
+            w["down_absmax"],
+            w["codebook"],
+            s["k"],
+            s["hidden_dim"],
+            s["intermediate_dim"],
+            s["num_experts"],
+            expert_chunk_size=2,
         )
 
         loss = output.sum()
@@ -493,13 +549,20 @@ class TestMoEExpertForward:
 
         def func(h):
             return moe_expert_forward(
-                h, router_result,
-                w["gate_packed"], w["gate_absmax"],
-                w["up_packed"], w["up_absmax"],
-                w["down_packed"], w["down_absmax"],
-                w["codebook"], k,
-                hidden_dim, intermediate_dim,
-                num_experts, expert_chunk_size=1,
+                h,
+                router_result,
+                w["gate_packed"],
+                w["gate_absmax"],
+                w["up_packed"],
+                w["up_absmax"],
+                w["down_packed"],
+                w["down_absmax"],
+                w["codebook"],
+                k,
+                hidden_dim,
+                intermediate_dim,
+                num_experts,
+                expert_chunk_size=1,
             ).sum()
 
         # Compute analytical gradient
@@ -529,8 +592,7 @@ class TestMoEExpertForward:
                 if abs(n) > 1e-5:  # Only check where numerical grad is meaningful
                     rel_err = abs(a - n) / (abs(n) + 1e-8)
                     assert rel_err < 0.1, (
-                        f"Gradient mismatch at [{i},{j}]: analytical={a:.6f}, "
-                        f"numerical={n:.6f}, rel_err={rel_err:.4f}"
+                        f"Gradient mismatch at [{i},{j}]: analytical={a:.6f}, numerical={n:.6f}, rel_err={rel_err:.4f}"
                     )
 
     def test_gradient_accumulation(self, moe_setup):
@@ -542,27 +604,42 @@ class TestMoEExpertForward:
         router_result = moe_router_dispatch(
             hidden.detach(),
             torch.randn(s["num_experts"], s["hidden_dim"], device="cuda", dtype=torch.float16),
-            s["num_experts"], s["top_k"],
+            s["num_experts"],
+            s["top_k"],
         )
 
         # Two forward passes with the same input
         out1 = moe_expert_forward(
-            hidden, router_result,
-            w["gate_packed"], w["gate_absmax"],
-            w["up_packed"], w["up_absmax"],
-            w["down_packed"], w["down_absmax"],
-            w["codebook"], s["k"],
-            s["hidden_dim"], s["intermediate_dim"],
-            s["num_experts"], expert_chunk_size=2,
+            hidden,
+            router_result,
+            w["gate_packed"],
+            w["gate_absmax"],
+            w["up_packed"],
+            w["up_absmax"],
+            w["down_packed"],
+            w["down_absmax"],
+            w["codebook"],
+            s["k"],
+            s["hidden_dim"],
+            s["intermediate_dim"],
+            s["num_experts"],
+            expert_chunk_size=2,
         )
         out2 = moe_expert_forward(
-            hidden, router_result,
-            w["gate_packed"], w["gate_absmax"],
-            w["up_packed"], w["up_absmax"],
-            w["down_packed"], w["down_absmax"],
-            w["codebook"], s["k"],
-            s["hidden_dim"], s["intermediate_dim"],
-            s["num_experts"], expert_chunk_size=2,
+            hidden,
+            router_result,
+            w["gate_packed"],
+            w["gate_absmax"],
+            w["up_packed"],
+            w["up_absmax"],
+            w["down_packed"],
+            w["down_absmax"],
+            w["codebook"],
+            s["k"],
+            s["hidden_dim"],
+            s["intermediate_dim"],
+            s["num_experts"],
+            expert_chunk_size=2,
         )
 
         loss = out1.sum() + out2.sum()
@@ -572,19 +649,28 @@ class TestMoEExpertForward:
         # Gradient should be 2x a single pass
         hidden2 = s["hidden"].clone().requires_grad_(True)
         out_single = moe_expert_forward(
-            hidden2, router_result,
-            w["gate_packed"], w["gate_absmax"],
-            w["up_packed"], w["up_absmax"],
-            w["down_packed"], w["down_absmax"],
-            w["codebook"], s["k"],
-            s["hidden_dim"], s["intermediate_dim"],
-            s["num_experts"], expert_chunk_size=2,
+            hidden2,
+            router_result,
+            w["gate_packed"],
+            w["gate_absmax"],
+            w["up_packed"],
+            w["up_absmax"],
+            w["down_packed"],
+            w["down_absmax"],
+            w["codebook"],
+            s["k"],
+            s["hidden_dim"],
+            s["intermediate_dim"],
+            s["num_experts"],
+            expert_chunk_size=2,
         )
         out_single.sum().backward()
 
         torch.testing.assert_close(
-            hidden.grad.float(), (2.0 * hidden2.grad).float(),
-            atol=1e-3, rtol=1e-3,
+            hidden.grad.float(),
+            (2.0 * hidden2.grad).float(),
+            atol=1e-3,
+            rtol=1e-3,
         )
 
     @pytest.mark.parametrize("k", [2, 3, 4])
@@ -603,13 +689,20 @@ class TestMoEExpertForward:
         router_result = moe_router_dispatch(hidden, router_weight, num_experts, top_k)
 
         output = moe_expert_forward(
-            hidden, router_result,
-            weights["gate_packed"], weights["gate_absmax"],
-            weights["up_packed"], weights["up_absmax"],
-            weights["down_packed"], weights["down_absmax"],
-            weights["codebook"], k,
-            hidden_dim, intermediate_dim,
-            num_experts, expert_chunk_size=1,
+            hidden,
+            router_result,
+            weights["gate_packed"],
+            weights["gate_absmax"],
+            weights["up_packed"],
+            weights["up_absmax"],
+            weights["down_packed"],
+            weights["down_absmax"],
+            weights["codebook"],
+            k,
+            hidden_dim,
+            intermediate_dim,
+            num_experts,
+            expert_chunk_size=1,
         )
 
         assert output.shape == (N_tokens, hidden_dim)
@@ -631,13 +724,20 @@ class TestMoEExpertForward:
         router_result = moe_router_dispatch(hidden, router_weight, num_experts, top_k)
 
         output = moe_expert_forward(
-            hidden, router_result,
-            weights["gate_packed"], weights["gate_absmax"],
-            weights["up_packed"], weights["up_absmax"],
-            weights["down_packed"], weights["down_absmax"],
-            weights["codebook"], k,
-            hidden_dim, intermediate_dim,
-            num_experts, expert_chunk_size=4,
+            hidden,
+            router_result,
+            weights["gate_packed"],
+            weights["gate_absmax"],
+            weights["up_packed"],
+            weights["up_absmax"],
+            weights["down_packed"],
+            weights["down_absmax"],
+            weights["codebook"],
+            k,
+            hidden_dim,
+            intermediate_dim,
+            num_experts,
+            expert_chunk_size=4,
         )
 
         assert output.shape == (N_tokens, hidden_dim)
@@ -665,21 +765,30 @@ class TestMoEExpertForward:
         for chunk_size in [1, 2, 4]:
             hidden = base_hidden.clone().requires_grad_(True)
             out = moe_expert_forward(
-                hidden, router_result,
-                w["gate_packed"], w["gate_absmax"],
-                w["up_packed"], w["up_absmax"],
-                w["down_packed"], w["down_absmax"],
-                w["codebook"], k,
-                hidden_dim, intermediate_dim,
-                num_experts, expert_chunk_size=chunk_size,
+                hidden,
+                router_result,
+                w["gate_packed"],
+                w["gate_absmax"],
+                w["up_packed"],
+                w["up_absmax"],
+                w["down_packed"],
+                w["down_absmax"],
+                w["codebook"],
+                k,
+                hidden_dim,
+                intermediate_dim,
+                num_experts,
+                expert_chunk_size=chunk_size,
             )
             out.sum().backward()
             grads.append(hidden.grad.clone())
 
         for i in range(1, len(grads)):
             torch.testing.assert_close(
-                grads[0].float(), grads[i].float(),
-                atol=1e-4, rtol=1e-4,
+                grads[0].float(),
+                grads[i].float(),
+                atol=1e-4,
+                rtol=1e-4,
             )
 
 

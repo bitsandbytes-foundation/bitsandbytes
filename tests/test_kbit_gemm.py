@@ -11,11 +11,10 @@ Staged implementation following cuda-spec.md:
 """
 
 import pytest
-import torch
 from scipy.stats import norm
+import torch
 
 import bitsandbytes  # noqa: F401 (registers torch.library ops)
-
 
 # ---------------------------------------------------------------------------
 # Codebook generation (same as test_kbit_quantization.py)
@@ -221,7 +220,7 @@ def repack_kbit_ref(packed_flat, absmax_flat, K_dim, N, k, tile_k=TILE_K, tile_n
     # block_id for element (n, kk) = (n * K_dim + kk) // 32
     for kt in range(k_tiles):
         for nt in range(n_tiles):
-            tile_base = (kt * n_tiles + nt)
+            tile_base = kt * n_tiles + nt
             tile_word_offset = tile_base * words_per_tile
             tile_abs_offset = tile_base * absmax_per_tile
 
@@ -306,8 +305,7 @@ def unrepack_kbit_ref(packed_tiled, absmax_tiled, K_dim, N, k, tile_k=TILE_K, ti
 # ---------------------------------------------------------------------------
 
 
-def kbit_gemm_ref(A, packed_tiled, absmax_tiled, codebook, K_dim, N, k,
-                  tile_k=TILE_K, tile_n=TILE_N):
+def kbit_gemm_ref(A, packed_tiled, absmax_tiled, codebook, K_dim, N, k, tile_k=TILE_K, tile_n=TILE_N):
     """Reference fused kbit dequant + GEMM (Python, via dequant then matmul).
 
     Computes C[M, N] = A[M, K_dim] * W^T where W is the kbit-quantized weight.
@@ -331,9 +329,7 @@ def kbit_gemm_ref(A, packed_tiled, absmax_tiled, codebook, K_dim, N, k,
         C: fp32 tensor of shape [M, N].
     """
     # Un-repack to flat layout
-    packed_flat, absmax_e4m4 = unrepack_kbit_ref(
-        packed_tiled, absmax_tiled, K_dim, N, k, tile_k, tile_n
-    )
+    packed_flat, absmax_e4m4 = unrepack_kbit_ref(packed_tiled, absmax_tiled, K_dim, N, k, tile_k, tile_n)
 
     # Decode E4M4 absmax
     absmax = decode_absmax_e4m4(absmax_e4m4)
@@ -395,7 +391,7 @@ class TestRepackRef:
     def test_repack_round_trip(self, k):
         """Repack then unrepack must recover the original flat data exactly."""
         K_dim = 128  # Must be multiple of TILE_K=64
-        N = 128      # Must be multiple of TILE_N=128
+        N = 128  # Must be multiple of TILE_N=128
 
         # Create a random weight matrix [N, K_dim]
         W = torch.randn(N, K_dim)
@@ -407,20 +403,14 @@ class TestRepackRef:
         absmax_e4m4 = encode_absmax_e4m4(absmax)
 
         # Repack to tiled layout
-        packed_tiled, absmax_tiled = repack_kbit_ref(
-            packed_flat, absmax, K_dim, N, k
-        )
+        packed_tiled, absmax_tiled = repack_kbit_ref(packed_flat, absmax, K_dim, N, k)
 
         # Unrepack back to flat
-        recovered_packed, recovered_absmax = unrepack_kbit_ref(
-            packed_tiled, absmax_tiled, K_dim, N, k
-        )
+        recovered_packed, recovered_absmax = unrepack_kbit_ref(packed_tiled, absmax_tiled, K_dim, N, k)
 
         # Bit-exact match
-        assert torch.equal(packed_flat, recovered_packed), \
-            f"Packed data round-trip failed for K={k}"
-        assert torch.equal(absmax_e4m4, recovered_absmax), \
-            f"Absmax round-trip failed for K={k}"
+        assert torch.equal(packed_flat, recovered_packed), f"Packed data round-trip failed for K={k}"
+        assert torch.equal(absmax_e4m4, recovered_absmax), f"Absmax round-trip failed for K={k}"
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_repack_tile_contiguity(self, k):
@@ -433,9 +423,7 @@ class TestRepackRef:
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
 
-        packed_tiled, absmax_tiled = repack_kbit_ref(
-            packed_flat, absmax, K_dim, N, k
-        )
+        packed_tiled, absmax_tiled = repack_kbit_ref(packed_flat, absmax, K_dim, N, k)
 
         k_tiles = K_dim // TILE_K
         n_tiles = N // TILE_N
@@ -444,8 +432,7 @@ class TestRepackRef:
 
         # Verify total size matches expected tile count
         expected_total = k_tiles * n_tiles * words_per_tile
-        assert packed_tiled.numel() == expected_total, \
-            f"Expected {expected_total} words, got {packed_tiled.numel()}"
+        assert packed_tiled.numel() == expected_total, f"Expected {expected_total} words, got {packed_tiled.numel()}"
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     @pytest.mark.parametrize("K_dim,N", [(128, 128), (256, 256), (256, 128), (128, 256)])
@@ -456,14 +443,10 @@ class TestRepackRef:
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
 
-        packed_tiled, absmax_tiled = repack_kbit_ref(
-            packed_flat, absmax, K_dim, N, k
-        )
+        packed_tiled, absmax_tiled = repack_kbit_ref(packed_flat, absmax, K_dim, N, k)
 
         # Round-trip
-        recovered_packed, recovered_absmax = unrepack_kbit_ref(
-            packed_tiled, absmax_tiled, K_dim, N, k
-        )
+        recovered_packed, recovered_absmax = unrepack_kbit_ref(packed_tiled, absmax_tiled, K_dim, N, k)
         assert torch.equal(packed_flat, recovered_packed)
 
 
@@ -486,9 +469,7 @@ class TestFusedGemmRef:
         # Fused reference: quantize -> pack -> repack -> fused GEMM
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
-        packed_tiled, absmax_tiled = repack_kbit_ref(
-            packed_flat, absmax, K_dim, N, k
-        )
+        packed_tiled, absmax_tiled = repack_kbit_ref(packed_flat, absmax, K_dim, N, k)
         C_fused = kbit_gemm_ref(A, packed_tiled, absmax_tiled, codebook, K_dim, N, k)
 
         # The fused path uses E4M4 absmax (lossy ~6.25% relative error per block)
@@ -497,8 +478,9 @@ class TestFusedGemmRef:
         # - rtol=0.1 accounts for the E4M4 error propagation
         # - atol scales with output magnitude to handle near-zero values
         atol = 0.05 * C_direct.abs().mean().item()
-        assert torch.allclose(C_fused, C_direct, rtol=0.1, atol=atol), \
+        assert torch.allclose(C_fused, C_direct, rtol=0.1, atol=atol), (
             f"K={k}: fused GEMM does not match direct reference"
+        )
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_gemm_m1(self, k):
@@ -514,14 +496,13 @@ class TestFusedGemmRef:
 
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
-        packed_tiled, absmax_tiled = repack_kbit_ref(
-            packed_flat, absmax, K_dim, N, k
-        )
+        packed_tiled, absmax_tiled = repack_kbit_ref(packed_flat, absmax, K_dim, N, k)
         C_fused = kbit_gemm_ref(A, packed_tiled, absmax_tiled, codebook, K_dim, N, k)
 
         atol = 0.05 * C_direct.abs().mean().item()
-        assert torch.allclose(C_fused, C_direct, rtol=0.1, atol=atol), \
+        assert torch.allclose(C_fused, C_direct, rtol=0.1, atol=atol), (
             f"K={k}: M=1 fused GEMM does not match direct reference"
+        )
 
     @pytest.mark.parametrize("k", [4])
     @pytest.mark.parametrize("M", [1, 4, 16, 32])
@@ -538,16 +519,15 @@ class TestFusedGemmRef:
 
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
-        packed_tiled, absmax_tiled = repack_kbit_ref(
-            packed_flat, absmax, K_dim, N, k
-        )
+        packed_tiled, absmax_tiled = repack_kbit_ref(packed_flat, absmax, K_dim, N, k)
         C_fused = kbit_gemm_ref(A, packed_tiled, absmax_tiled, codebook, K_dim, N, k)
 
         # E4M4 error accumulates over K_dim reduction. Scale atol with sqrt(K_dim)
         # to account for error accumulation in larger reductions.
         atol = 0.1 * C_direct.abs().mean().item()
-        assert torch.allclose(C_fused, C_direct, rtol=0.1, atol=atol), \
+        assert torch.allclose(C_fused, C_direct, rtol=0.1, atol=atol), (
             f"M={M}: fused GEMM does not match direct reference"
+        )
 
     def test_gemm_fp16_output_quality(self):
         """SQNR of fused GEMM output vs fp16 reference matmul."""
@@ -560,20 +540,18 @@ class TestFusedGemmRef:
         codebook = create_normal_float_codebook(k)
 
         # fp16 reference (no quantization)
-        C_fp16 = (A @ W.T)
+        C_fp16 = A @ W.T
 
         # Quantized fused GEMM
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
-        packed_tiled, absmax_tiled = repack_kbit_ref(
-            packed_flat, absmax, K_dim, N, k
-        )
+        packed_tiled, absmax_tiled = repack_kbit_ref(packed_flat, absmax, K_dim, N, k)
         C_fused = kbit_gemm_ref(A, packed_tiled, absmax_tiled, codebook, K_dim, N, k)
 
         # SQNR: signal power / noise power
         noise = C_fused - C_fp16
-        signal_power = (C_fp16 ** 2).mean()
-        noise_power = (noise ** 2).mean()
+        signal_power = (C_fp16**2).mean()
+        noise_power = (noise**2).mean()
         sqnr_db = 10 * torch.log10(signal_power / noise_power).item()
 
         # For K=4, expect SQNR > 15 dB (quantization noise dominates)
@@ -595,14 +573,13 @@ class TestFusedGemmRef:
 
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
-        packed_tiled, absmax_tiled = repack_kbit_ref(
-            packed_flat, absmax, K_dim, N, k
-        )
+        packed_tiled, absmax_tiled = repack_kbit_ref(packed_flat, absmax, K_dim, N, k)
         C_fused = kbit_gemm_ref(A, packed_tiled, absmax_tiled, codebook, K_dim, N, k)
 
         atol = 0.05 * C_direct.abs().mean().item()
-        assert torch.allclose(C_fused, C_direct, rtol=0.1, atol=atol), \
+        assert torch.allclose(C_fused, C_direct, rtol=0.1, atol=atol), (
             "Non-standard codebook: fused GEMM does not match direct reference"
+        )
 
 
 # ===========================================================================
@@ -634,17 +611,15 @@ class TestRepackCUDA:
         # CUDA repack
         packed_flat_gpu = packed_flat.cuda()
         absmax_gpu = absmax.cuda()
-        packed_cuda, absmax_cuda = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat_gpu, absmax_gpu, K_dim, N, k
-        )
+        packed_cuda, absmax_cuda = torch.ops.bitsandbytes.repack_kbit(packed_flat_gpu, absmax_gpu, K_dim, N, k)
 
         # Bit-exact match for packed data
-        assert torch.equal(packed_ref, packed_cuda.cpu()), \
+        assert torch.equal(packed_ref, packed_cuda.cpu()), (
             f"K={k}: CUDA repack packed data does not match Python reference"
+        )
 
         # Bit-exact match for absmax (E4M4-encoded)
-        assert torch.equal(absmax_ref, absmax_cuda.cpu()), \
-            f"K={k}: CUDA repack absmax does not match Python reference"
+        assert torch.equal(absmax_ref, absmax_cuda.cpu()), f"K={k}: CUDA repack absmax does not match Python reference"
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     @pytest.mark.parametrize("K_dim,N", [(128, 128), (256, 256), (256, 128), (128, 256)])
@@ -661,14 +636,10 @@ class TestRepackCUDA:
         packed_ref, absmax_ref = repack_kbit_ref(packed_flat, absmax, K_dim, N, k)
 
         # CUDA
-        packed_cuda, absmax_cuda = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat.cuda(), absmax.cuda(), K_dim, N, k
-        )
+        packed_cuda, absmax_cuda = torch.ops.bitsandbytes.repack_kbit(packed_flat.cuda(), absmax.cuda(), K_dim, N, k)
 
-        assert torch.equal(packed_ref, packed_cuda.cpu()), \
-            f"K={k}, {K_dim}x{N}: packed data mismatch"
-        assert torch.equal(absmax_ref, absmax_cuda.cpu()), \
-            f"K={k}, {K_dim}x{N}: absmax mismatch"
+        assert torch.equal(packed_ref, packed_cuda.cpu()), f"K={k}, {K_dim}x{N}: packed data mismatch"
+        assert torch.equal(absmax_ref, absmax_cuda.cpu()), f"K={k}, {K_dim}x{N}: absmax mismatch"
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_repack_round_trip_with_gemm(self, k):
@@ -687,17 +658,14 @@ class TestRepackCUDA:
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
 
-        packed_cuda, absmax_cuda = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat.cuda(), absmax.cuda(), K_dim, N, k
-        )
+        packed_cuda, absmax_cuda = torch.ops.bitsandbytes.repack_kbit(packed_flat.cuda(), absmax.cuda(), K_dim, N, k)
 
-        C_fused = kbit_gemm_ref(
-            A, packed_cuda.cpu(), absmax_cuda.cpu(), codebook, K_dim, N, k
-        )
+        C_fused = kbit_gemm_ref(A, packed_cuda.cpu(), absmax_cuda.cpu(), codebook, K_dim, N, k)
 
         atol = 0.05 * C_direct.abs().mean().item()
-        assert torch.allclose(C_fused, C_direct, rtol=0.1, atol=atol), \
+        assert torch.allclose(C_fused, C_direct, rtol=0.1, atol=atol), (
             f"K={k}: GEMM with CUDA-repacked data does not match direct reference"
+        )
 
     def test_repack_output_sizes(self):
         """Verify CUDA repack output tensor sizes match expected tile structure."""
@@ -710,9 +678,7 @@ class TestRepackCUDA:
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
 
-        packed_cuda, absmax_cuda = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat.cuda(), absmax.cuda(), K_dim, N, k
-        )
+        packed_cuda, absmax_cuda = torch.ops.bitsandbytes.repack_kbit(packed_flat.cuda(), absmax.cuda(), K_dim, N, k)
 
         k_tiles = K_dim // TILE_K
         n_tiles = N // TILE_N
@@ -720,10 +686,12 @@ class TestRepackCUDA:
         expected_words = k_tiles * n_tiles * TILE_N * k_blocks_per_tile * k
         expected_absmax = k_tiles * n_tiles * TILE_N * k_blocks_per_tile
 
-        assert packed_cuda.numel() == expected_words, \
+        assert packed_cuda.numel() == expected_words, (
             f"Expected {expected_words} packed words, got {packed_cuda.numel()}"
-        assert absmax_cuda.numel() == expected_absmax, \
+        )
+        assert absmax_cuda.numel() == expected_absmax, (
             f"Expected {expected_absmax} absmax values, got {absmax_cuda.numel()}"
+        )
 
 
 # ===========================================================================
@@ -752,25 +720,22 @@ class TestGemmCUDA:
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
 
-        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat.cuda(), absmax.cuda(), K_dim, N, k
-        )
+        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat.cuda(), absmax.cuda(), K_dim, N, k)
 
         A_gpu = A.half().cuda()
         codebook_gpu = codebook.cuda()
-        C_cuda = torch.ops.bitsandbytes.kbit_gemm(
-            A_gpu, packed_tiled, absmax_tiled, codebook_gpu, K_dim, N, k
-        )
+        C_cuda = torch.ops.bitsandbytes.kbit_gemm(A_gpu, packed_tiled, absmax_tiled, codebook_gpu, K_dim, N, k)
 
         C_cuda_cpu = C_cuda.float().cpu()
 
         # Tolerance: E4M4 absmax introduces ~6.25% relative error per block,
         # which accumulates over K_dim/32 blocks. fp16 MMA also adds rounding.
         atol = 0.1 * C_direct.abs().mean().item()
-        assert torch.allclose(C_cuda_cpu, C_direct, rtol=0.15, atol=atol), \
-            f"K={k}: CUDA GEMM does not match reference.\n" \
-            f"Max diff: {(C_cuda_cpu - C_direct).abs().max().item():.6f}, " \
+        assert torch.allclose(C_cuda_cpu, C_direct, rtol=0.15, atol=atol), (
+            f"K={k}: CUDA GEMM does not match reference.\n"
+            f"Max diff: {(C_cuda_cpu - C_direct).abs().max().item():.6f}, "
             f"Mean abs: {C_direct.abs().mean().item():.6f}"
+        )
 
     @pytest.mark.parametrize("k", [4])
     @pytest.mark.parametrize("M", [1, 4, 8, 16])
@@ -787,17 +752,18 @@ class TestGemmCUDA:
 
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
-        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat.cuda(), absmax.cuda(), K_dim, N, k
+        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat.cuda(), absmax.cuda(), K_dim, N, k)
+
+        C_cuda = (
+            torch.ops.bitsandbytes.kbit_gemm(A.half().cuda(), packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k)
+            .float()
+            .cpu()
         )
 
-        C_cuda = torch.ops.bitsandbytes.kbit_gemm(
-            A.half().cuda(), packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k
-        ).float().cpu()
-
         atol = 0.1 * C_direct.abs().mean().item()
-        assert torch.allclose(C_cuda, C_direct, rtol=0.15, atol=atol), \
+        assert torch.allclose(C_cuda, C_direct, rtol=0.15, atol=atol), (
             f"M={M}: CUDA GEMM mismatch. Max diff: {(C_cuda - C_direct).abs().max().item():.6f}"
+        )
 
     @pytest.mark.parametrize("k", [4])
     @pytest.mark.parametrize("K_dim,N", [(128, 128), (256, 256), (256, 128), (128, 256)])
@@ -814,17 +780,18 @@ class TestGemmCUDA:
 
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
-        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat.cuda(), absmax.cuda(), K_dim, N, k
+        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat.cuda(), absmax.cuda(), K_dim, N, k)
+
+        C_cuda = (
+            torch.ops.bitsandbytes.kbit_gemm(A.half().cuda(), packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k)
+            .float()
+            .cpu()
         )
 
-        C_cuda = torch.ops.bitsandbytes.kbit_gemm(
-            A.half().cuda(), packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k
-        ).float().cpu()
-
         atol = 0.15 * C_direct.abs().mean().item()
-        assert torch.allclose(C_cuda, C_direct, rtol=0.15, atol=atol), \
+        assert torch.allclose(C_cuda, C_direct, rtol=0.15, atol=atol), (
             f"{K_dim}x{N}: CUDA GEMM mismatch. Max diff: {(C_cuda - C_direct).abs().max().item():.6f}"
+        )
 
     def test_gemm_sqnr(self):
         """SQNR of CUDA GEMM output vs unquantized fp16 matmul."""
@@ -837,21 +804,21 @@ class TestGemmCUDA:
         codebook = create_normal_float_codebook(k)
 
         # Unquantized reference
-        C_ref = (A @ W.T)
+        C_ref = A @ W.T
 
         # CUDA quantized path
         indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
         packed_flat = pack_kbit_ref(indices, k)
-        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat.cuda(), absmax.cuda(), K_dim, N, k
+        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat.cuda(), absmax.cuda(), K_dim, N, k)
+        C_cuda = (
+            torch.ops.bitsandbytes.kbit_gemm(A.half().cuda(), packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k)
+            .float()
+            .cpu()
         )
-        C_cuda = torch.ops.bitsandbytes.kbit_gemm(
-            A.half().cuda(), packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k
-        ).float().cpu()
 
         noise = C_cuda - C_ref
-        signal_power = (C_ref ** 2).mean()
-        noise_power = (noise ** 2).mean()
+        signal_power = (C_ref**2).mean()
+        noise_power = (noise**2).mean()
         sqnr_db = 10 * torch.log10(signal_power / noise_power).item()
 
         # K=4 GEMM should have SQNR > 10 dB (same threshold as Python ref)
@@ -867,9 +834,7 @@ def _gemm_helper(A, W, codebook, k, K_dim, N, op_name="kbit_gemm"):
     """Quantize W, repack, and run the specified GEMM op. Returns fp16 CUDA tensor."""
     indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
     packed_flat = pack_kbit_ref(indices, k)
-    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-        packed_flat.cuda(), absmax.cuda(), K_dim, N, k
-    )
+    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat.cuda(), absmax.cuda(), K_dim, N, k)
     op = getattr(torch.ops.bitsandbytes, op_name)
     return op(A.half().cuda(), packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k)
 
@@ -891,9 +856,10 @@ class TestGemmPipelinedCUDA:
         C_minimal = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm")
         C_pipelined = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm_pipelined")
 
-        assert torch.equal(C_minimal, C_pipelined), \
-            f"K={k}: Pipelined GEMM does not match minimal GEMM bit-for-bit.\n" \
+        assert torch.equal(C_minimal, C_pipelined), (
+            f"K={k}: Pipelined GEMM does not match minimal GEMM bit-for-bit.\n"
             f"Max diff: {(C_minimal.float() - C_pipelined.float()).abs().max().item():.6f}"
+        )
 
     @pytest.mark.parametrize("k", [4])
     @pytest.mark.parametrize("M", [1, 4, 8, 16])
@@ -909,14 +875,21 @@ class TestGemmPipelinedCUDA:
         C_minimal = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm")
         C_pipelined = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm_pipelined")
 
-        assert torch.equal(C_minimal, C_pipelined), \
-            f"M={M}: Pipelined does not match minimal.\n" \
+        assert torch.equal(C_minimal, C_pipelined), (
+            f"M={M}: Pipelined does not match minimal.\n"
             f"Max diff: {(C_minimal.float() - C_pipelined.float()).abs().max().item():.6f}"
+        )
 
     @pytest.mark.parametrize("k", [4])
-    @pytest.mark.parametrize("M,K_dim,N", [
-        (4, 128, 128), (4, 128, 256), (4, 256, 128), (4, 256, 256),
-    ])
+    @pytest.mark.parametrize(
+        "M,K_dim,N",
+        [
+            (4, 128, 128),
+            (4, 128, 256),
+            (4, 256, 128),
+            (4, 256, 256),
+        ],
+    )
     def test_pipelined_various_sizes(self, k, M, K_dim, N):
         """Pipelined GEMM works for various matrix sizes."""
         torch.manual_seed(42)
@@ -928,9 +901,10 @@ class TestGemmPipelinedCUDA:
         C_minimal = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm")
         C_pipelined = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm_pipelined")
 
-        assert torch.equal(C_minimal, C_pipelined), \
-            f"({M},{K_dim},{N}): Pipelined does not match minimal.\n" \
+        assert torch.equal(C_minimal, C_pipelined), (
+            f"({M},{K_dim},{N}): Pipelined does not match minimal.\n"
             f"Max diff: {(C_minimal.float() - C_pipelined.float()).abs().max().item():.6f}"
+        )
 
     def test_pipelined_matches_reference(self):
         """Pipelined GEMM matches Python reference (same tolerance as Stage 3)."""
@@ -946,18 +920,17 @@ class TestGemmPipelinedCUDA:
         C_pipelined_cpu = C_pipelined.float().cpu()
 
         atol = 0.1 * C_direct.abs().mean().item()
-        assert torch.allclose(C_pipelined_cpu, C_direct, rtol=0.15, atol=atol), \
-            f"Pipelined GEMM does not match Python reference.\n" \
+        assert torch.allclose(C_pipelined_cpu, C_direct, rtol=0.15, atol=atol), (
+            f"Pipelined GEMM does not match Python reference.\n"
             f"Max diff: {(C_pipelined_cpu - C_direct).abs().max().item():.6f}"
+        )
 
 
 def _gemm_splitk_helper(A, W, codebook, k, K_dim, N, k_chunks):
     """Quantize W, repack, and run split-K GEMM. Returns fp16 CUDA tensor."""
     indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
     packed_flat = pack_kbit_ref(indices, k)
-    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-        packed_flat.cuda(), absmax.cuda(), K_dim, N, k
-    )
+    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat.cuda(), absmax.cuda(), K_dim, N, k)
     return torch.ops.bitsandbytes.kbit_gemm_splitk(
         A.half().cuda(), packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k, k_chunks
     )
@@ -980,9 +953,10 @@ class TestGemmSplitKCUDA:
         C_pipelined = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm_pipelined")
         C_splitk = _gemm_splitk_helper(A, W, codebook, k, K_dim, N, k_chunks=1)
 
-        assert torch.equal(C_pipelined, C_splitk), \
-            f"K={k}: split-K (k_chunks=1) does not match pipelined bit-for-bit.\n" \
+        assert torch.equal(C_pipelined, C_splitk), (
+            f"K={k}: split-K (k_chunks=1) does not match pipelined bit-for-bit.\n"
             f"Max diff: {(C_pipelined.float() - C_splitk.float()).abs().max().item():.6f}"
+        )
 
     @pytest.mark.parametrize("k", [4])
     @pytest.mark.parametrize("M", [1, 4, 8, 16])
@@ -998,9 +972,10 @@ class TestGemmSplitKCUDA:
         C_pipelined = _gemm_helper(A, W, codebook, k, K_dim, N, "kbit_gemm_pipelined")
         C_splitk = _gemm_splitk_helper(A, W, codebook, k, K_dim, N, k_chunks=1)
 
-        assert torch.equal(C_pipelined, C_splitk), \
-            f"M={M}: split-K (k_chunks=1) does not match pipelined.\n" \
+        assert torch.equal(C_pipelined, C_splitk), (
+            f"M={M}: split-K (k_chunks=1) does not match pipelined.\n"
             f"Max diff: {(C_pipelined.float() - C_splitk.float()).abs().max().item():.6f}"
+        )
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_splitk2_matches_reference(self, k):
@@ -1018,15 +993,22 @@ class TestGemmSplitKCUDA:
 
         # Split-K uses atomicAdd so may have small fp32 rounding differences
         atol = 0.1 * C_direct.abs().mean().item()
-        assert torch.allclose(C_splitk_cpu, C_direct, rtol=0.15, atol=atol), \
-            f"K={k}: split-K (k_chunks=2) does not match reference.\n" \
+        assert torch.allclose(C_splitk_cpu, C_direct, rtol=0.15, atol=atol), (
+            f"K={k}: split-K (k_chunks=2) does not match reference.\n"
             f"Max diff: {(C_splitk_cpu - C_direct).abs().max().item():.6f}"
+        )
 
     @pytest.mark.parametrize("k", [4])
     @pytest.mark.parametrize("k_chunks", [1, 2])
-    @pytest.mark.parametrize("M,K_dim,N", [
-        (4, 128, 128), (4, 128, 256), (4, 256, 128), (4, 256, 256),
-    ])
+    @pytest.mark.parametrize(
+        "M,K_dim,N",
+        [
+            (4, 128, 128),
+            (4, 128, 256),
+            (4, 256, 128),
+            (4, 256, 256),
+        ],
+    )
     def test_splitk_various_sizes(self, k, k_chunks, M, K_dim, N):
         """Split-K works for various matrix sizes and chunk counts."""
         torch.manual_seed(42)
@@ -1040,9 +1022,10 @@ class TestGemmSplitKCUDA:
         C_splitk_cpu = C_splitk.float().cpu()
 
         atol = 0.1 * C_direct.abs().mean().item()
-        assert torch.allclose(C_splitk_cpu, C_direct, rtol=0.15, atol=atol), \
-            f"({M},{K_dim},{N}) k_chunks={k_chunks}: split-K does not match reference.\n" \
+        assert torch.allclose(C_splitk_cpu, C_direct, rtol=0.15, atol=atol), (
+            f"({M},{K_dim},{N}) k_chunks={k_chunks}: split-K does not match reference.\n"
             f"Max diff: {(C_splitk_cpu - C_direct).abs().max().item():.6f}"
+        )
 
     def test_splitk_sqnr(self):
         """Split-K GEMM should have reasonable SQNR for K=4."""
@@ -1069,9 +1052,7 @@ def _gemm_prod_helper(A, W, codebook, k, K_dim, N, k_chunks=1, dtype=torch.float
     """Quantize W, repack, and run production GEMM. Returns CUDA tensor in requested dtype."""
     indices, absmax = quantize_kbit_ref(W.reshape(-1), codebook)
     packed_flat = pack_kbit_ref(indices, k)
-    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-        packed_flat.cuda(), absmax.cuda(), K_dim, N, k
-    )
+    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat.cuda(), absmax.cuda(), K_dim, N, k)
     A_gpu = A.to(dtype).cuda()
     return torch.ops.bitsandbytes.kbit_gemm_prod(
         A_gpu, packed_tiled, absmax_tiled, codebook.cuda(), K_dim, N, k, k_chunks
@@ -1097,9 +1078,9 @@ class TestGemmProdCUDA:
         C_prod_cpu = C_prod.float().cpu()
 
         atol = 0.15 * C_direct.abs().mean().item()
-        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
-            f"K={k}: prod fp16 does not match reference.\n" \
-            f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), (
+            f"K={k}: prod fp16 does not match reference.\nMax diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+        )
 
     @pytest.mark.parametrize("k", [2, 3, 4, 5])
     def test_prod_bf16_matches_reference(self, k):
@@ -1116,9 +1097,9 @@ class TestGemmProdCUDA:
         C_prod_cpu = C_prod.float().cpu()
 
         atol = 0.15 * C_direct.abs().mean().item()
-        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
-            f"K={k}: prod bf16 does not match reference.\n" \
-            f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), (
+            f"K={k}: prod bf16 does not match reference.\nMax diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+        )
 
     @pytest.mark.parametrize("k", [4])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
@@ -1137,9 +1118,10 @@ class TestGemmProdCUDA:
         C_prod_cpu = C_prod.float().cpu()
 
         atol = 0.15 * C_direct.abs().mean().item()
-        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
-            f"M={M} {dtype}: prod does not match reference.\n" \
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), (
+            f"M={M} {dtype}: prod does not match reference.\n"
             f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+        )
 
     @pytest.mark.parametrize("k", [4])
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
@@ -1158,14 +1140,21 @@ class TestGemmProdCUDA:
         C_prod_cpu = C_prod.float().cpu()
 
         atol = 0.15 * C_direct.abs().mean().item()
-        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
-            f"{dtype} k_chunks={k_chunks}: prod does not match reference.\n" \
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), (
+            f"{dtype} k_chunks={k_chunks}: prod does not match reference.\n"
             f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+        )
 
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-    @pytest.mark.parametrize("M,K_dim,N", [
-        (4, 128, 128), (4, 128, 256), (4, 256, 128), (4, 256, 256),
-    ])
+    @pytest.mark.parametrize(
+        "M,K_dim,N",
+        [
+            (4, 128, 128),
+            (4, 128, 256),
+            (4, 256, 128),
+            (4, 256, 256),
+        ],
+    )
     def test_prod_various_sizes(self, dtype, M, K_dim, N):
         """Production GEMM works for various matrix sizes."""
         k = 4
@@ -1180,9 +1169,10 @@ class TestGemmProdCUDA:
         C_prod_cpu = C_prod.float().cpu()
 
         atol = 0.15 * C_direct.abs().mean().item()
-        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
-            f"({M},{K_dim},{N}) {dtype}: prod does not match reference.\n" \
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), (
+            f"({M},{K_dim},{N}) {dtype}: prod does not match reference.\n"
             f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+        )
 
     def test_prod_output_dtype(self):
         """Production GEMM output dtype matches input dtype."""
@@ -1218,9 +1208,10 @@ class TestGemmProdCUDA:
         C_prod_cpu = C_prod.float().cpu()
 
         atol = 0.15 * C_direct.abs().mean().item()
-        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
-            f"M={M} K={k} {dtype}: multi-M-block does not match reference.\n" \
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), (
+            f"M={M} K={k} {dtype}: multi-M-block does not match reference.\n"
             f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+        )
 
     @pytest.mark.parametrize("M", [20, 40, 64])
     def test_prod_multi_mblock_splitk(self, M):
@@ -1237,13 +1228,20 @@ class TestGemmProdCUDA:
         C_prod_cpu = C_prod.float().cpu()
 
         atol = 0.15 * C_direct.abs().mean().item()
-        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
-            f"M={M} split-K: multi-M-block does not match reference.\n" \
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), (
+            f"M={M} split-K: multi-M-block does not match reference.\n"
             f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+        )
 
-    @pytest.mark.parametrize("M,K_dim,N", [
-        (32, 128, 256), (64, 256, 128), (64, 256, 256), (48, 128, 128),
-    ])
+    @pytest.mark.parametrize(
+        "M,K_dim,N",
+        [
+            (32, 128, 256),
+            (64, 256, 128),
+            (64, 256, 256),
+            (48, 128, 128),
+        ],
+    )
     def test_prod_multi_mblock_sizes(self, M, K_dim, N):
         """Multi-M-block works across various matrix sizes."""
         k = 4
@@ -1258,9 +1256,10 @@ class TestGemmProdCUDA:
         C_prod_cpu = C_prod.float().cpu()
 
         atol = 0.15 * C_direct.abs().mean().item()
-        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
-            f"({M},{K_dim},{N}): multi-M-block does not match reference.\n" \
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), (
+            f"({M},{K_dim},{N}): multi-M-block does not match reference.\n"
             f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+        )
 
     def test_prod_mblock1_matches_reference(self):
         """M_BLOCKS=1 (M<=16) matches Python reference."""
@@ -1276,6 +1275,7 @@ class TestGemmProdCUDA:
         C_prod_cpu = C_prod.float().cpu()
 
         atol = 0.15 * C_direct.abs().mean().item()
-        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), \
-            f"M_BLOCKS=1 regression: prod does not match reference.\n" \
+        assert torch.allclose(C_prod_cpu, C_direct, rtol=0.2, atol=atol), (
+            f"M_BLOCKS=1 regression: prod does not match reference.\n"
             f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
+        )

@@ -1,16 +1,12 @@
 """Tests for ArchConfig architecture adapter system."""
 
 import pytest
-from dataclasses import replace
 
 from bitsandbytes.arch_config import (
-    ArchConfig,
-    LLAMA_CONFIG,
-    MISTRAL_CONFIG,
-    QWEN2_CONFIG,
-    QWEN3_DENSE_CONFIG,
-    QWEN3_MOE_CONFIG,
     GLM4_MOE_CONFIG,
+    LLAMA_CONFIG,
+    QWEN3_MOE_CONFIG,
+    ArchConfig,
     detect_arch_config,
 )
 
@@ -25,7 +21,6 @@ class MockConfig:
 
 
 class TestArchConfigDetection:
-
     def test_detect_llama(self):
         config = MockConfig("llama")
         arch = detect_arch_config(config)
@@ -86,7 +81,6 @@ class TestArchConfigDetection:
 
 
 class TestArchConfigMoELayer:
-
     def test_all_moe_layers(self):
         """When dense_layer_indices is None, all layers are MoE."""
         arch = QWEN3_MOE_CONFIG
@@ -110,9 +104,7 @@ class TestArchConfigMoELayer:
 
 
 class TestGetNestedAttr:
-
     def test_simple_path(self):
-
         class Inner:
             value = 42
 
@@ -123,7 +115,6 @@ class TestGetNestedAttr:
         assert result == 42
 
     def test_deep_path(self):
-
         class A:
             val = "found"
 
@@ -138,7 +129,6 @@ class TestGetNestedAttr:
 
 
 class TestMoeIntermediateOverride:
-
     def test_moe_intermediate_override(self):
         """moe_intermediate_size from config should override default."""
         config = MockConfig(

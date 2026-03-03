@@ -68,12 +68,10 @@ def test_quantized_sizes_match(N, K, k):
 
     # Compare sizes
     assert packed.numel() == predicted["packed_numel"], (
-        f"packed size mismatch for N={N}, K={K}, k={k}: "
-        f"got {packed.numel()}, expected {predicted['packed_numel']}"
+        f"packed size mismatch for N={N}, K={K}, k={k}: got {packed.numel()}, expected {predicted['packed_numel']}"
     )
     assert absmax.numel() == predicted["absmax_numel"], (
-        f"absmax size mismatch for N={N}, K={K}, k={k}: "
-        f"got {absmax.numel()}, expected {predicted['absmax_numel']}"
+        f"absmax size mismatch for N={N}, K={K}, k={k}: got {absmax.numel()}, expected {predicted['absmax_numel']}"
     )
     assert codebook.numel() == predicted["codebook_numel"], (
         f"codebook size mismatch for N={N}, K={K}, k={k}: "

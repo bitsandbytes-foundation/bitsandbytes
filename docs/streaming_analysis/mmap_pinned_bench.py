@@ -24,14 +24,13 @@ import argparse
 import mmap
 import os
 import struct
-import sys
-import tempfile
 import time
 
 import numpy as np
 import torch
 
 # ─── Helpers ───
+
 
 def fmt_bw(gb_per_s):
     if gb_per_s >= 1:
@@ -103,6 +102,7 @@ def create_safetensors_file(path: str, tensor_sizes_bytes: list[int]):
 
 # ─── Test 1: mmap → pinned copy ───
 
+
 def test_mmap_to_pinned(file_path: str, chunk_sizes_mb: list[int], n_repeats: int = 5):
     """Copy chunks from mmap'd file to pinned CPU buffer."""
     print(f"\n{'=' * 70}")
@@ -141,7 +141,7 @@ def test_mmap_to_pinned(file_path: str, chunk_sizes_mb: list[int], n_repeats: in
 
             offset = 0  # always read from start
             t0 = time.perf_counter()
-            pinned_np[:] = np.frombuffer(mm[offset:offset + chunk_bytes], dtype=np.int32)
+            pinned_np[:] = np.frombuffer(mm[offset : offset + chunk_bytes], dtype=np.int32)
             elapsed = time.perf_counter() - t0
             times.append(elapsed)
 
@@ -158,6 +158,7 @@ def test_mmap_to_pinned(file_path: str, chunk_sizes_mb: list[int], n_repeats: in
 
 
 # ─── Test 2: safetensors safe_open → get_tensor → copy to pinned ───
+
 
 def test_safetensors_to_pinned(st_path: str, n_repeats: int = 5):
     """Load tensors via safetensors safe_open, then copy to pinned."""
@@ -210,6 +211,7 @@ def test_safetensors_to_pinned(st_path: str, n_repeats: int = 5):
 
 # ─── Test 3: Direct file read → pinned ───
 
+
 def test_direct_read_to_pinned(file_path: str, chunk_sizes_mb: list[int], n_repeats: int = 5):
     """Read file directly into a numpy view of pinned memory."""
     print(f"\n{'=' * 70}")
@@ -256,6 +258,7 @@ def test_direct_read_to_pinned(file_path: str, chunk_sizes_mb: list[int], n_repe
 
 # ─── Test 4: Estimated layer transfer times ───
 
+
 def test_layer_estimates(mmap_results: list, direct_results: list):
     """Estimate per-layer transfer times at realistic MoE sizes."""
     print(f"\n{'=' * 70}")
@@ -286,7 +289,7 @@ def test_layer_estimates(mmap_results: list, direct_results: list):
     }
 
     print(f"\n  {'Layer type':<35} {'mmap→pin':>10} {'direct→pin':>12} {'PCIe H2D':>10} {'Bottleneck':>12}")
-    print(f"  {'-'*35} {'-'*10} {'-'*12} {'-'*10} {'-'*12}")
+    print(f"  {'-' * 35} {'-' * 10} {'-' * 12} {'-' * 10} {'-' * 12}")
 
     for name, size_mb in layer_sizes.items():
         size_gb = size_mb / 1000
@@ -306,6 +309,7 @@ def test_layer_estimates(mmap_results: list, direct_results: list):
 
 
 # ─── Main ───
+
 
 def main():
     parser = argparse.ArgumentParser(description="Benchmark mmap → pinned copy")
@@ -338,7 +342,7 @@ def main():
     file_size_bytes = int(args.file_size_gb * 1024 * 1024 * 1024)
 
     # Create test files
-    print(f"\n--- Setup ---")
+    print("\n--- Setup ---")
     raw_path = args.file_path
     st_path = raw_path.replace(".bin", ".safetensors")
 
@@ -351,7 +355,7 @@ def main():
     # Create safetensors file with realistic layer sizes
     # MoE layer: ~1237 MB, Dense layer: ~190 MB
     st_tensor_sizes = [
-        190 * 1024 * 1024,   # dense layer
+        190 * 1024 * 1024,  # dense layer
         1237 * 1024 * 1024,  # MoE layer
     ]
     if not args.skip_create or not os.path.exists(st_path):
@@ -371,7 +375,7 @@ def main():
     test_layer_estimates(mmap_results, direct_results)
 
     # Cleanup
-    print(f"\n--- Cleanup ---")
+    print("\n--- Cleanup ---")
     print(f"Test files left at:\n  {raw_path}\n  {st_path}")
     print("Delete manually when done.")
 

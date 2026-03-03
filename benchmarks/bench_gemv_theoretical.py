@@ -14,9 +14,9 @@ import time
 import torch
 
 sys.path.insert(0, ".")
-import bitsandbytes  # noqa: E402
-from bitsandbytes import _ops  # noqa: E402, F401
-from scipy.stats import norm  # noqa: E402
+from scipy.stats import norm
+
+from bitsandbytes import _ops  # noqa: F401
 
 
 def create_normal_float_codebook(k: int) -> torch.Tensor:
@@ -60,18 +60,26 @@ def prepare_and_bench_grouped(K_dim, N, num_experts, M_per_expert, k):
     B_packed_all = torch.cat(packed_list)
     B_absmax_all = torch.cat(absmax_list)
 
-    A_list = [torch.randn(M_per_expert, K_dim, dtype=torch.float16, device="cuda")
-              for _ in range(num_experts)]
+    A_list = [torch.randn(M_per_expert, K_dim, dtype=torch.float16, device="cuda") for _ in range(num_experts)]
     offsets = [0]
     for i in range(num_experts):
         offsets.append(offsets[-1] + M_per_expert)
     A_concat = torch.cat(A_list)
     expert_offsets = torch.tensor(offsets, dtype=torch.int32, device="cuda")
 
-    return bench(lambda: torch.ops.bitsandbytes.kbit_grouped_gemm(
-        A_concat, B_packed_all, B_absmax_all, codebook,
-        expert_offsets, K_dim, N, k, num_experts,
-    ))
+    return bench(
+        lambda: torch.ops.bitsandbytes.kbit_grouped_gemm(
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            k,
+            num_experts,
+        )
+    )
 
 
 def expected_unique_experts(batch_size, total_experts, top_k):
@@ -110,17 +118,23 @@ def main():
 
     for model_name, total_exp, top_k, shapes_list in [
         ("Qwen3-Coder-Next (512 experts, top-8)", total_experts_qwen, top_k_qwen, shapes),
-        ("GLM-4.7-Flash (64 experts, top-4)", total_experts_glm, top_k_glm,
-         [(2048, 1536, "gate/up"), (1536, 2048, "down")]),
+        (
+            "GLM-4.7-Flash (64 experts, top-4)",
+            total_experts_glm,
+            top_k_glm,
+            [(2048, 1536, "gate/up"), (1536, 2048, "down")],
+        ),
     ]:
-        print(f"{'='*100}")
+        print(f"{'=' * 100}")
         print(f"  {model_name}")
-        print(f"{'='*100}")
+        print(f"{'=' * 100}")
         print()
 
-        hdr = (f"{'Batch':>5} | {'#exp':>4} {'M/e':>4} | "
-               f"{'Scalar est':>10} {'bmm meas':>10} {'grp meas':>10} | "
-               f"{'Scalar/bmm':>10} {'Scalar/grp':>10}")
+        hdr = (
+            f"{'Batch':>5} | {'#exp':>4} {'M/e':>4} | "
+            f"{'Scalar est':>10} {'bmm meas':>10} {'grp meas':>10} | "
+            f"{'Scalar/bmm':>10} {'Scalar/grp':>10}"
+        )
         print(hdr)
         print("-" * len(hdr))
 
@@ -175,23 +189,24 @@ def main():
             total_grp_us = 0.0
             for K_dim, N, _ in shapes_list:
                 N_padded = ((N + 127) // 128) * 128
-                t = prepare_and_bench_grouped(K_dim, N_padded, num_active_int,
-                                              M_per_expert, k)
+                t = prepare_and_bench_grouped(K_dim, N_padded, num_active_int, M_per_expert, k)
                 total_grp_us += t * 1e6
 
             scalar_vs_bmm = total_bmm_us / total_scalar_us
             scalar_vs_grp = total_grp_us / total_scalar_us
 
-            print(f"{batch_size:5d} | {num_active_int:4d} {M_per_expert:4d} | "
-                  f"{total_scalar_us:9.0f}us {total_bmm_us:9.0f}us {total_grp_us:9.0f}us | "
-                  f"{scalar_vs_bmm:9.2f}x {scalar_vs_grp:9.2f}x")
+            print(
+                f"{batch_size:5d} | {num_active_int:4d} {M_per_expert:4d} | "
+                f"{total_scalar_us:9.0f}us {total_bmm_us:9.0f}us {total_grp_us:9.0f}us | "
+                f"{scalar_vs_bmm:9.2f}x {scalar_vs_grp:9.2f}x"
+            )
 
         print()
 
     # Detailed breakdown for batch=1
-    print(f"\n{'='*100}")
+    print(f"\n{'=' * 100}")
     print("  Detailed breakdown: Qwen3 batch=1 (8 experts, M=1)")
-    print(f"{'='*100}")
+    print(f"{'=' * 100}")
     print()
     for K_dim, N, name in shapes:
         N_padded = ((N + 127) // 128) * 128
@@ -207,9 +222,11 @@ def main():
             t_est = max(t_bw, t_compute) * 1.8
 
             print(f"  {name} ({K_dim}x{N_padded}), 8 experts, M={M}:")
-            print(f"    kbit data: {kbit_data/1e6:.2f} MB, L2 BW time: {t_bw:.1f} us")
-            print(f"    {total_elements/1e6:.1f}M elements × {ops} ops = "
-                  f"{total_ops/1e6:.0f}M ops → compute: {t_compute:.1f} us")
+            print(f"    kbit data: {kbit_data / 1e6:.2f} MB, L2 BW time: {t_bw:.1f} us")
+            print(
+                f"    {total_elements / 1e6:.1f}M elements × {ops} ops = "
+                f"{total_ops / 1e6:.0f}M ops → compute: {t_compute:.1f} us"
+            )
             print(f"    Estimated (×1.8): {t_est:.1f} us")
             print()
 

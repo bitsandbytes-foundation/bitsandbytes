@@ -34,8 +34,7 @@ def generate_1f1b_schedule(num_stages, num_micro_batches):
         where op is 'F' (forward) or 'B' (backward).
     """
     assert num_micro_batches >= num_stages, (
-        f"Need at least {num_stages} micro-batches for {num_stages} stages, "
-        f"got {num_micro_batches}"
+        f"Need at least {num_stages} micro-batches for {num_stages} stages, got {num_micro_batches}"
     )
 
     S = num_stages
@@ -135,9 +134,7 @@ class PipelineEngine:
         S = self.num_stages
         M = self.num_micro_batches
 
-        assert len(micro_batch_inputs) == M, (
-            f"Expected {M} micro-batch inputs, got {len(micro_batch_inputs)}"
-        )
+        assert len(micro_batch_inputs) == M, f"Expected {M} micro-batch inputs, got {len(micro_batch_inputs)}"
 
         # Storage for intermediate activations
         # fwd_inputs[s][m] = input tensor to stage s for micro-batch m (requires_grad)
@@ -165,13 +162,11 @@ class PipelineEngine:
 
             # Process forward operations left-to-right (stage 0 first)
             for s, m in sorted(forward_ops, key=lambda x: x[0]):
-                self._forward_step(s, m, micro_batch_inputs, micro_batch_labels,
-                                   fwd_inputs, fwd_outputs, losses)
+                self._forward_step(s, m, micro_batch_inputs, micro_batch_labels, fwd_inputs, fwd_outputs, losses)
 
             # Process backward operations right-to-left (last stage first)
             for s, m in sorted(backward_ops, key=lambda x: -x[0]):
-                self._backward_step(s, m, fwd_inputs, fwd_outputs, losses,
-                                    grad_inputs)
+                self._backward_step(s, m, fwd_inputs, fwd_outputs, losses, grad_inputs)
 
         # Compute average loss
         valid_losses = [l.item() for l in losses if l is not None]
@@ -182,8 +177,7 @@ class PipelineEngine:
             "losses": valid_losses,
         }
 
-    def _forward_step(self, stage, micro_batch, inputs, labels,
-                      fwd_inputs, fwd_outputs, losses):
+    def _forward_step(self, stage, micro_batch, inputs, labels, fwd_inputs, fwd_outputs, losses):
         """Execute one forward step for a stage and micro-batch."""
         S = self.num_stages
 
@@ -208,8 +202,7 @@ class PipelineEngine:
             loss = self.loss_fn(output, labels[micro_batch])
             losses[micro_batch] = loss
 
-    def _backward_step(self, stage, micro_batch, fwd_inputs, fwd_outputs,
-                       losses, grad_inputs):
+    def _backward_step(self, stage, micro_batch, fwd_inputs, fwd_outputs, losses, grad_inputs):
         """Execute one backward step for a stage and micro-batch."""
         S = self.num_stages
 
@@ -255,9 +248,7 @@ class PipelineEngine:
             List of lists: stage_layers[stage_id] = [layer1, layer2, ...]
         """
         n = len(layers)
-        assert n >= num_stages, (
-            f"Cannot split {n} layers into {num_stages} stages"
-        )
+        assert n >= num_stages, f"Cannot split {n} layers into {num_stages} stages"
 
         # Even split with remainder going to earlier stages
         base = n // num_stages
@@ -267,7 +258,7 @@ class PipelineEngine:
         idx = 0
         for s in range(num_stages):
             count = base + (1 if s < remainder else 0)
-            stage_layers.append(layers[idx:idx + count])
+            stage_layers.append(layers[idx : idx + count])
             idx += count
 
         return stage_layers
@@ -297,10 +288,13 @@ class CheckpointedStage(nn.Module):
         if self.training:
             if self.cpu_offload:
                 from bitsandbytes.training import checkpoint_cpu_offload
+
                 return checkpoint_cpu_offload(self.stage_module, x)
             else:
                 return torch.utils.checkpoint.checkpoint(
-                    self.stage_module, x, use_reentrant=False,
+                    self.stage_module,
+                    x,
+                    use_reentrant=False,
                 )
         return self.stage_module(x)
 
@@ -424,8 +418,7 @@ class DistributedPipelineEngine:
                     inp = micro_batch_inputs[m].to(self.device)
                 else:
                     # Receive activation from previous stage
-                    inp = _recv(self.hidden_shape, src=s - 1,
-                                device=self.device, dtype=self.dtype)
+                    inp = _recv(self.hidden_shape, src=s - 1, device=self.device, dtype=self.dtype)
 
                 # Only set requires_grad for non-first stages (first stage may
                 # receive integer input_ids that can't track gradients)
@@ -456,8 +449,7 @@ class DistributedPipelineEngine:
                         scaled_loss.backward(retain_graph=False)
                 else:
                     # Receive gradient from next stage
-                    grad = _recv(output.shape, src=s + 1,
-                                 device=self.device, dtype=output.dtype)
+                    grad = _recv(output.shape, src=s + 1, device=self.device, dtype=output.dtype)
                     output.backward(grad, retain_graph=False)
 
                 if s > 0 and inp.grad is not None:

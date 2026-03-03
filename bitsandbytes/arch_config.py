@@ -5,7 +5,7 @@ attribute paths, so KbitLoraModel can handle different HF architectures
 with a single code path.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -232,9 +232,7 @@ def detect_arch_config(config) -> ArchConfig:
         raise ValueError("Model config has no model_type attribute")
     if model_type not in _MODEL_TYPE_MAP:
         supported = ", ".join(sorted(_MODEL_TYPE_MAP.keys()))
-        raise ValueError(
-            f"Unsupported model_type: {model_type}. Supported: {supported}"
-        )
+        raise ValueError(f"Unsupported model_type: {model_type}. Supported: {supported}")
 
     arch = _MODEL_TYPE_MAP[model_type]
 
@@ -244,16 +242,19 @@ def detect_arch_config(config) -> ArchConfig:
         if num_experts is not None and num_experts != arch.num_experts:
             # Create a copy with updated values
             from dataclasses import replace
+
             arch = replace(arch, num_experts=num_experts)
 
         num_active = getattr(config, "num_experts_per_tok", None) or getattr(config, "num_selected_experts", None)
         if num_active is not None and num_active != arch.num_active_experts:
             from dataclasses import replace
+
             arch = replace(arch, num_active_experts=num_active)
 
         moe_inter = getattr(config, "moe_intermediate_size", None)
         if moe_inter is not None and moe_inter != arch.expert_intermediate_size:
             from dataclasses import replace
+
             arch = replace(arch, expert_intermediate_size=moe_inter)
 
     return arch

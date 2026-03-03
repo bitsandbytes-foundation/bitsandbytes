@@ -8,16 +8,15 @@ Expert routing: uniform random (worst case for expert reuse).
 """
 
 import argparse
-import math
 import sys
 import time
 
 import torch
 
 sys.path.insert(0, ".")
-import bitsandbytes  # noqa: E402
-from bitsandbytes import _ops  # noqa: E402, F401
-from scipy.stats import norm  # noqa: E402
+from scipy.stats import norm
+
+from bitsandbytes import _ops  # noqa: F401
 
 BLOCKSIZE = 32
 
@@ -37,12 +36,8 @@ def prepare_expert_weights(K_dim, N, k, num_experts):
     absmax_list = []
     for _ in range(num_experts):
         W = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
-        packed_flat, absmax = torch.ops.bitsandbytes.quantize_kbit(
-            W.reshape(-1), codebook, k
-        )
-        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-            packed_flat, absmax.cuda(), K_dim, N, k
-        )
+        packed_flat, absmax = torch.ops.bitsandbytes.quantize_kbit(W.reshape(-1), codebook, k)
+        packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat, absmax.cuda(), K_dim, N, k)
         packed_list.append(packed_tiled)
         absmax_list.append(absmax_tiled)
 
@@ -89,23 +84,24 @@ def bench_one(fn, warmup=20, iters=200):
     return (time.perf_counter() - start) / iters
 
 
-def run_model_benchmark(model_name, shapes, total_experts, top_k,
-                        batch_sizes, k, warmup, iters):
+def run_model_benchmark(model_name, shapes, total_experts, top_k, batch_sizes, k, warmup, iters):
     """Benchmark one model's MoE layer across batch sizes.
 
     shapes: list of (K_dim, N, layer_name) for the MoE projections.
     """
     codebook = create_normal_float_codebook(k).cuda()
 
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print(f"  {model_name}: {total_experts} experts, top-{top_k}, K={k}")
     print(f"  MoE projections: {', '.join(f'{name} ({K}x{N})' for K, N, name in shapes)}")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     print()
 
-    hdr = (f"{'Batch':>5} | {'#active':>7} {'avg M':>5} {'max M':>5} | "
-           + "  ".join(f"{'kbit(us)':>8} {'bmm(us)':>8}" for _ in shapes)
-           + f" | {'Total kbit':>10} {'Total bmm':>10} {'Speedup':>8}")
+    hdr = (
+        f"{'Batch':>5} | {'#active':>7} {'avg M':>5} {'max M':>5} | "
+        + "  ".join(f"{'kbit(us)':>8} {'bmm(us)':>8}" for _ in shapes)
+        + f" | {'Total kbit':>10} {'Total bmm':>10} {'Speedup':>8}"
+    )
     print(hdr)
     print("-" * len(hdr))
 
@@ -125,9 +121,7 @@ def run_model_benchmark(model_name, shapes, total_experts, top_k,
             N_padded = ((N + 127) // 128) * 128
 
             # Prepare kbit weights for active experts
-            B_packed_all, B_absmax_all, cb = prepare_expert_weights(
-                K_dim, N_padded, k, num_active
-            )
+            B_packed_all, B_absmax_all, cb = prepare_expert_weights(K_dim, N_padded, k, num_active)
 
             # Build A_concat and expert_offsets from routing
             A_list = []
@@ -144,25 +138,32 @@ def run_model_benchmark(model_name, shapes, total_experts, top_k,
             # Benchmark kbit grouped GEMM
             t_kbit = bench_one(
                 lambda: torch.ops.bitsandbytes.kbit_grouped_gemm(
-                    A_concat, B_packed_all, B_absmax_all, cb,
-                    expert_offsets, K_dim, N_padded, k, num_active,
+                    A_concat,
+                    B_packed_all,
+                    B_absmax_all,
+                    cb,
+                    expert_offsets,
+                    K_dim,
+                    N_padded,
+                    k,
+                    num_active,
                 ),
-                warmup=warmup, iters=iters,
+                warmup=warmup,
+                iters=iters,
             )
 
             # Benchmark cuBLAS bmm (pad all experts to max_M)
-            A_padded = torch.zeros(num_active, max_M, K_dim,
-                                   dtype=torch.float16, device="cuda")
+            A_padded = torch.zeros(num_active, max_M, K_dim, dtype=torch.float16, device="cuda")
             for i, eid in enumerate(expert_ids):
                 M_i = M_per_expert[eid]
                 A_padded[i, :M_i, :] = A_list[i]
 
-            W_batched_T = torch.randn(num_active, K_dim, N_padded,
-                                       dtype=torch.float16, device="cuda")
+            W_batched_T = torch.randn(num_active, K_dim, N_padded, dtype=torch.float16, device="cuda")
 
             t_bmm = bench_one(
                 lambda: torch.bmm(A_padded, W_batched_T),
-                warmup=warmup, iters=iters,
+                warmup=warmup,
+                iters=iters,
             )
 
             per_shape_results.append((t_kbit, t_bmm))
@@ -170,13 +171,12 @@ def run_model_benchmark(model_name, shapes, total_experts, top_k,
             total_bmm_us += t_bmm * 1e6
 
         # Print row
-        shape_cols = "  ".join(
-            f"{t_k*1e6:7.0f}us {t_b*1e6:7.0f}us"
-            for t_k, t_b in per_shape_results
-        )
+        shape_cols = "  ".join(f"{t_k * 1e6:7.0f}us {t_b * 1e6:7.0f}us" for t_k, t_b in per_shape_results)
         speedup = total_bmm_us / total_kbit_us if total_kbit_us > 0 else 0
-        print(f"{batch_size:5d} | {num_active:7d} {avg_M:5.2f} {max_M:5d} | "
-              f"{shape_cols} | {total_kbit_us:9.0f}us {total_bmm_us:9.0f}us {speedup:7.2f}x")
+        print(
+            f"{batch_size:5d} | {num_active:7d} {avg_M:5.2f} {max_M:5d} | "
+            f"{shape_cols} | {total_kbit_us:9.0f}us {total_bmm_us:9.0f}us {speedup:7.2f}x"
+        )
 
 
 def main():
@@ -198,7 +198,9 @@ def main():
         total_experts=512,
         top_k=8,
         batch_sizes=batch_sizes,
-        k=args.k, warmup=args.warmup, iters=args.iters,
+        k=args.k,
+        warmup=args.warmup,
+        iters=args.iters,
     )
 
     # GLM-4.7-Flash: 64 routed experts, top-4 (typical config)
@@ -211,23 +213,23 @@ def main():
         total_experts=64,
         top_k=4,
         batch_sizes=batch_sizes,
-        k=args.k, warmup=args.warmup, iters=args.iters,
+        k=args.k,
+        warmup=args.warmup,
+        iters=args.iters,
     )
 
     # Print theoretical analysis
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("  Theoretical: expected unique experts under uniform routing")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     print()
-    for model, te, tk in [("Qwen3 (512e, top-8)", 512, 8),
-                           ("GLM4.7 (64e, top-4)", 64, 4)]:
+    for model, te, tk in [("Qwen3 (512e, top-8)", 512, 8), ("GLM4.7 (64e, top-4)", 64, 4)]:
         print(f"  {model}:")
         for bs in batch_sizes:
             eu = expected_unique_experts(bs, te, tk)
             total_inv = bs * tk
             avg_m = total_inv / eu
-            print(f"    batch={bs:3d}: {eu:6.1f} unique experts, "
-                  f"avg M={avg_m:.2f}, total invocations={total_inv}")
+            print(f"    batch={bs:3d}: {eu:6.1f} unique experts, avg M={avg_m:.2f}, total invocations={total_inv}")
         print()
 
 

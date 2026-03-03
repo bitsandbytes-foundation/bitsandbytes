@@ -70,16 +70,15 @@ WHAT WE COMPUTE:
     7. Training throughput (tokens/sec)
 """
 
+from dataclasses import dataclass
 import math
 import sys
-import json
-from dataclasses import dataclass, field, asdict
 from typing import Optional
-
 
 # =============================================================================
 # MODEL DEFINITION
 # =============================================================================
+
 
 @dataclass
 class MoEModel:
@@ -103,20 +102,21 @@ class MoEModel:
     - Active params per MoE layer: ~515M
     - Total: ~367B (model card says ~355B; difference likely counting convention)
     """
+
     name: str = "GLM-4.7-355B"
     n_layers: int = 92
-    n_dense_layers: int = 3         # first_k_dense_replace: no MoE in first 3 layers
+    n_dense_layers: int = 3  # first_k_dense_replace: no MoE in first 3 layers
     hidden_size: int = 5120
     num_attention_heads: int = 96
-    num_kv_heads: int = 8            # GQA
-    head_dim: int = 128              # Q/K/V head dimension
+    num_kv_heads: int = 8  # GQA
+    head_dim: int = 128  # Q/K/V head dimension
     # The shared expert acts like a dense FFN
     shared_intermediate_size: int = 12288  # config: intermediate_size
     # Each routing expert is small (160 of them)
-    expert_intermediate_size: int = 1536   # config: moe_intermediate_size
-    num_experts: int = 160                 # config: n_routed_experts
-    num_active_experts: int = 8            # config: num_experts_per_tok
-    has_shared_expert: bool = True         # config: n_shared_experts = 1
+    expert_intermediate_size: int = 1536  # config: moe_intermediate_size
+    num_experts: int = 160  # config: n_routed_experts
+    num_active_experts: int = 8  # config: num_experts_per_tok
+    has_shared_expert: bool = True  # config: n_shared_experts = 1
 
     @property
     def attention_params(self) -> int:
@@ -136,18 +136,22 @@ class MoEModel:
     @property
     def total_params_per_layer(self) -> float:
         router = self.hidden_size * self.num_experts
-        return (self.attention_params
-                + self.shared_expert_params
-                + self.num_experts * self.per_routing_expert_params
-                + router)
+        return (
+            self.attention_params
+            + self.shared_expert_params
+            + self.num_experts * self.per_routing_expert_params
+            + router
+        )
 
     @property
     def active_params_per_layer(self) -> float:
         router = self.hidden_size * self.num_experts
-        return (self.attention_params
-                + self.shared_expert_params
-                + self.num_active_experts * self.per_routing_expert_params
-                + router)
+        return (
+            self.attention_params
+            + self.shared_expert_params
+            + self.num_active_experts * self.per_routing_expert_params
+            + router
+        )
 
     @property
     def expert_fraction(self) -> float:
@@ -163,6 +167,7 @@ class MoEModel:
 # =============================================================================
 # QUANTIZATION
 # =============================================================================
+
 
 @dataclass
 class QuantConfig:
@@ -181,12 +186,13 @@ class QuantConfig:
       - Attention compute = 4.7% → always BF16
       - At 3x raw kernel speedup: full NVFP4 effective = 2.74x
     """
+
     name: str
-    layer_mb_empirical: float   # measured/validated layer size in MB
+    layer_mb_empirical: float  # measured/validated layer size in MB
     compute_speedup: float = 1.0  # effective layer-level speedup (1.0 = no speedup)
 
     def layer_bytes(self, model: MoEModel) -> float:
-        return self.layer_mb_empirical * (1024 ** 2)
+        return self.layer_mb_empirical * (1024**2)
 
     def layer_mb(self, model: MoEModel) -> float:
         return self.layer_mb_empirical
@@ -205,12 +211,12 @@ class QuantConfig:
 #   Full NVFP4 = 2.74x layer-level (95% of FLOPs are weight matmuls).
 #   NVFP4 ONLY valid on GPUs with FP4 tensor cores (Blackwell: RTX 5090, B100, B200).
 QUANT_CONFIGS = {
-    "NF4":       QuantConfig("NF4",       layer_mb_empirical=2250),
-    "NF3":       QuantConfig("NF3",       layer_mb_empirical=1640),
-    "NF2":       QuantConfig("NF2",       layer_mb_empirical=1150),
+    "NF4": QuantConfig("NF4", layer_mb_empirical=2250),
+    "NF3": QuantConfig("NF3", layer_mb_empirical=1640),
+    "NF2": QuantConfig("NF2", layer_mb_empirical=1150),
     "NF4d+NF2e": QuantConfig("NF4d+NF2e", layer_mb_empirical=1237),
     "NF4d+NF3e": QuantConfig("NF4d+NF3e", layer_mb_empirical=1690),
-    "NVFP4":     QuantConfig("NVFP4",     layer_mb_empirical=2100, compute_speedup=2.74),
+    "NVFP4": QuantConfig("NVFP4", layer_mb_empirical=2100, compute_speedup=2.74),
 }
 
 
@@ -218,9 +224,11 @@ QUANT_CONFIGS = {
 # LORA CONFIG
 # =============================================================================
 
+
 @dataclass
 class LoRAConfig:
     """LoRA adapter configuration."""
+
     rank: int = 64
     # Which projections get LoRA
     # Attention: Q, K, V, O = 4 projections
@@ -274,22 +282,26 @@ class LoRAConfig:
 
     def total_gpu_bytes_per_layer(self, model: MoEModel) -> float:
         """Total LoRA-related GPU memory per layer."""
-        return (self.weight_bytes_per_layer(model)
-                + self.grad_bytes_per_layer(model)
-                + self.optimizer_bytes_per_layer(model))
+        return (
+            self.weight_bytes_per_layer(model)
+            + self.grad_bytes_per_layer(model)
+            + self.optimizer_bytes_per_layer(model)
+        )
 
 
 # =============================================================================
 # GPU HARDWARE
 # =============================================================================
 
+
 @dataclass
 class GPU:
     """GPU hardware specification."""
+
     name: str
     vram_gb: float
-    pcie_bw_gbs: float    # effective PCIe bandwidth (GB/s)
-    bf16_tflops: float    # dense BF16 tensor core TFLOPS
+    pcie_bw_gbs: float  # effective PCIe bandwidth (GB/s)
+    bf16_tflops: float  # dense BF16 tensor core TFLOPS
     pcie_gen: int = 4
 
     @property
@@ -298,13 +310,13 @@ class GPU:
 
 
 GPUS = {
-    "RTX 4090":  GPU("RTX 4090",  vram_gb=24,  pcie_bw_gbs=22, bf16_tflops=165, pcie_gen=4),
-    "RTX 5090":  GPU("RTX 5090",  vram_gb=32,  pcie_bw_gbs=44, bf16_tflops=209, pcie_gen=5),
-    "A100 80G":  GPU("A100 80G",  vram_gb=80,  pcie_bw_gbs=22, bf16_tflops=312, pcie_gen=4),
+    "RTX 4090": GPU("RTX 4090", vram_gb=24, pcie_bw_gbs=22, bf16_tflops=165, pcie_gen=4),
+    "RTX 5090": GPU("RTX 5090", vram_gb=32, pcie_bw_gbs=44, bf16_tflops=209, pcie_gen=5),
+    "A100 80G": GPU("A100 80G", vram_gb=80, pcie_bw_gbs=22, bf16_tflops=312, pcie_gen=4),
     # H100 PCIe: BF16 TC dense = 756 TFLOPS. SXM5: 990 TFLOPS.
     # (495 was TF32 dense SXM5, not BF16)
-    "H100 80G":  GPU("H100 80G",  vram_gb=80,  pcie_bw_gbs=44, bf16_tflops=756, pcie_gen=5),
-    "RTX6000P":  GPU("RTX6000P",  vram_gb=96,  pcie_bw_gbs=44, bf16_tflops=300, pcie_gen=5),
+    "H100 80G": GPU("H100 80G", vram_gb=80, pcie_bw_gbs=44, bf16_tflops=756, pcie_gen=5),
+    "RTX6000P": GPU("RTX6000P", vram_gb=96, pcie_bw_gbs=44, bf16_tflops=300, pcie_gen=5),
 }
 
 
@@ -312,13 +324,15 @@ GPUS = {
 # STORAGE
 # =============================================================================
 
+
 @dataclass
 class StorageConfig:
     """NVMe + CPU RAM configuration."""
+
     name: str
-    nvme_bw_gbs: float    # NVMe sequential read bandwidth
-    cpu_ram_gb: float      # total system RAM
-    cpu_pinned_gb: float   # available for pinned memory (after OS, PyTorch)
+    nvme_bw_gbs: float  # NVMe sequential read bandwidth
+    cpu_ram_gb: float  # total system RAM
+    cpu_pinned_gb: float  # available for pinned memory (after OS, PyTorch)
 
     @property
     def description(self) -> str:
@@ -326,19 +340,20 @@ class StorageConfig:
 
 
 STORAGE_CONFIGS = {
-    "Gen4x1_32G":     StorageConfig("Gen4x1",     nvme_bw_gbs=7,  cpu_ram_gb=32, cpu_pinned_gb=26),
-    "Gen4x1_64G":     StorageConfig("Gen4x1",     nvme_bw_gbs=7,  cpu_ram_gb=64, cpu_pinned_gb=56),
-    "Gen4R0x4_32G":   StorageConfig("Gen4 R0x4",  nvme_bw_gbs=28, cpu_ram_gb=32, cpu_pinned_gb=26),
-    "Gen5AICx4_32G":  StorageConfig("Gen5 AICx4", nvme_bw_gbs=48, cpu_ram_gb=32, cpu_pinned_gb=26),
-    "Gen5AICx4_64G":  StorageConfig("Gen5 AICx4", nvme_bw_gbs=48, cpu_ram_gb=64, cpu_pinned_gb=56),
-    "Gen4R0x4_64G":   StorageConfig("Gen4 R0x4",  nvme_bw_gbs=28, cpu_ram_gb=64, cpu_pinned_gb=56),
-    "Gen4R0x4_128G":  StorageConfig("Gen4 R0x4",  nvme_bw_gbs=28, cpu_ram_gb=128, cpu_pinned_gb=120),
+    "Gen4x1_32G": StorageConfig("Gen4x1", nvme_bw_gbs=7, cpu_ram_gb=32, cpu_pinned_gb=26),
+    "Gen4x1_64G": StorageConfig("Gen4x1", nvme_bw_gbs=7, cpu_ram_gb=64, cpu_pinned_gb=56),
+    "Gen4R0x4_32G": StorageConfig("Gen4 R0x4", nvme_bw_gbs=28, cpu_ram_gb=32, cpu_pinned_gb=26),
+    "Gen5AICx4_32G": StorageConfig("Gen5 AICx4", nvme_bw_gbs=48, cpu_ram_gb=32, cpu_pinned_gb=26),
+    "Gen5AICx4_64G": StorageConfig("Gen5 AICx4", nvme_bw_gbs=48, cpu_ram_gb=64, cpu_pinned_gb=56),
+    "Gen4R0x4_64G": StorageConfig("Gen4 R0x4", nvme_bw_gbs=28, cpu_ram_gb=64, cpu_pinned_gb=56),
+    "Gen4R0x4_128G": StorageConfig("Gen4 R0x4", nvme_bw_gbs=28, cpu_ram_gb=128, cpu_pinned_gb=120),
 }
 
 
 # =============================================================================
 # ACTIVATION MEMORY MODEL
 # =============================================================================
+
 
 def activation_memory_per_layer_bytes(
     model: MoEModel,
@@ -415,6 +430,7 @@ def activation_memory_per_layer_bytes(
 # COMPUTE TIME MODEL
 # =============================================================================
 
+
 def layer_forward_flops(model: MoEModel, batch_size: int, seq_len: int) -> float:
     """FLOPs for one forward pass through one layer."""
     B, S = batch_size, seq_len
@@ -462,7 +478,10 @@ def layer_backward_flops(model: MoEModel, batch_size: int, seq_len: int) -> floa
 
 
 def compute_time_seconds(
-    flops: float, gpu: GPU, utilization: float = 0.70, compute_speedup: float = 1.0,
+    flops: float,
+    gpu: GPU,
+    utilization: float = 0.70,
+    compute_speedup: float = 1.0,
 ) -> float:
     """
     Wall-clock time for given FLOPs on given GPU.
@@ -492,9 +511,11 @@ def compute_time_seconds(
 # MEMORY BUDGET AND MAX BATCH SIZE
 # =============================================================================
 
+
 @dataclass
 class MemoryBudget:
     """Complete GPU memory breakdown."""
+
     gpu_vram_gb: float
     resident_weight_gb: float
     stream_buffer_gb: float
@@ -510,9 +531,14 @@ class MemoryBudget:
 
     @property
     def total_fixed_gb(self) -> float:
-        return (self.resident_weight_gb + self.stream_buffer_gb
-                + self.lora_weight_gb + self.lora_grad_gb
-                + self.lora_optimizer_gb + self.cuda_overhead_gb)
+        return (
+            self.resident_weight_gb
+            + self.stream_buffer_gb
+            + self.lora_weight_gb
+            + self.lora_grad_gb
+            + self.lora_optimizer_gb
+            + self.cuda_overhead_gb
+        )
 
 
 def compute_memory_budget(
@@ -544,8 +570,7 @@ def compute_memory_budget(
         n_streamed = layers_per_gpu - n_resident
         buffer_gb = 2 * layer_gb if n_streamed > 0 else 0
         resident_gb = n_resident * layer_gb
-        free = gpu.vram_gb - (resident_gb + buffer_gb + lora_w_gb + lora_g_gb
-                              + lora_o_gb + cuda_overhead)
+        free = gpu.vram_gb - (resident_gb + buffer_gb + lora_w_gb + lora_g_gb + lora_o_gb + cuda_overhead)
         if free < 0:
             return None
         return MemoryBudget(
@@ -642,9 +667,11 @@ def find_max_batch_size(
 # STREAMING SIMULATION
 # =============================================================================
 
+
 @dataclass
 class StepSimulation:
     """Result of simulating one complete training step."""
+
     # Config
     gpu_name: str
     n_gpus: int
@@ -658,22 +685,22 @@ class StepSimulation:
     n_streamed: int
     layers_per_gpu: int
     # Compute
-    forward_time_s: float      # total forward pass time (all layers, this GPU)
-    backward_time_s: float     # total backward pass (includes recompute)
-    compute_time_s: float      # forward + backward
+    forward_time_s: float  # total forward pass time (all layers, this GPU)
+    backward_time_s: float  # total backward pass (includes recompute)
+    compute_time_s: float  # forward + backward
     # Transfer
-    transfer_source: str       # "RAM" or "NVMe"
-    effective_bw_gbs: float    # bottleneck bandwidth
-    bottleneck: str            # "PCIe" or "NVMe"
+    transfer_source: str  # "RAM" or "NVMe"
+    effective_bw_gbs: float  # bottleneck bandwidth
+    bottleneck: str  # "PCIe" or "NVMe"
     # Per-layer transfer time (for one streamed layer)
     layer_transfer_time_s: float
     # Total transfer demand: each streamed layer loaded twice (fwd recompute + bwd)
     total_transfer_demand_s: float
     # Overlap
     compute_time_per_step_s: float  # total compute for all micro-batches
-    transfer_time_per_step_s: float # total transfer needed
-    step_time_s: float              # max(compute, transfer) — with overlap
-    overhead_pct: float             # (step_time / compute_time - 1) × 100
+    transfer_time_per_step_s: float  # total transfer needed
+    step_time_s: float  # max(compute, transfer) — with overlap
+    overhead_pct: float  # (step_time / compute_time - 1) × 100
     # Throughput
     tokens_per_step: int
     tokens_per_sec: float
@@ -696,8 +723,7 @@ def simulate_step(
 ) -> Optional[StepSimulation]:
     """Simulate a complete training step."""
 
-    mem = compute_memory_budget(gpu, n_gpus, model, quant, lora,
-                                n_resident_override=n_resident_override)
+    mem = compute_memory_budget(gpu, n_gpus, model, quant, lora, n_resident_override=n_resident_override)
     if mem is None:
         return None
 
@@ -721,13 +747,9 @@ def simulate_step(
     recompute_flops = fwd_flops_per_layer  # recompute during backward
 
     cs = quant.compute_speedup  # hardware-accelerated format speedup (1.0 for NF4, 2.74 for NVFP4)
-    fwd_time = sum(
-        compute_time_seconds(fwd_flops_per_layer, gpu, gpu_utilization, cs)
-        for _ in range(lpg)
-    )
+    fwd_time = sum(compute_time_seconds(fwd_flops_per_layer, gpu, gpu_utilization, cs) for _ in range(lpg))
     bwd_time = sum(
-        compute_time_seconds(bwd_flops_per_layer + recompute_flops, gpu, gpu_utilization, cs)
-        for _ in range(lpg)
+        compute_time_seconds(bwd_flops_per_layer + recompute_flops, gpu, gpu_utilization, cs) for _ in range(lpg)
     )
     compute_per_microbatch = fwd_time + bwd_time
 
@@ -737,7 +759,7 @@ def simulate_step(
     if n_str == 0:
         # All on GPU — no streaming
         transfer_source = "GPU"
-        effective_bw = float('inf')
+        effective_bw = float("inf")
         bneck = "—"
         layer_xfer = 0
         total_xfer = 0
@@ -814,7 +836,7 @@ def simulate_step(
         backward_time_s=bwd_time,
         compute_time_s=compute_per_microbatch,
         transfer_source=transfer_source,
-        effective_bw_gbs=effective_bw if effective_bw != float('inf') else 0,
+        effective_bw_gbs=effective_bw if effective_bw != float("inf") else 0,
         bottleneck=bneck,
         layer_transfer_time_s=layer_xfer,
         total_transfer_demand_s=total_xfer,
@@ -832,6 +854,7 @@ def simulate_step(
 # =============================================================================
 # OPTIMAL RESIDENT/BATCH TRADE-OFF
 # =============================================================================
+
 
 def find_optimal_resident(
     model: MoEModel,
@@ -859,7 +882,12 @@ def find_optimal_resident(
 
     for n_res in range(layers_per_gpu + 1):
         sim = simulate_step(
-            model, gpu, n_gpus, quant, lora, storage,
+            model,
+            gpu,
+            n_gpus,
+            quant,
+            lora,
+            storage,
             seq_len=seq_len,
             n_micro_batches=n_micro_batches,
             gpu_utilization=gpu_utilization,
@@ -879,6 +907,7 @@ def find_optimal_resident(
 # =============================================================================
 # VALIDATION: Check all assumptions against cross-references
 # =============================================================================
+
 
 def validate(model: MoEModel, lora: LoRAConfig) -> bool:
     """
@@ -910,8 +939,8 @@ def validate(model: MoEModel, lora: LoRAConfig) -> bool:
     status = "OK" if pct_off < 5 else "WARN" if pct_off < 10 else "FAIL"
     if status != "OK":
         ok = False if status == "FAIL" else ok
-        warnings.append(f"Total params {total_params/1e9:.1f}B vs target 355B ({pct_off:.1f}% off)")
-    print(f"  [{status:4s}] Total params: {total_params/1e9:.2f}B (target: 355B, {pct_off:.1f}% off)")
+        warnings.append(f"Total params {total_params / 1e9:.1f}B vs target 355B ({pct_off:.1f}% off)")
+    print(f"  [{status:4s}] Total params: {total_params / 1e9:.2f}B (target: 355B, {pct_off:.1f}% off)")
 
     # ─── 2. Architecture → active params ───
     active = model.active_params_per_layer
@@ -920,8 +949,8 @@ def validate(model: MoEModel, lora: LoRAConfig) -> bool:
     status = "OK" if pct_off_active < 5 else "WARN" if pct_off_active < 10 else "FAIL"
     if status != "OK":
         ok = False if status == "FAIL" else ok
-        warnings.append(f"Active params {active/1e6:.0f}M vs target 514M ({pct_off_active:.1f}% off)")
-    print(f"  [{status:4s}] Active params/layer: {active/1e6:.0f}M (target: ~514M, {pct_off_active:.1f}% off)")
+        warnings.append(f"Active params {active / 1e6:.0f}M vs target 514M ({pct_off_active:.1f}% off)")
+    print(f"  [{status:4s}] Active params/layer: {active / 1e6:.0f}M (target: ~514M, {pct_off_active:.1f}% off)")
 
     # ─── 3. Cross-check: theoretical NF4 size vs empirical ───
     # NF4: 4 bits + absmax scales. With group_size=64, fp16 scale per group:
@@ -934,15 +963,17 @@ def validate(model: MoEModel, lora: LoRAConfig) -> bool:
         ok = False if status == "FAIL" else ok
         warnings.append(f"Implied NF4 bits/param = {implied_bits:.2f} (expected 4.0-5.5)")
     theoretical_nf4_mb = params_per_layer * 4.5 / 8 / (1024**2)
-    print(f"  [{status:4s}] NF4 cross-check: empirical={empirical_nf4_mb}MB, "
-          f"theoretical@4.5bpp={theoretical_nf4_mb:.0f}MB, "
-          f"implied={implied_bits:.2f} bits/param")
+    print(
+        f"  [{status:4s}] NF4 cross-check: empirical={empirical_nf4_mb}MB, "
+        f"theoretical@4.5bpp={theoretical_nf4_mb:.0f}MB, "
+        f"implied={implied_bits:.2f} bits/param"
+    )
 
     # ─── 4. Cross-check: NF4d+NF2e size ───
     # Dense params at NF4 (~4.5 bpp), expert params at NF2 (~2.5 bpp)
     dense_params = model.attention_params + model.shared_expert_params + model.hidden_size * model.num_experts
     expert_params = model.num_experts * model.per_routing_expert_params
-    theoretical_mixed = (dense_params * implied_bits + expert_params * (implied_bits * 2/4.5)) / 8 / (1024**2)
+    theoretical_mixed = (dense_params * implied_bits + expert_params * (implied_bits * 2 / 4.5)) / 8 / (1024**2)
     # Better estimate: use the NF4/NF2 ratio from empirical values
     # NF2 empirical = 1150 MB → implied NF2 bits = 1150 * 1024^2 * 8 / 3.87B = 2.52 bits
     empirical_nf2_mb = 1150
@@ -954,9 +985,13 @@ def validate(model: MoEModel, lora: LoRAConfig) -> bool:
     status = "OK" if pct_mixed < 10 else "WARN" if pct_mixed < 20 else "FAIL"
     if status != "OK":
         ok = False if status == "FAIL" else ok
-        warnings.append(f"NF4d+NF2e cross-check: predicted={mixed_mb:.0f}MB vs empirical={empirical_mixed}MB ({pct_mixed:.0f}%)")
-    print(f"  [{status:4s}] NF4d+NF2e cross-check: predicted={mixed_mb:.0f}MB, "
-          f"empirical={empirical_mixed}MB ({pct_mixed:.1f}% off)")
+        warnings.append(
+            f"NF4d+NF2e cross-check: predicted={mixed_mb:.0f}MB vs empirical={empirical_mixed}MB ({pct_mixed:.0f}%)"
+        )
+    print(
+        f"  [{status:4s}] NF4d+NF2e cross-check: predicted={mixed_mb:.0f}MB, "
+        f"empirical={empirical_mixed}MB ({pct_mixed:.1f}% off)"
+    )
     print(f"         (implied bits: NF4={implied_bits:.2f}, NF2={implied_nf2_bits:.2f})")
 
     # ─── 5. LoRA param count sanity ───
@@ -968,21 +1003,19 @@ def validate(model: MoEModel, lora: LoRAConfig) -> bool:
     status = "OK" if 0.5 < ratio < 2.0 else "WARN"
     if status != "OK":
         warnings.append(f"LoRA params ratio unexpected: {ratio:.2f}")
-    print(f"  [{status:4s}] LoRA params/layer: {lora_params/1e6:.2f}M "
-          f"(7 projections, rank={lora.rank})")
+    print(f"  [{status:4s}] LoRA params/layer: {lora_params / 1e6:.2f}M (7 projections, rank={lora.rank})")
     lora_total_gb = lora.total_gpu_bytes_per_layer(model) * model.n_layers / (1024**3)
-    print(f"         LoRA total GPU footprint: {lora_total_gb:.1f} GB "
-          f"(weights + grads + optimizer, all 92 layers)")
+    print(f"         LoRA total GPU footprint: {lora_total_gb:.1f} GB (weights + grads + optimizer, all 92 layers)")
 
     # ─── 6. GPU specs cross-check ───
     print()
     print("  GPU specs (from vendor datasheets):")
     known_specs = {
-        "RTX 4090":  {"vram": 24, "bf16": 165, "pcie_gen": 4},
-        "RTX 5090":  {"vram": 32, "bf16": 209, "pcie_gen": 5},
-        "A100 80G":  {"vram": 80, "bf16": 312, "pcie_gen": 4},
-        "H100 80G":  {"vram": 80, "bf16": 756, "pcie_gen": 5},  # PCIe dense BF16; SXM: 990
-        "RTX6000P":  {"vram": 96, "bf16": 300, "pcie_gen": 5},  # placeholder
+        "RTX 4090": {"vram": 24, "bf16": 165, "pcie_gen": 4},
+        "RTX 5090": {"vram": 32, "bf16": 209, "pcie_gen": 5},
+        "A100 80G": {"vram": 80, "bf16": 312, "pcie_gen": 4},
+        "H100 80G": {"vram": 80, "bf16": 756, "pcie_gen": 5},  # PCIe dense BF16; SXM: 990
+        "RTX6000P": {"vram": 96, "bf16": 300, "pcie_gen": 5},  # placeholder
     }
     for name, gpu in GPUS.items():
         spec = known_specs.get(name, {})
@@ -996,15 +1029,17 @@ def validate(model: MoEModel, lora: LoRAConfig) -> bool:
         if abs(gpu.pcie_bw_gbs - expected_pcie) > 5:
             notes.append(f"PCIe BW unusual: {gpu.pcie_bw_gbs} vs expected ~{expected_pcie}")
         note_str = f" !! {'; '.join(notes)}" if notes else ""
-        print(f"    {name:12s}: {gpu.vram_gb}GB, {gpu.bf16_tflops} BF16 TFLOPS, "
-              f"PCIe Gen{gpu.pcie_gen} @{gpu.pcie_bw_gbs}GB/s{note_str}")
+        print(
+            f"    {name:12s}: {gpu.vram_gb}GB, {gpu.bf16_tflops} BF16 TFLOPS, "
+            f"PCIe Gen{gpu.pcie_gen} @{gpu.pcie_bw_gbs}GB/s{note_str}"
+        )
 
     # ─── 7. H100 TFLOPS note ───
     h100 = GPUS.get("H100 80G")
     if h100:
         print()
         print(f"  [INFO] H100 80G BF16={h100.bf16_tflops} TFLOPS (PCIe dense).")
-        print(f"         H100 SXM5 dense BF16 = 990 TFLOPS (1.31× higher).")
+        print("         H100 SXM5 dense BF16 = 990 TFLOPS (1.31× higher).")
 
     # ─── 8. Compute model: FLOPs per token sanity check ───
     print()
@@ -1012,20 +1047,29 @@ def validate(model: MoEModel, lora: LoRAConfig) -> bool:
     # For a dense transformer: ~6H² FLOPs per token for attention + MLP
     # For MoE: attention is ~2×H×(nh*d + 2*kv*d + nh*d) = ~4H²
     #          MLP is (shared + k*expert) × 3×2×H = 6H×(shared + k*expert)
-    expected_attn_flops = 2 * 1 * model.hidden_size * (
-        model.num_attention_heads * model.head_dim +
-        2 * model.num_kv_heads * model.head_dim +
-        model.num_attention_heads * model.head_dim
+    expected_attn_flops = (
+        2
+        * 1
+        * model.hidden_size
+        * (
+            model.num_attention_heads * model.head_dim
+            + 2 * model.num_kv_heads * model.head_dim
+            + model.num_attention_heads * model.head_dim
+        )
     )
-    expected_mlp_flops = (3 * 2 * 1 * model.hidden_size * model.shared_intermediate_size +
-                          model.num_active_experts * 3 * 2 * 1 * model.hidden_size * model.expert_intermediate_size)
+    expected_mlp_flops = (
+        3 * 2 * 1 * model.hidden_size * model.shared_intermediate_size
+        + model.num_active_experts * 3 * 2 * 1 * model.hidden_size * model.expert_intermediate_size
+    )
     expected_total = (expected_attn_flops + expected_mlp_flops) * 1.05  # +5% non-matmul
     ratio_flops = flops_b1 / expected_total
     status = "OK" if 0.95 < ratio_flops < 1.15 else "WARN"
     # At S=1 there's no attention QK^T/softmax*V, so we should use S=1024
     flops_1024 = layer_forward_flops(model, 1, 1024) / 1024  # per token at S=1024
-    print(f"  [{status:4s}] FLOPs/token (S=1024): {flops_1024/1e6:.1f} MFLOP "
-          f"(attn: {expected_attn_flops/1e6:.1f}M, mlp: {expected_mlp_flops/1e6:.1f}M per token)")
+    print(
+        f"  [{status:4s}] FLOPs/token (S=1024): {flops_1024 / 1e6:.1f} MFLOP "
+        f"(attn: {expected_attn_flops / 1e6:.1f}M, mlp: {expected_mlp_flops / 1e6:.1f}M per token)"
+    )
 
     # ─── 9. Activation memory model: cross-check against known formulas ───
     # Megatron-LM formula for activation mem per layer (with grad ckpt, flash attn):
@@ -1037,8 +1081,7 @@ def validate(model: MoEModel, lora: LoRAConfig) -> bool:
     linearity = (act_b8 / act_b1) / 8
     status = "OK" if 0.95 < linearity < 1.05 else "WARN"
     print(f"  [{status:4s}] Activation memory linearity: act(B=8)/act(B=1)/8 = {linearity:.3f} (expect ~1.0)")
-    print(f"         act(B=1,S=1024) = {act_b1/(1024**3):.3f} GB, "
-          f"act(B=8,S=1024) = {act_b8/(1024**3):.3f} GB")
+    print(f"         act(B=1,S=1024) = {act_b1 / (1024**3):.3f} GB, act(B=8,S=1024) = {act_b8 / (1024**3):.3f} GB")
 
     # ─── 10. Compute vs transfer dominance check ───
     # At B=1, compute time should be short relative to a 80GB GPU
@@ -1046,10 +1089,14 @@ def validate(model: MoEModel, lora: LoRAConfig) -> bool:
     flops_layer = layer_forward_flops(model, 1, 1024)
     a100_time = flops_layer / (312e12 * 0.5)
     transfer_time = 1237 / 1024 / 22  # NF4d+NF2e layer in seconds on PCIe Gen4
-    print(f"  [INFO] At B=1: A100 forward time/layer = {a100_time*1000:.1f} ms, "
-          f"transfer/layer = {transfer_time*1000:.1f} ms")
-    print(f"         Ratio compute/transfer = {a100_time/transfer_time:.2f} "
-          f"({'compute-bound' if a100_time > transfer_time else 'TRANSFER-BOUND'})")
+    print(
+        f"  [INFO] At B=1: A100 forward time/layer = {a100_time * 1000:.1f} ms, "
+        f"transfer/layer = {transfer_time * 1000:.1f} ms"
+    )
+    print(
+        f"         Ratio compute/transfer = {a100_time / transfer_time:.2f} "
+        f"({'compute-bound' if a100_time > transfer_time else 'TRANSFER-BOUND'})"
+    )
 
     # ─── 11. Memory budget sanity: does the model even fit? ───
     print()
@@ -1058,10 +1105,12 @@ def validate(model: MoEModel, lora: LoRAConfig) -> bool:
         layer_gb = nf4de.layer_gb(model)
         all_layers = layer_gb * model.n_layers
         lora_all = lora.total_gpu_bytes_per_layer(model) * model.n_layers / (1024**3)
-        print(f"  {gpu_name:12s}: {gpu.vram_gb:.0f}GB VRAM, "
-              f"NF4d+NF2e all layers={all_layers:.0f}GB, "
-              f"fits on 1 GPU: {'YES' if all_layers + lora_all + 2.5 < gpu.vram_gb else 'NO'}, "
-              f"min GPUs: {math.ceil((all_layers + lora_all + 2.5) / gpu.vram_gb)}")
+        print(
+            f"  {gpu_name:12s}: {gpu.vram_gb:.0f}GB VRAM, "
+            f"NF4d+NF2e all layers={all_layers:.0f}GB, "
+            f"fits on 1 GPU: {'YES' if all_layers + lora_all + 2.5 < gpu.vram_gb else 'NO'}, "
+            f"min GPUs: {math.ceil((all_layers + lora_all + 2.5) / gpu.vram_gb)}"
+        )
 
     # ─── Summary ───
     print()
@@ -1083,6 +1132,7 @@ def validate(model: MoEModel, lora: LoRAConfig) -> bool:
 # MAIN: RUN ALL CONFIGURATIONS
 # =============================================================================
 
+
 def main():
     model = MoEModel()
     lora = LoRAConfig()
@@ -1103,24 +1153,23 @@ def main():
     print(f"  Shared expert MLP intermediate: {model.shared_intermediate_size}")
     print(f"  Routing expert MLP intermediate: {model.expert_intermediate_size}")
     print(f"  Experts: {model.num_experts} total, {model.num_active_experts} active + 1 shared")
-    print(f"  Total params/layer: {model.total_params_per_layer/1e9:.2f}B")
-    print(f"  Active params/layer: {model.active_params_per_layer/1e6:.0f}M")
-    print(f"  Expert fraction: {model.expert_fraction*100:.1f}%")
+    print(f"  Total params/layer: {model.total_params_per_layer / 1e9:.2f}B")
+    print(f"  Active params/layer: {model.active_params_per_layer / 1e6:.0f}M")
+    print(f"  Expert fraction: {model.expert_fraction * 100:.1f}%")
     print()
 
     print(f"LoRA: rank={lora.rank}, {lora.n_projections} projections/layer")
-    print(f"  Params/layer: {lora.params_per_layer(model)/1e6:.2f}M")
-    print(f"  Weight/layer: {lora.weight_bytes_per_layer(model)/1e6:.1f} MB (bf16)")
-    print(f"  Grad/layer: {lora.grad_bytes_per_layer(model)/1e6:.1f} MB")
-    print(f"  Optimizer/layer: {lora.optimizer_bytes_per_layer(model)/1e6:.1f} MB (AdamW fp32)")
-    print(f"  Total LoRA GPU mem/layer: {lora.total_gpu_bytes_per_layer(model)/1e6:.1f} MB")
-    print(f"  Total LoRA GPU mem (92 layers): {lora.total_gpu_bytes_per_layer(model)*92/1e9:.2f} GB")
+    print(f"  Params/layer: {lora.params_per_layer(model) / 1e6:.2f}M")
+    print(f"  Weight/layer: {lora.weight_bytes_per_layer(model) / 1e6:.1f} MB (bf16)")
+    print(f"  Grad/layer: {lora.grad_bytes_per_layer(model) / 1e6:.1f} MB")
+    print(f"  Optimizer/layer: {lora.optimizer_bytes_per_layer(model) / 1e6:.1f} MB (AdamW fp32)")
+    print(f"  Total LoRA GPU mem/layer: {lora.total_gpu_bytes_per_layer(model) / 1e6:.1f} MB")
+    print(f"  Total LoRA GPU mem (92 layers): {lora.total_gpu_bytes_per_layer(model) * 92 / 1e9:.2f} GB")
     print()
 
     print("Quantization formats:")
     for qn, qc in QUANT_CONFIGS.items():
-        print(f"  {qn:12s}: {qc.layer_mb(model):7.1f} MB/layer, "
-              f"{qc.total_gb(model):6.1f} GB total")
+        print(f"  {qn:12s}: {qc.layer_mb(model):7.1f} MB/layer, {qc.total_gb(model):6.1f} GB total")
     print()
 
     # Sample activation memory
@@ -1134,7 +1183,7 @@ def main():
     print("Forward FLOPs per layer:")
     for b in [1, 2, 4, 8, 16]:
         flops = layer_forward_flops(model, b, 1024)
-        print(f"  B={b:3d}, S=1024: {flops/1e12:.2f} TFLOP")
+        print(f"  B={b:3d}, S=1024: {flops / 1e12:.2f} TFLOP")
     print()
 
     # =================================================================
@@ -1144,32 +1193,44 @@ def main():
     GPU_UTILIZATION = 0.70  # benchmarked: NF4 matmul 81-97%, minus ~15% training overhead
 
     print("=" * 110)
-    print(f"SIMULATION RESULTS — OPTIMAL RESIDENT/BATCH SPLIT")
-    print(f"(seq_len={SEQ_LEN}, GPU utilization={GPU_UTILIZATION*100:.0f}%)")
-    print(f"Optimizer sweeps n_resident to minimize step time.")
+    print("SIMULATION RESULTS — OPTIMAL RESIDENT/BATCH SPLIT")
+    print(f"(seq_len={SEQ_LEN}, GPU utilization={GPU_UTILIZATION * 100:.0f}%)")
+    print("Optimizer sweeps n_resident to minimize step time.")
     print("=" * 110)
     print()
 
     # Header
-    hdr = (f"{'Config':24s} {'Quant':>11s} {'Storage':>18s} "
-           f"{'B':>3s} {'Res':>4s} {'Str':>4s} {'Free':>5s} "
-           f"{'Src':>4s} {'Bnk':>5s} "
-           f"{'Comp':>6s} {'Xfer':>6s} {'Step':>6s} "
-           f"{'OH%':>5s} {'tok/s':>7s}")
+    hdr = (
+        f"{'Config':24s} {'Quant':>11s} {'Storage':>18s} "
+        f"{'B':>3s} {'Res':>4s} {'Str':>4s} {'Free':>5s} "
+        f"{'Src':>4s} {'Bnk':>5s} "
+        f"{'Comp':>6s} {'Xfer':>6s} {'Step':>6s} "
+        f"{'OH%':>5s} {'tok/s':>7s}"
+    )
     print(hdr)
     print("-" * len(hdr))
 
     def format_sim_line(config, qn, storage_desc, sim):
-        comp_s = f"{sim.compute_time_per_step_s:.1f}s" if sim.compute_time_per_step_s < 100 else f"{sim.compute_time_per_step_s:.0f}s"
-        xfer_s = f"{sim.transfer_time_per_step_s:.1f}s" if sim.transfer_time_per_step_s < 100 else f"{sim.transfer_time_per_step_s:.0f}s"
+        comp_s = (
+            f"{sim.compute_time_per_step_s:.1f}s"
+            if sim.compute_time_per_step_s < 100
+            else f"{sim.compute_time_per_step_s:.0f}s"
+        )
+        xfer_s = (
+            f"{sim.transfer_time_per_step_s:.1f}s"
+            if sim.transfer_time_per_step_s < 100
+            else f"{sim.transfer_time_per_step_s:.0f}s"
+        )
         step_s = f"{sim.step_time_s:.1f}s" if sim.step_time_s < 100 else f"{sim.step_time_s:.0f}s"
         oh = f"{sim.overhead_pct:.0f}%" if sim.overhead_pct > 0 else "0%"
         tps = f"{sim.tokens_per_sec:.0f}"
-        return (f"{config:24s} {qn:>11s} {storage_desc:>18s} "
-                f"{sim.max_micro_batch:>3d} {sim.n_resident:>4d} {sim.n_streamed:>4d} {sim.free_vram_gb:>4.1f}G "
-                f"{sim.transfer_source:>4s} {sim.bottleneck:>5s} "
-                f"{comp_s:>6s} {xfer_s:>6s} {step_s:>6s} "
-                f"{oh:>5s} {tps:>7s}")
+        return (
+            f"{config:24s} {qn:>11s} {storage_desc:>18s} "
+            f"{sim.max_micro_batch:>3d} {sim.n_resident:>4d} {sim.n_streamed:>4d} {sim.free_vram_gb:>4.1f}G "
+            f"{sim.transfer_source:>4s} {sim.bottleneck:>5s} "
+            f"{comp_s:>6s} {xfer_s:>6s} {step_s:>6s} "
+            f"{oh:>5s} {tps:>7s}"
+        )
 
     # Focus on key quant configs. NVFP4 only valid on Blackwell GPUs (RTX 5090).
     BLACKWELL_GPUS = {"RTX 5090"}
@@ -1187,8 +1248,14 @@ def main():
                 seen = set()
                 for st_name, storage in STORAGE_CONFIGS.items():
                     sim = find_optimal_resident(
-                        model, gpu, ng, quant, lora, storage,
-                        seq_len=SEQ_LEN, n_micro_batches=n_mb,
+                        model,
+                        gpu,
+                        ng,
+                        quant,
+                        lora,
+                        storage,
+                        seq_len=SEQ_LEN,
+                        n_micro_batches=n_mb,
                         gpu_utilization=GPU_UTILIZATION,
                     )
                     if sim is None or sim.max_micro_batch < 1:
@@ -1197,8 +1264,7 @@ def main():
                     if sim.n_streamed == 0:
                         key = ("GPU", "—", 0.0, sim.max_micro_batch)
                     else:
-                        key = (sim.transfer_source, sim.bottleneck,
-                               round(sim.overhead_pct, 1), sim.max_micro_batch)
+                        key = (sim.transfer_source, sim.bottleneck, round(sim.overhead_pct, 1), sim.max_micro_batch)
                     if key in seen:
                         continue
                     seen.add(key)
@@ -1227,7 +1293,7 @@ def main():
         ("RTX 4090", 1, "NF4d+NF3e", "Gen4x1_32G"),
         ("RTX 5090", 1, "NF4d+NF2e", "Gen5AICx4_32G"),
         ("RTX 5090", 1, "NF4d+NF3e", "Gen5AICx4_32G"),
-        ("RTX 5090", 1, "NVFP4",     "Gen5AICx4_32G"),
+        ("RTX 5090", 1, "NVFP4", "Gen5AICx4_32G"),
         ("A100 80G", 1, "NF4d+NF2e", "Gen4x1_64G"),
         ("H100 80G", 1, "NF4d+NF2e", "Gen4x1_32G"),
         ("RTX6000P", 1, "NF4d+NF2e", "Gen4x1_32G"),
@@ -1240,48 +1306,71 @@ def main():
         n_mb = max(2 * ng, 4) if ng > 1 else 1
 
         # Greedy (default)
-        greedy = simulate_step(model, gpu, ng, quant, lora, storage,
-                              seq_len=SEQ_LEN, n_micro_batches=n_mb,
-                              gpu_utilization=GPU_UTILIZATION)
+        greedy = simulate_step(
+            model,
+            gpu,
+            ng,
+            quant,
+            lora,
+            storage,
+            seq_len=SEQ_LEN,
+            n_micro_batches=n_mb,
+            gpu_utilization=GPU_UTILIZATION,
+        )
         # Optimal
-        optimal = find_optimal_resident(model, gpu, ng, quant, lora, storage,
-                                       seq_len=SEQ_LEN, n_micro_batches=n_mb,
-                                       gpu_utilization=GPU_UTILIZATION)
+        optimal = find_optimal_resident(
+            model,
+            gpu,
+            ng,
+            quant,
+            lora,
+            storage,
+            seq_len=SEQ_LEN,
+            n_micro_batches=n_mb,
+            gpu_utilization=GPU_UTILIZATION,
+        )
 
         if greedy is None and optimal is None:
             continue
 
-        print(f"{'─'*3} {ng}x {gpu_name} | {qn} | {storage.description} {'─'*30}")
+        print(f"{'─' * 3} {ng}x {gpu_name} | {qn} | {storage.description} {'─' * 30}")
         print(f"  {'':20s} {'Greedy':>12s}  {'Optimal':>12s}  {'Δ':>8s}")
 
         if greedy and optimal:
             g, o = greedy, optimal
+
             def delta_pct(g_val, o_val):
                 if g_val == 0:
                     return ""
-                return f"{(o_val/g_val - 1)*100:+.0f}%"
+                return f"{(o_val / g_val - 1) * 100:+.0f}%"
 
             print(f"  {'Resident layers':20s} {g.n_resident:>12d}  {o.n_resident:>12d}")
             print(f"  {'Streamed layers':20s} {g.n_streamed:>12d}  {o.n_streamed:>12d}")
             print(f"  {'Micro-batch (B)':20s} {g.max_micro_batch:>12d}  {o.max_micro_batch:>12d}")
             print(f"  {'Free VRAM (GB)':20s} {g.free_vram_gb:>11.1f}G  {o.free_vram_gb:>11.1f}G")
-            print(f"  {'Tokens/micro-batch':20s} {g.max_micro_batch*SEQ_LEN:>12,d}  {o.max_micro_batch*SEQ_LEN:>12,d}")
+            print(
+                f"  {'Tokens/micro-batch':20s} {g.max_micro_batch * SEQ_LEN:>12,d}  {o.max_micro_batch * SEQ_LEN:>12,d}"
+            )
             print(f"  {'Compute (s)':20s} {g.compute_time_per_step_s:>12.2f}  {o.compute_time_per_step_s:>12.2f}")
             print(f"  {'Transfer (s)':20s} {g.transfer_time_per_step_s:>12.2f}  {o.transfer_time_per_step_s:>12.2f}")
-            print(f"  {'Step time (s)':20s} {g.step_time_s:>12.2f}  {o.step_time_s:>12.2f}  {delta_pct(g.step_time_s, o.step_time_s):>8s}")
+            print(
+                f"  {'Step time (s)':20s} {g.step_time_s:>12.2f}  {o.step_time_s:>12.2f}  {delta_pct(g.step_time_s, o.step_time_s):>8s}"
+            )
             print(f"  {'Overhead':20s} {g.overhead_pct:>11.1f}%  {o.overhead_pct:>11.1f}%")
-            print(f"  {'Tokens/sec':20s} {g.tokens_per_sec:>12.0f}  {o.tokens_per_sec:>12.0f}  {delta_pct(g.tokens_per_sec, o.tokens_per_sec):>8s}")
+            print(
+                f"  {'Tokens/sec':20s} {g.tokens_per_sec:>12.0f}  {o.tokens_per_sec:>12.0f}  {delta_pct(g.tokens_per_sec, o.tokens_per_sec):>8s}"
+            )
         print()
 
     # =================================================================
     # Sweep: resident/batch curves
     # =================================================================
     sweep_configs = [
-        ("RTX 4090", "NF4d+NF2e", "Gen4x1_32G",    1),
-        ("RTX 4090", "NF4d+NF3e", "Gen4x1_32G",    1),
-        ("RTX 5090", "NVFP4",     "Gen5AICx4_32G", 1),
-        ("A100 80G", "NF4d+NF2e", "Gen4x1_64G",    1),
-        ("H100 80G", "NF4d+NF2e", "Gen4x1_32G",    1),
+        ("RTX 4090", "NF4d+NF2e", "Gen4x1_32G", 1),
+        ("RTX 4090", "NF4d+NF3e", "Gen4x1_32G", 1),
+        ("RTX 5090", "NVFP4", "Gen5AICx4_32G", 1),
+        ("A100 80G", "NF4d+NF2e", "Gen4x1_64G", 1),
+        ("H100 80G", "NF4d+NF2e", "Gen4x1_32G", 1),
     ]
 
     for gpu_name, qn, st_name, ng in sweep_configs:
@@ -1306,8 +1395,14 @@ def main():
         results = []
         for n_res in range(lpg + 1):
             sim = simulate_step(
-                model, gpu, ng, quant, lora, storage,
-                seq_len=SEQ_LEN, n_micro_batches=1,
+                model,
+                gpu,
+                ng,
+                quant,
+                lora,
+                storage,
+                seq_len=SEQ_LEN,
+                n_micro_batches=1,
                 gpu_utilization=GPU_UTILIZATION,
                 n_resident_override=n_res,
             )
@@ -1321,10 +1416,12 @@ def main():
         for n_res, sim in results:
             oh = f"{sim.overhead_pct:.0f}%" if sim.overhead_pct > 0 else "0%"
             note = " ← OPTIMAL" if n_res == best_n_res else ""
-            print(f"{sim.n_resident:>4d} {sim.n_streamed:>4d} {sim.free_vram_gb:>5.1f}G "
-                  f"{sim.max_micro_batch:>3d} {sim.tokens_per_step:>6d} "
-                  f"{sim.compute_time_per_step_s:>6.1f}s {sim.transfer_time_per_step_s:>6.1f}s "
-                  f"{sim.step_time_s:>6.1f}s {oh:>6s} {sim.tokens_per_sec:>7.0f}{note}")
+            print(
+                f"{sim.n_resident:>4d} {sim.n_streamed:>4d} {sim.free_vram_gb:>5.1f}G "
+                f"{sim.max_micro_batch:>3d} {sim.tokens_per_step:>6d} "
+                f"{sim.compute_time_per_step_s:>6.1f}s {sim.transfer_time_per_step_s:>6.1f}s "
+                f"{sim.step_time_s:>6.1f}s {oh:>6s} {sim.tokens_per_sec:>7.0f}{note}"
+            )
 
 
 if __name__ == "__main__":

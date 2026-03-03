@@ -24,8 +24,8 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA requ
 
 # ─── Schedule Generation Tests ────────────────────────────────────────────
 
-class TestScheduleGeneration:
 
+class TestScheduleGeneration:
     def test_basic_schedule(self):
         """2 stages, 4 micro-batches — basic 1F1B schedule."""
         schedule = generate_1f1b_schedule(2, 4)
@@ -48,12 +48,8 @@ class TestScheduleGeneration:
                     f_set = {m for op, m in schedule[s] if op == "F"}
                     b_set = {m for op, m in schedule[s] if op == "B"}
                     expected = set(range(M))
-                    assert f_set == expected, (
-                        f"S={S}, M={M}, stage {s}: forward set {f_set} != {expected}"
-                    )
-                    assert b_set == expected, (
-                        f"S={S}, M={M}, stage {s}: backward set {b_set} != {expected}"
-                    )
+                    assert f_set == expected, f"S={S}, M={M}, stage {s}: forward set {f_set} != {expected}"
+                    assert b_set == expected, f"S={S}, M={M}, stage {s}: backward set {b_set} != {expected}"
 
     def test_forward_before_backward(self):
         """For each micro-batch, forward should come before backward."""
@@ -62,14 +58,9 @@ class TestScheduleGeneration:
                 schedule = generate_1f1b_schedule(S, M)
                 for s in range(S):
                     for m in range(M):
-                        f_pos = next(i for i, (op, mb) in enumerate(schedule[s])
-                                     if op == "F" and mb == m)
-                        b_pos = next(i for i, (op, mb) in enumerate(schedule[s])
-                                     if op == "B" and mb == m)
-                        assert f_pos < b_pos, (
-                            f"S={S}, M={M}, stage {s}, mb {m}: "
-                            f"F at {f_pos}, B at {b_pos}"
-                        )
+                        f_pos = next(i for i, (op, mb) in enumerate(schedule[s]) if op == "F" and mb == m)
+                        b_pos = next(i for i, (op, mb) in enumerate(schedule[s]) if op == "B" and mb == m)
+                        assert f_pos < b_pos, f"S={S}, M={M}, stage {s}, mb {m}: F at {f_pos}, B at {b_pos}"
 
     def test_warmup_counts(self):
         """Non-last stages should have (S-1-s) warmup forwards.
@@ -94,9 +85,7 @@ class TestScheduleGeneration:
                 expected = S - 1 - s
             else:
                 expected = 1  # last stage: 0 warmup, but 1 steady F at start
-            assert warmup == expected, (
-                f"Stage {s}: expected {expected} consecutive forwards at start, got {warmup}"
-            )
+            assert warmup == expected, f"Stage {s}: expected {expected} consecutive forwards at start, got {warmup}"
 
     def test_bounded_in_flight(self):
         """At most num_stages micro-batches should be in flight per stage."""
@@ -112,9 +101,7 @@ class TestScheduleGeneration:
                         else:
                             in_flight -= 1
                         max_in_flight = max(max_in_flight, in_flight)
-                    assert max_in_flight <= S, (
-                        f"S={S}, M={M}, stage {s}: max in-flight {max_in_flight} > {S}"
-                    )
+                    assert max_in_flight <= S, f"S={S}, M={M}, stage {s}: max in-flight {max_in_flight} > {S}"
 
     def test_minimum_micro_batches(self):
         """Should require M >= S."""
@@ -123,6 +110,7 @@ class TestScheduleGeneration:
 
 
 # ─── Pipeline Engine Tests ────────────────────────────────────────────────
+
 
 class SimpleLayer(nn.Module):
     """Simple linear layer for testing."""
@@ -136,7 +124,6 @@ class SimpleLayer(nn.Module):
 
 
 class TestPipelineEngine:
-
     @pytest.fixture
     def simple_model_setup(self):
         """Create a simple 4-layer model for testing."""
@@ -199,8 +186,10 @@ class TestPipelineEngine:
 
         # --- Reference: single-device gradient accumulation ---
         ref_layers = [
-            SimpleLayer(dim).cuda(), SimpleLayer(dim).cuda(),
-            SimpleLayer(dim).cuda(), SimpleLayer(dim).cuda(),
+            SimpleLayer(dim).cuda(),
+            SimpleLayer(dim).cuda(),
+            SimpleLayer(dim).cuda(),
+            SimpleLayer(dim).cuda(),
         ]
         # Copy weights
         for ref, orig in zip(ref_layers, [layer0, layer1, layer2, layer3]):
@@ -246,8 +235,10 @@ class TestPipelineEngine:
         for i, (ref_g, pipe_g) in enumerate(zip(ref_grads, pipeline_grads)):
             assert pipe_g is not None, f"Layer {i}: no gradient from pipeline"
             torch.testing.assert_close(
-                ref_g, pipe_g,
-                atol=1e-5, rtol=1e-5,
+                ref_g,
+                pipe_g,
+                atol=1e-5,
+                rtol=1e-5,
                 msg=f"Layer {i}: gradient mismatch",
             )
 
@@ -286,9 +277,7 @@ class TestPipelineEngine:
         result = engine.step(micro_inputs, micro_labels)
 
         for i, (ref_l, pipe_l) in enumerate(zip(ref_losses, result["losses"])):
-            assert abs(ref_l - pipe_l) < 1e-5, (
-                f"Micro-batch {i}: ref loss {ref_l:.6f} vs pipeline loss {pipe_l:.6f}"
-            )
+            assert abs(ref_l - pipe_l) < 1e-5, f"Micro-batch {i}: ref loss {ref_l:.6f} vs pipeline loss {pipe_l:.6f}"
 
     def test_three_stages(self):
         """Pipeline should work with 3 stages."""
@@ -325,15 +314,19 @@ class TestPipelineEngine:
             SequentialStage(layers[4:6]).cuda(),
         ]
         engine = PipelineEngine(
-            stage_modules=stages, loss_fn=loss_fn, num_micro_batches=M,
+            stage_modules=stages,
+            loss_fn=loss_fn,
+            num_micro_batches=M,
         )
         result = engine.step(micro_inputs, micro_labels)
 
         for i, layer in enumerate(layers):
             assert layer.linear.weight.grad is not None, f"Layer {i}: no gradient"
             torch.testing.assert_close(
-                ref_grads[i], layer.linear.weight.grad,
-                atol=1e-5, rtol=1e-5,
+                ref_grads[i],
+                layer.linear.weight.grad,
+                atol=1e-5,
+                rtol=1e-5,
                 msg=f"Layer {i}: gradient mismatch (3 stages)",
             )
 
@@ -366,15 +359,19 @@ class TestPipelineEngine:
             layer.zero_grad()
         stages = [SequentialStage([layer]).cuda() for layer in layers]
         engine = PipelineEngine(
-            stage_modules=stages, loss_fn=loss_fn, num_micro_batches=M,
+            stage_modules=stages,
+            loss_fn=loss_fn,
+            num_micro_batches=M,
         )
         result = engine.step(micro_inputs, micro_labels)
 
         for i, layer in enumerate(layers):
             assert layer.linear.weight.grad is not None, f"Layer {i}: no gradient"
             torch.testing.assert_close(
-                ref_grads[i], layer.linear.weight.grad,
-                atol=1e-5, rtol=1e-5,
+                ref_grads[i],
+                layer.linear.weight.grad,
+                atol=1e-5,
+                rtol=1e-5,
                 msg=f"Layer {i}: gradient mismatch (4 stages)",
             )
 
@@ -436,14 +433,18 @@ class TestPipelineEngine:
             SequentialStage(layers[2:]).cuda(),
         ]
         engine = PipelineEngine(
-            stage_modules=stages, loss_fn=loss_fn, num_micro_batches=M,
+            stage_modules=stages,
+            loss_fn=loss_fn,
+            num_micro_batches=M,
         )
         result = engine.step(micro_inputs, micro_labels)
 
         for i, layer in enumerate(layers):
             torch.testing.assert_close(
-                ref_grads[i], layer.linear.weight.grad,
-                atol=1e-5, rtol=1e-5,
+                ref_grads[i],
+                layer.linear.weight.grad,
+                atol=1e-5,
+                rtol=1e-5,
                 msg=f"ReLU layer {i}: gradient mismatch",
             )
 
@@ -485,6 +486,7 @@ class TestPipelineEngine:
 
 # ─── Pipeline Checkpointing Tests ─────────────────────────────────────────
 
+
 class WideLayer(nn.Module):
     """Linear layer with large intermediate for memory testing."""
 
@@ -498,7 +500,6 @@ class WideLayer(nn.Module):
 
 
 class TestPipelineCheckpointer:
-
     def test_checkpointed_gradient_correctness(self):
         """Checkpointed pipeline should produce identical gradients to reference."""
         dim = 32
@@ -540,8 +541,10 @@ class TestPipelineCheckpointer:
         for i, layer in enumerate(layers):
             assert layer.linear.weight.grad is not None, f"Layer {i}: no gradient"
             torch.testing.assert_close(
-                ref_grads[i], layer.linear.weight.grad,
-                atol=1e-5, rtol=1e-5,
+                ref_grads[i],
+                layer.linear.weight.grad,
+                atol=1e-5,
+                rtol=1e-5,
                 msg=f"Layer {i}: gradient mismatch with checkpointing",
             )
 
@@ -583,8 +586,10 @@ class TestPipelineCheckpointer:
         for i, layer in enumerate(layers):
             assert layer.linear.weight.grad is not None, f"Layer {i}: no gradient"
             torch.testing.assert_close(
-                ref_grads[i], layer.linear.weight.grad,
-                atol=1e-5, rtol=1e-5,
+                ref_grads[i],
+                layer.linear.weight.grad,
+                atol=1e-5,
+                rtol=1e-5,
                 msg=f"Layer {i}: gradient mismatch without CPU offload",
             )
 

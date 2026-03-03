@@ -24,7 +24,9 @@ class SwiGLUFunction(torch.autograd.Function):
     def backward(ctx, grad_h):
         gate, up = ctx.saved_tensors
         grad_gate, grad_up = torch.ops.bitsandbytes.swiglu_backward(
-            grad_h.contiguous(), gate, up,
+            grad_h.contiguous(),
+            gate,
+            up,
         )
         return grad_gate, grad_up
 
@@ -55,7 +57,10 @@ class RMSNormFunction(torch.autograd.Function):
         x_2d = x.reshape(-1, x.shape[-1]).contiguous()
 
         out_2d, rrms = torch.ops.bitsandbytes.rmsnorm_forward(
-            x_2d, w, eps, add_unit_offset,
+            x_2d,
+            w,
+            eps,
+            add_unit_offset,
         )
 
         ctx.save_for_backward(x_2d, w, rrms)
@@ -70,7 +75,11 @@ class RMSNormFunction(torch.autograd.Function):
         grad_out_2d = grad_out.reshape(x_2d.shape).contiguous()
 
         grad_x_2d, grad_w = torch.ops.bitsandbytes.rmsnorm_backward(
-            grad_out_2d, x_2d, w, rrms, ctx.add_unit_offset,
+            grad_out_2d,
+            x_2d,
+            w,
+            rrms,
+            ctx.add_unit_offset,
         )
 
         grad_x = grad_x_2d.reshape(ctx.orig_shape)
@@ -122,7 +131,10 @@ class RoPEFunction(torch.autograd.Function):
         # Backward of RoPE is the same operation with sin negated
         grad_q_out = grad_q.clone()
         torch.ops.bitsandbytes.rope_forward(
-            grad_q_out, cos_cache, -sin_cache, ctx.n_heads,
+            grad_q_out,
+            cos_cache,
+            -sin_cache,
+            ctx.n_heads,
         )
         return grad_q_out, None, None, None
 
@@ -164,7 +176,9 @@ class CrossEntropyFunction(torch.autograd.Function):
         labels_flat = labels.reshape(-1)
 
         losses, logsumexp = torch.ops.bitsandbytes.cross_entropy_forward(
-            logits_2d, labels_flat, ignore_index,
+            logits_2d,
+            labels_flat,
+            ignore_index,
         )
 
         ctx.save_for_backward(logits_2d, labels_flat, logsumexp)
@@ -194,7 +208,11 @@ class CrossEntropyFunction(torch.autograd.Function):
             grad_per_sample[valid_mask] = grad_output.float() / n_valid.float()
 
         grad_logits = torch.ops.bitsandbytes.cross_entropy_backward(
-            logits_2d, labels_flat, grad_per_sample, logsumexp, ctx.ignore_index,
+            logits_2d,
+            labels_flat,
+            grad_per_sample,
+            logsumexp,
+            ctx.ignore_index,
         )
 
         return grad_logits, None, None

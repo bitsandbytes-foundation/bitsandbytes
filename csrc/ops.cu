@@ -747,8 +747,7 @@ __device__ __forceinline__ float decode_e4m4_absmax_branchless(unsigned char raw
     // Normal path: construct IEEE 754 directly.
     // When raw==0 (e==0, m==0) this produces 2^(0-11+127)<<23 | 0 which
     // is some small positive float; we select 0.0 below via predicate.
-    unsigned int ieee = (unsigned int)(e - E4M4_BIAS + 127) << 23
-                      | (unsigned int)m << 19;
+    unsigned int ieee = (unsigned int)(e - E4M4_BIAS + 127) << 23 | (unsigned int)m << 19;
     float result = __uint_as_float(ieee);
     // Zero-out for raw==0 using predicated select (no branch).
     // PTXAS emits a FSEL instruction (1 cycle, no divergence).
@@ -920,8 +919,8 @@ __global__ void kRepackKbit(
 // Repack launcher
 template <int K>
 void repackKbit(
-    const unsigned int* packed_flat, const float* absmax_flat, unsigned int* packed_tiled,
-    unsigned char* absmax_tiled, int K_dim, int N
+    const unsigned int* packed_flat, const float* absmax_flat, unsigned int* packed_tiled, unsigned char* absmax_tiled,
+    int K_dim, int N
 ) {
     int total_work = N * (K_dim / KBIT_BLOCKSIZE);
     int block_size = 256;
@@ -947,9 +946,9 @@ __global__ void kbit_gemm_minimal(
     constexpr int TILE_K = 64;
     constexpr int TILE_N = 128;
     constexpr int BS = 32;
-    constexpr int KB_PER_TILE = TILE_K / BS;                 // 2
-    constexpr int B_COL_STRIDE = KB_PER_TILE * K_BITS + 1;  // +1 padding for bank conflicts
-    constexpr int N_BLOCKS = 2;                              // 16 cols per warp / 8 cols per MMA
+    constexpr int KB_PER_TILE = TILE_K / BS;               // 2
+    constexpr int B_COL_STRIDE = KB_PER_TILE * K_BITS + 1; // +1 padding for bank conflicts
+    constexpr int N_BLOCKS = 2;                            // 16 cols per warp / 8 cols per MMA
 
     const int n_tile = blockIdx.x;
     const int m_tile = blockIdx.y;
@@ -957,10 +956,10 @@ __global__ void kbit_gemm_minimal(
     const int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
     const int warp_id = threadIdx.x / 32;
     const int lane_id = threadIdx.x % 32;
-    const int gid = lane_id / 4;  // group_id (0-7): maps to MMA row (A/C) or column (B)
-    const int tid = lane_id % 4;  // tid_in_group (0-3): maps to MMA column pairs
+    const int gid = lane_id / 4; // group_id (0-7): maps to MMA row (A/C) or column (B)
+    const int tid = lane_id % 4; // tid_in_group (0-3): maps to MMA column pairs
 
-    const int warp_n_base = warp_id * (TILE_N / 8);  // 16 cols per warp
+    const int warp_n_base = warp_id * (TILE_N / 8); // 16 cols per warp
 
     // Shared memory: A tile | B tile (padded) | absmax tile
     extern __shared__ char smem[];
@@ -1013,8 +1012,8 @@ __global__ void kbit_gemm_minimal(
         // ---- Process 4 k-sub-tiles (each 16 elements) ----
 #pragma unroll
         for (int ks = 0; ks < 4; ks++) {
-            const int k_block = ks / 2;   // which 32-element block (0 or 1)
-            const int half_idx = ks % 2;  // which half within block (0: bits 0-15, 1: bits 16-31)
+            const int k_block = ks / 2;  // which 32-element block (0 or 1)
+            const int half_idx = ks % 2; // which half within block (0: bits 0-15, 1: bits 16-31)
 
             // Load A fragment from shared memory
             // m16n8k16 register order (from Turing m16n8k8 decomposition):
@@ -1030,16 +1029,20 @@ __global__ void kbit_gemm_minimal(
                 const int r1 = gid + 8;
                 half2 h_rlo_klo = __halves2half2(
                     (r0 < TILE_M) ? sh_a[r0 * TILE_K + kc0] : __float2half(0.0f),
-                    (r0 < TILE_M) ? sh_a[r0 * TILE_K + kc0 + 1] : __float2half(0.0f));
+                    (r0 < TILE_M) ? sh_a[r0 * TILE_K + kc0 + 1] : __float2half(0.0f)
+                );
                 half2 h_rhi_klo = __halves2half2(
                     (r1 < TILE_M) ? sh_a[r1 * TILE_K + kc0] : __float2half(0.0f),
-                    (r1 < TILE_M) ? sh_a[r1 * TILE_K + kc0 + 1] : __float2half(0.0f));
+                    (r1 < TILE_M) ? sh_a[r1 * TILE_K + kc0 + 1] : __float2half(0.0f)
+                );
                 half2 h_rlo_khi = __halves2half2(
                     (r0 < TILE_M) ? sh_a[r0 * TILE_K + kc1] : __float2half(0.0f),
-                    (r0 < TILE_M) ? sh_a[r0 * TILE_K + kc1 + 1] : __float2half(0.0f));
+                    (r0 < TILE_M) ? sh_a[r0 * TILE_K + kc1 + 1] : __float2half(0.0f)
+                );
                 half2 h_rhi_khi = __halves2half2(
                     (r1 < TILE_M) ? sh_a[r1 * TILE_K + kc1] : __float2half(0.0f),
-                    (r1 < TILE_M) ? sh_a[r1 * TILE_K + kc1 + 1] : __float2half(0.0f));
+                    (r1 < TILE_M) ? sh_a[r1 * TILE_K + kc1 + 1] : __float2half(0.0f)
+                );
                 frag_a[0] = *reinterpret_cast<uint32_t*>(&h_rlo_klo);
                 frag_a[1] = *reinterpret_cast<uint32_t*>(&h_rhi_klo);
                 frag_a[2] = *reinterpret_cast<uint32_t*>(&h_rlo_khi);
@@ -1094,11 +1097,9 @@ __global__ void kbit_gemm_minimal(
                              "{%4, %5, %6, %7}, "
                              "{%8, %9}, "
                              "{%10, %11, %12, %13};\n"
-                             : "=f"(frag_c[nb][0]), "=f"(frag_c[nb][1]), "=f"(frag_c[nb][2]),
-                               "=f"(frag_c[nb][3])
-                             : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]),
-                               "r"(frag_b[0]), "r"(frag_b[1]),
-                               "f"(frag_c[nb][0]), "f"(frag_c[nb][1]), "f"(frag_c[nb][2]),
+                             : "=f"(frag_c[nb][0]), "=f"(frag_c[nb][1]), "=f"(frag_c[nb][2]), "=f"(frag_c[nb][3])
+                             : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]), "r"(frag_b[0]),
+                               "r"(frag_b[1]), "f"(frag_c[nb][0]), "f"(frag_c[nb][1]), "f"(frag_c[nb][2]),
                                "f"(frag_c[nb][3]));
             }
         }
@@ -1144,8 +1145,8 @@ void kbitGemmMinimal(
     dim3 grid(n_tiles, m_tiles);
     dim3 block(256);
 
-    int smem_size = TILE_M * TILE_K * sizeof(half) + TILE_N * B_COL_STRIDE * sizeof(unsigned int)
-                    + TILE_N * KB_PER_TILE * sizeof(unsigned char);
+    int smem_size = TILE_M * TILE_K * sizeof(half) + TILE_N * B_COL_STRIDE * sizeof(unsigned int) +
+                    TILE_N * KB_PER_TILE * sizeof(unsigned char);
 
     kbit_gemm_minimal<K><<<grid, block, smem_size>>>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
@@ -1163,14 +1164,9 @@ __device__ __forceinline__ void cp_async_cg_16(void* __restrict__ smem, const vo
     asm volatile("cp.async.cg.shared.global [%0], [%1], 16;\n" ::"r"(smem_addr), "l"(gmem));
 }
 
-__device__ __forceinline__ void cp_async_fence() {
-    asm volatile("cp.async.commit_group;\n" ::);
-}
+__device__ __forceinline__ void cp_async_fence() { asm volatile("cp.async.commit_group;\n" ::); }
 
-template <int N>
-__device__ __forceinline__ void cp_async_wait() {
-    asm volatile("cp.async.wait_group %0;\n" ::"n"(N));
-}
+template <int N> __device__ __forceinline__ void cp_async_wait() { asm volatile("cp.async.wait_group %0;\n" ::"n"(N)); }
 
 template <int K_BITS>
 __global__ void kbit_gemm_pipelined(
@@ -1181,14 +1177,14 @@ __global__ void kbit_gemm_pipelined(
     constexpr int TILE_K = 64;
     constexpr int TILE_N = 128;
     constexpr int BS = 32;
-    constexpr int KB_PER_TILE = TILE_K / BS;                          // 2
-    constexpr int B_COL_WORDS = KB_PER_TILE * K_BITS;                 // words per column (no padding)
-    constexpr int N_BLOCKS = 2;                                        // 16 cols per warp / 8 cols per MMA
+    constexpr int KB_PER_TILE = TILE_K / BS;          // 2
+    constexpr int B_COL_WORDS = KB_PER_TILE * K_BITS; // words per column (no padding)
+    constexpr int N_BLOCKS = 2;                       // 16 cols per warp / 8 cols per MMA
 
     // Per-stage sizes in elements
-    constexpr int A_STAGE_ELEMS = TILE_M * TILE_K;                     // half elements
-    constexpr int B_STAGE_WORDS = TILE_N * B_COL_WORDS;                // uint32 elements
-    constexpr int ABS_STAGE_BYTES = TILE_N * KB_PER_TILE;              // uint8 elements
+    constexpr int A_STAGE_ELEMS = TILE_M * TILE_K;        // half elements
+    constexpr int B_STAGE_WORDS = TILE_N * B_COL_WORDS;   // uint32 elements
+    constexpr int ABS_STAGE_BYTES = TILE_N * KB_PER_TILE; // uint8 elements
 
     // Per-stage sizes in bytes (all naturally 16-byte aligned)
     constexpr int A_STAGE_BYTES = A_STAGE_ELEMS * sizeof(half);
@@ -1214,9 +1210,7 @@ __global__ void kbit_gemm_pipelined(
     extern __shared__ char smem[];
 
     // Helper lambdas for stage-indexed shared memory pointers
-    auto sh_a = [&](int stage) -> half* {
-        return reinterpret_cast<half*>(smem + stage * STAGE_BYTES);
-    };
+    auto sh_a = [&](int stage) -> half* { return reinterpret_cast<half*>(smem + stage * STAGE_BYTES); };
     auto sh_b = [&](int stage) -> unsigned int* {
         return reinterpret_cast<unsigned int*>(smem + stage * STAGE_BYTES + A_STAGE_BYTES);
     };
@@ -1287,16 +1281,20 @@ __global__ void kbit_gemm_pipelined(
                 const int r1 = gid + 8;
                 half2 h_rlo_klo = __halves2half2(
                     (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc0] : __float2half(0.0f),
-                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc0 + 1] : __float2half(0.0f));
+                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc0 + 1] : __float2half(0.0f)
+                );
                 half2 h_rhi_klo = __halves2half2(
                     (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc0] : __float2half(0.0f),
-                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc0 + 1] : __float2half(0.0f));
+                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc0 + 1] : __float2half(0.0f)
+                );
                 half2 h_rlo_khi = __halves2half2(
                     (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc1] : __float2half(0.0f),
-                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc1 + 1] : __float2half(0.0f));
+                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc1 + 1] : __float2half(0.0f)
+                );
                 half2 h_rhi_khi = __halves2half2(
                     (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc1] : __float2half(0.0f),
-                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc1 + 1] : __float2half(0.0f));
+                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc1 + 1] : __float2half(0.0f)
+                );
                 frag_a[0] = *reinterpret_cast<uint32_t*>(&h_rlo_klo);
                 frag_a[1] = *reinterpret_cast<uint32_t*>(&h_rhi_klo);
                 frag_a[2] = *reinterpret_cast<uint32_t*>(&h_rlo_khi);
@@ -1342,11 +1340,9 @@ __global__ void kbit_gemm_pipelined(
                              "{%4, %5, %6, %7}, "
                              "{%8, %9}, "
                              "{%10, %11, %12, %13};\n"
-                             : "=f"(frag_c[nb][0]), "=f"(frag_c[nb][1]), "=f"(frag_c[nb][2]),
-                               "=f"(frag_c[nb][3])
-                             : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]),
-                               "r"(frag_b[0]), "r"(frag_b[1]),
-                               "f"(frag_c[nb][0]), "f"(frag_c[nb][1]), "f"(frag_c[nb][2]),
+                             : "=f"(frag_c[nb][0]), "=f"(frag_c[nb][1]), "=f"(frag_c[nb][2]), "=f"(frag_c[nb][3])
+                             : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]), "r"(frag_b[0]),
+                               "r"(frag_b[1]), "f"(frag_c[nb][0]), "f"(frag_c[nb][1]), "f"(frag_c[nb][2]),
                                "f"(frag_c[nb][3]));
             }
         }
@@ -1364,9 +1360,9 @@ __global__ void kbit_gemm_pipelined(
         if (kt + 1 < k_tiles) {
             fetch_tile((kt + 1) % 2, kt + 1);
             cp_async_fence();
-            cp_async_wait<1>();  // wait for current tile, allow next pending
+            cp_async_wait<1>(); // wait for current tile, allow next pending
         } else {
-            cp_async_wait<0>();  // last tile: wait for everything
+            cp_async_wait<0>(); // last tile: wait for everything
         }
         __syncthreads();
 
@@ -1417,7 +1413,7 @@ void kbitGemmPipelined(
     dim3 grid(n_tiles, m_tiles);
     dim3 block(256);
 
-    int smem_size = 2 * STAGE_BYTES;  // double buffer
+    int smem_size = 2 * STAGE_BYTES; // double buffer
 
     kbit_gemm_pipelined<K><<<grid, block, smem_size>>>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
@@ -1469,9 +1465,7 @@ __global__ void kbit_gemm_splitk(
 
     // Double-buffered shared memory
     extern __shared__ char smem[];
-    auto sh_a = [&](int stage) -> half* {
-        return reinterpret_cast<half*>(smem + stage * STAGE_BYTES);
-    };
+    auto sh_a = [&](int stage) -> half* { return reinterpret_cast<half*>(smem + stage * STAGE_BYTES); };
     auto sh_b = [&](int stage) -> unsigned int* {
         return reinterpret_cast<unsigned int*>(smem + stage * STAGE_BYTES + A_STAGE_BYTES);
     };
@@ -1538,16 +1532,20 @@ __global__ void kbit_gemm_splitk(
                 const int r1 = gid + 8;
                 half2 h_rlo_klo = __halves2half2(
                     (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc0] : __float2half(0.0f),
-                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc0 + 1] : __float2half(0.0f));
+                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc0 + 1] : __float2half(0.0f)
+                );
                 half2 h_rhi_klo = __halves2half2(
                     (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc0] : __float2half(0.0f),
-                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc0 + 1] : __float2half(0.0f));
+                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc0 + 1] : __float2half(0.0f)
+                );
                 half2 h_rlo_khi = __halves2half2(
                     (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc1] : __float2half(0.0f),
-                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc1 + 1] : __float2half(0.0f));
+                    (r0 < TILE_M) ? a_ptr[r0 * TILE_K + kc1 + 1] : __float2half(0.0f)
+                );
                 half2 h_rhi_khi = __halves2half2(
                     (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc1] : __float2half(0.0f),
-                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc1 + 1] : __float2half(0.0f));
+                    (r1 < TILE_M) ? a_ptr[r1 * TILE_K + kc1 + 1] : __float2half(0.0f)
+                );
                 frag_a[0] = *reinterpret_cast<uint32_t*>(&h_rlo_klo);
                 frag_a[1] = *reinterpret_cast<uint32_t*>(&h_rhi_klo);
                 frag_a[2] = *reinterpret_cast<uint32_t*>(&h_rlo_khi);
@@ -1591,11 +1589,9 @@ __global__ void kbit_gemm_splitk(
                              "{%4, %5, %6, %7}, "
                              "{%8, %9}, "
                              "{%10, %11, %12, %13};\n"
-                             : "=f"(frag_c[nb][0]), "=f"(frag_c[nb][1]), "=f"(frag_c[nb][2]),
-                               "=f"(frag_c[nb][3])
-                             : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]),
-                               "r"(frag_b[0]), "r"(frag_b[1]),
-                               "f"(frag_c[nb][0]), "f"(frag_c[nb][1]), "f"(frag_c[nb][2]),
+                             : "=f"(frag_c[nb][0]), "=f"(frag_c[nb][1]), "=f"(frag_c[nb][2]), "=f"(frag_c[nb][3])
+                             : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]), "r"(frag_b[0]),
+                               "r"(frag_b[1]), "f"(frag_c[nb][0]), "f"(frag_c[nb][1]), "f"(frag_c[nb][2]),
                                "f"(frag_c[nb][3]));
             }
         }
@@ -1704,12 +1700,13 @@ void kbitGemmSplitK(
 
     if (k_chunks <= 1) {
         dim3 grid(n_tiles, m_tiles);
-        kbit_gemm_splitk<K><<<grid, block, smem_size>>>(
-            A, B_packed, B_absmax, codebook, C, nullptr, nullptr, M, K_dim, N, 1);
+        kbit_gemm_splitk<K>
+            <<<grid, block, smem_size>>>(A, B_packed, B_absmax, codebook, C, nullptr, nullptr, M, K_dim, N, 1);
     } else {
         dim3 grid(n_tiles, m_tiles, k_chunks);
         kbit_gemm_splitk<K><<<grid, block, smem_size>>>(
-            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks);
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks
+        );
     }
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -1719,32 +1716,31 @@ void kbitGemmSplitK(
 // Uses the same split-K architecture as Stage 5.
 
 // Helper: type-specific operations
-template <typename scalar_t>
-struct ScalarOps {
+template <typename scalar_t> struct ScalarOps {
     __device__ static scalar_t from_float(float f);
     __device__ static float to_float(scalar_t v);
     __device__ static scalar_t mul(scalar_t a, scalar_t b);
 };
 
-template <>
-struct ScalarOps<half> {
+template <> struct ScalarOps<half> {
     __device__ static half from_float(float f) { return __float2half(f); }
+
     __device__ static float to_float(half v) { return __half2float(v); }
+
     __device__ static half mul(half a, half b) { return __hmul(a, b); }
 };
 
-template <>
-struct ScalarOps<__nv_bfloat16> {
+template <> struct ScalarOps<__nv_bfloat16> {
     __device__ static __nv_bfloat16 from_float(float f) { return __float2bfloat16(f); }
+
     __device__ static float to_float(__nv_bfloat16 v) { return __bfloat162float(v); }
+
     __device__ static __nv_bfloat16 mul(__nv_bfloat16 a, __nv_bfloat16 b) { return __hmul(a, b); }
 };
 
 // Helper: MMA instruction dispatch based on scalar_t
 template <typename scalar_t>
-__device__ __forceinline__ void mma_m16n8k16(
-    uint32_t (&frag_a)[4], uint32_t (&frag_b)[2], float (&frag_c)[4]
-) {
+__device__ __forceinline__ void mma_m16n8k16(uint32_t (&frag_a)[4], uint32_t (&frag_b)[2], float (&frag_c)[4]) {
     if constexpr (std::is_same_v<scalar_t, half>) {
         asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 "
                      "{%0, %1, %2, %3}, "
@@ -1752,8 +1748,7 @@ __device__ __forceinline__ void mma_m16n8k16(
                      "{%8, %9}, "
                      "{%10, %11, %12, %13};\n"
                      : "=f"(frag_c[0]), "=f"(frag_c[1]), "=f"(frag_c[2]), "=f"(frag_c[3])
-                     : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]),
-                       "r"(frag_b[0]), "r"(frag_b[1]),
+                     : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]), "r"(frag_b[0]), "r"(frag_b[1]),
                        "f"(frag_c[0]), "f"(frag_c[1]), "f"(frag_c[2]), "f"(frag_c[3]));
     } else {
         asm volatile("mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32 "
@@ -1762,15 +1757,13 @@ __device__ __forceinline__ void mma_m16n8k16(
                      "{%8, %9}, "
                      "{%10, %11, %12, %13};\n"
                      : "=f"(frag_c[0]), "=f"(frag_c[1]), "=f"(frag_c[2]), "=f"(frag_c[3])
-                     : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]),
-                       "r"(frag_b[0]), "r"(frag_b[1]),
+                     : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]), "r"(frag_b[0]), "r"(frag_b[1]),
                        "f"(frag_c[0]), "f"(frag_c[1]), "f"(frag_c[2]), "f"(frag_c[3]));
     }
 }
 
 // Helper: pack two scalar_t values into a uint32 (for MMA fragment register)
-template <typename scalar_t>
-__device__ __forceinline__ uint32_t pack_two(scalar_t a, scalar_t b) {
+template <typename scalar_t> __device__ __forceinline__ uint32_t pack_two(scalar_t a, scalar_t b) {
     if constexpr (std::is_same_v<scalar_t, half>) {
         half2 v = __halves2half2(a, b);
         return *reinterpret_cast<uint32_t*>(&v);
@@ -1783,9 +1776,8 @@ __device__ __forceinline__ uint32_t pack_two(scalar_t a, scalar_t b) {
 template <int K_BITS, int M_BLOCKS, typename scalar_t>
 __global__ void kbit_gemm_prod(
     const scalar_t* __restrict__ A, const unsigned int* __restrict__ B_packed,
-    const unsigned char* __restrict__ B_absmax, const float* __restrict__ codebook,
-    scalar_t* __restrict__ C, float* __restrict__ C_workspace,
-    int* __restrict__ tile_counters, const int M, const int K_dim, const int N,
+    const unsigned char* __restrict__ B_absmax, const float* __restrict__ codebook, scalar_t* __restrict__ C,
+    float* __restrict__ C_workspace, int* __restrict__ tile_counters, const int M, const int K_dim, const int N,
     const int k_splits, const int total_work
 ) {
     using Ops = ScalarOps<scalar_t>;
@@ -1818,9 +1810,7 @@ __global__ void kbit_gemm_prod(
 
     // Double-buffered shared memory
     extern __shared__ char smem[];
-    auto sh_a = [&](int stage) -> scalar_t* {
-        return reinterpret_cast<scalar_t*>(smem + stage * STAGE_BYTES);
-    };
+    auto sh_a = [&](int stage) -> scalar_t* { return reinterpret_cast<scalar_t*>(smem + stage * STAGE_BYTES); };
     auto sh_b = [&](int stage) -> unsigned int* {
         return reinterpret_cast<unsigned int*>(smem + stage * STAGE_BYTES + A_STAGE_BYTES);
     };
@@ -1887,7 +1877,8 @@ __global__ void kbit_gemm_prod(
                     int col_group = i % (TILE_K / 8);
                     int swizzled_group = col_group ^ (row % 8);
                     int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
-                    const int4* src = reinterpret_cast<const int4*>(&A[(m_base + row) * K_dim + k_base + col_group * 8]);
+                    const int4* src =
+                        reinterpret_cast<const int4*>(&A[(m_base + row) * K_dim + k_base + col_group * 8]);
                     cp_async_cg_16(dst, src);
                 }
             } else {
@@ -1948,7 +1939,8 @@ __global__ void kbit_gemm_prod(
                     for (int b = 0; b < K_BITS; b++)
                         planes[b] = b_ptr[b_addr + b];
 
-                    scalar_t scale = Ops::from_float(decode_e4m4_absmax_branchless(abs_ptr[col * KB_PER_TILE + k_block]));
+                    scalar_t scale =
+                        Ops::from_float(decode_e4m4_absmax_branchless(abs_ptr[col * KB_PER_TILE + k_block]));
 
                     const int bit_offset = half_idx * 16;
                     const int rows[4] = {2 * tid, 2 * tid + 1, 2 * tid + 8, 2 * tid + 9};
@@ -2073,9 +2065,8 @@ __global__ void kbit_gemm_prod(
 // Production GEMM launcher — persistent kernel with auto k_splits
 template <int K, int MB, typename scalar_t>
 static void kbitGemmProdLaunch(
-    const scalar_t* A, const unsigned int* B_packed, const unsigned char* B_absmax,
-    const float* codebook, scalar_t* C, float* C_workspace, int* tile_counters,
-    int M, int K_dim, int N, int num_sms
+    const scalar_t* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, scalar_t* C,
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int num_sms
 ) {
     constexpr int TILE_M = MB * 16;
     constexpr int TILE_K = 64;
@@ -2104,9 +2095,9 @@ static void kbitGemmProdLaunch(
     // Tier 2: Moderate underutilization with DRAM-bound data.
     // When data exceeds L2 cache, more SMs generate more DRAM requests.
     // Split conservatively (k_splits <= 2) to avoid atomicAdd overhead.
-    long long b_data_bytes = (long long)N * (K_dim / BS) * K * sizeof(unsigned int)
-                           + (long long)N * (K_dim / BS);  // packed + absmax
-    constexpr long long DRAM_THRESHOLD = 24LL * 1024 * 1024;  // 24 MB
+    long long b_data_bytes =
+        (long long)N * (K_dim / BS) * K * sizeof(unsigned int) + (long long)N * (K_dim / BS); // packed + absmax
+    constexpr long long DRAM_THRESHOLD = 24LL * 1024 * 1024;                                  // 24 MB
 
     int k_splits = 1;
     if (mn_tiles < num_sms / 4 && k_tiles > 1) {
@@ -2128,16 +2119,15 @@ static void kbitGemmProdLaunch(
     int smem_size = 2 * STAGE_BYTES;
 
     kbit_gemm_prod<K, MB, scalar_t><<<grid_size, block, smem_size>>>(
-        A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters,
-        M, K_dim, N, k_splits, total_work);
+        A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_splits, total_work
+    );
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 template <int K, typename scalar_t>
 void kbitGemmProd(
-    const scalar_t* A, const unsigned int* B_packed, const unsigned char* B_absmax,
-    const float* codebook, scalar_t* C, float* C_workspace, int* tile_counters,
-    int M, int K_dim, int N, int k_chunks
+    const scalar_t* A, const unsigned int* B_packed, const unsigned char* B_absmax, const float* codebook, scalar_t* C,
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks
 ) {
     // Query SM count for persistent kernel grid sizing and M_BLOCKS dispatch
     int dev;
@@ -2158,16 +2148,24 @@ void kbitGemmProd(
 
     switch (m_blocks) {
     case 4:
-        kbitGemmProdLaunch<K, 4, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms);
+        kbitGemmProdLaunch<K, 4, scalar_t>(
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms
+        );
         break;
     case 3:
-        kbitGemmProdLaunch<K, 3, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms);
+        kbitGemmProdLaunch<K, 3, scalar_t>(
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms
+        );
         break;
     case 2:
-        kbitGemmProdLaunch<K, 2, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms);
+        kbitGemmProdLaunch<K, 2, scalar_t>(
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms
+        );
         break;
     default:
-        kbitGemmProdLaunch<K, 1, scalar_t>(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms);
+        kbitGemmProdLaunch<K, 1, scalar_t>(
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms
+        );
         break;
     }
 }
@@ -2180,16 +2178,10 @@ void kbitGemmProd(
 
 template <int K_BITS, int M_BLOCKS, typename scalar_t>
 __global__ void kbit_grouped_gemm_prod(
-    const scalar_t* __restrict__ A_concat,
-    const unsigned int* __restrict__ B_packed_all,
-    const unsigned char* __restrict__ B_absmax_all,
-    const float* __restrict__ codebook,
-    scalar_t* __restrict__ C_concat,
-    const int* __restrict__ expert_offsets,
-    const int* __restrict__ work_offsets,
-    const int K_dim, const int N,
-    const int num_experts,
-    const int total_work
+    const scalar_t* __restrict__ A_concat, const unsigned int* __restrict__ B_packed_all,
+    const unsigned char* __restrict__ B_absmax_all, const float* __restrict__ codebook, scalar_t* __restrict__ C_concat,
+    const int* __restrict__ expert_offsets, const int* __restrict__ work_offsets, const int K_dim, const int N,
+    const int num_experts, const int total_work
 ) {
     using Ops = ScalarOps<scalar_t>;
     constexpr int TILE_M = M_BLOCKS * 16;
@@ -2224,9 +2216,7 @@ __global__ void kbit_grouped_gemm_prod(
 
     // Double-buffered shared memory
     extern __shared__ char smem[];
-    auto sh_a = [&](int stage) -> scalar_t* {
-        return reinterpret_cast<scalar_t*>(smem + stage * STAGE_BYTES);
-    };
+    auto sh_a = [&](int stage) -> scalar_t* { return reinterpret_cast<scalar_t*>(smem + stage * STAGE_BYTES); };
     auto sh_b = [&](int stage) -> unsigned int* {
         return reinterpret_cast<unsigned int*>(smem + stage * STAGE_BYTES + A_STAGE_BYTES);
     };
@@ -2306,7 +2296,8 @@ __global__ void kbit_grouped_gemm_prod(
                     int col_group = i % (TILE_K / 8);
                     int swizzled_group = col_group ^ (row % 8);
                     int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
-                    const int4* src = reinterpret_cast<const int4*>(&A[(m_base + row) * K_dim + k_base + col_group * 8]);
+                    const int4* src =
+                        reinterpret_cast<const int4*>(&A[(m_base + row) * K_dim + k_base + col_group * 8]);
                     cp_async_cg_16(dst, src);
                 }
             } else {
@@ -2367,7 +2358,8 @@ __global__ void kbit_grouped_gemm_prod(
                     for (int b = 0; b < K_BITS; b++)
                         planes[b] = b_ptr[b_addr + b];
 
-                    scalar_t scale = Ops::from_float(decode_e4m4_absmax_branchless(abs_ptr[col * KB_PER_TILE + k_block]));
+                    scalar_t scale =
+                        Ops::from_float(decode_e4m4_absmax_branchless(abs_ptr[col * KB_PER_TILE + k_block]));
 
                     const int bit_offset = half_idx * 16;
                     const int rows[4] = {2 * tid, 2 * tid + 1, 2 * tid + 8, 2 * tid + 9};
@@ -2447,10 +2439,9 @@ __global__ void kbit_grouped_gemm_prod(
 // Grouped GEMM launcher
 template <int K, int MB, typename scalar_t>
 static void kbitGroupedGemmProdLaunch(
-    const scalar_t* A_concat, const unsigned int* B_packed_all,
-    const unsigned char* B_absmax_all, const float* codebook,
-    scalar_t* C_concat, const int* expert_offsets, const int* work_offsets,
-    int K_dim, int N, int num_experts, int total_work
+    const scalar_t* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,
+    const float* codebook, scalar_t* C_concat, const int* expert_offsets, const int* work_offsets, int K_dim, int N,
+    int num_experts, int total_work
 ) {
     constexpr int TILE_M = MB * 16;
     constexpr int TILE_K = 64;
@@ -2475,9 +2466,9 @@ static void kbitGroupedGemmProdLaunch(
     int smem_size = 2 * STAGE_BYTES;
 
     kbit_grouped_gemm_prod<K, MB, scalar_t><<<grid_size, block, smem_size>>>(
-        A_concat, B_packed_all, B_absmax_all, codebook, C_concat,
-        expert_offsets, work_offsets,
-        K_dim, N, num_experts, total_work);
+        A_concat, B_packed_all, B_absmax_all, codebook, C_concat, expert_offsets, work_offsets, K_dim, N, num_experts,
+        total_work
+    );
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -2485,27 +2476,30 @@ static void kbitGroupedGemmProdLaunch(
 // and max_M internally to avoid Python-side GPU→CPU sync.
 template <int K, typename scalar_t>
 void kbitGroupedGemmProd(
-    const scalar_t* A_concat, const unsigned int* B_packed_all,
-    const unsigned char* B_absmax_all, const float* codebook,
-    scalar_t* C_concat, const int* d_expert_offsets,
-    int K_dim, int N, int num_experts
+    const scalar_t* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,
+    const float* codebook, scalar_t* C_concat, const int* d_expert_offsets, int K_dim, int N, int num_experts
 ) {
     // Copy expert_offsets from device to host (tiny: num_experts+1 ints)
     std::vector<int> h_offsets(num_experts + 1);
-    CUDA_CHECK_RETURN(cudaMemcpy(h_offsets.data(), d_expert_offsets,
-                                  (num_experts + 1) * sizeof(int), cudaMemcpyDeviceToHost));
+    CUDA_CHECK_RETURN(
+        cudaMemcpy(h_offsets.data(), d_expert_offsets, (num_experts + 1) * sizeof(int), cudaMemcpyDeviceToHost)
+    );
 
     // Compute max_M and M_BLOCKS
     int max_M = 0;
     for (int i = 0; i < num_experts; i++) {
         int M_i = h_offsets[i + 1] - h_offsets[i];
-        if (M_i > max_M) max_M = M_i;
+        if (M_i > max_M)
+            max_M = M_i;
     }
 
     int m_blocks = 1;
-    if (max_M > 48) m_blocks = 4;
-    else if (max_M > 32) m_blocks = 3;
-    else if (max_M > 16) m_blocks = 2;
+    if (max_M > 48)
+        m_blocks = 4;
+    else if (max_M > 32)
+        m_blocks = 3;
+    else if (max_M > 16)
+        m_blocks = 2;
 
     int tile_m = m_blocks * 16;
     int n_tiles = N / 128;
@@ -2520,26 +2514,40 @@ void kbitGroupedGemmProd(
     }
     int total_work = h_work_offsets[num_experts];
 
-    if (total_work == 0) return;
+    if (total_work == 0)
+        return;
 
     // Copy work_offsets to device
     int* d_work_offsets;
     CUDA_CHECK_RETURN(cudaMalloc(&d_work_offsets, (num_experts + 1) * sizeof(int)));
-    CUDA_CHECK_RETURN(cudaMemcpy(d_work_offsets, h_work_offsets.data(),
-                                  (num_experts + 1) * sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK_RETURN(
+        cudaMemcpy(d_work_offsets, h_work_offsets.data(), (num_experts + 1) * sizeof(int), cudaMemcpyHostToDevice)
+    );
 
     switch (m_blocks) {
     case 4:
-        kbitGroupedGemmProdLaunch<K, 4, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        kbitGroupedGemmProdLaunch<K, 4, scalar_t>(
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N,
+            num_experts, total_work
+        );
         break;
     case 3:
-        kbitGroupedGemmProdLaunch<K, 3, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        kbitGroupedGemmProdLaunch<K, 3, scalar_t>(
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N,
+            num_experts, total_work
+        );
         break;
     case 2:
-        kbitGroupedGemmProdLaunch<K, 2, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        kbitGroupedGemmProdLaunch<K, 2, scalar_t>(
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N,
+            num_experts, total_work
+        );
         break;
     default:
-        kbitGroupedGemmProdLaunch<K, 1, scalar_t>(A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N, num_experts, total_work);
+        kbitGroupedGemmProdLaunch<K, 1, scalar_t>(
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, d_expert_offsets, d_work_offsets, K_dim, N,
+            num_experts, total_work
+        );
         break;
     }
 
@@ -2548,6 +2556,7 @@ void kbitGroupedGemmProd(
 
 // Cached SM count to avoid repeated cudaGetDevice/cudaDeviceGetAttribute calls
 static int cached_num_sms = 0;
+
 static int get_num_sms() {
     if (cached_num_sms == 0) {
         int dev;
@@ -2571,27 +2580,25 @@ static int get_num_sms() {
 // This hides memory latency by having independent loads/compute for 2 columns.
 
 template <int K_BITS, int M_VAL, typename scalar_t>
-__global__ void __launch_bounds__(128, 12)
-kbit_scalar_gemv(
+__global__ void __launch_bounds__(128, 12) kbit_scalar_gemv(
     const scalar_t* __restrict__ A,
-    const unsigned int* __restrict__ B_packed,   // flat: [N * num_k_blocks * K_BITS] uint32
-    const float* __restrict__ B_absmax,          // flat: [N * num_k_blocks] float32
-    const float* __restrict__ codebook,
-    scalar_t* __restrict__ C,
-    const int M, const int K_dim, const int N
+    const unsigned int* __restrict__ B_packed, // flat: [N * num_k_blocks * K_BITS] uint32
+    const float* __restrict__ B_absmax,        // flat: [N * num_k_blocks] float32
+    const float* __restrict__ codebook, scalar_t* __restrict__ C, const int M, const int K_dim, const int N
 ) {
-    constexpr int BS = 32;          // quantization block size
-    constexpr int VALUES_PER_ITER = 32;     // Each lane processes 32 values per iteration
+    constexpr int BS = 32;              // quantization block size
+    constexpr int VALUES_PER_ITER = 32; // Each lane processes 32 values per iteration
 
     typedef cub::WarpReduce<float> WarpReduce;
-    __shared__ typename WarpReduce::TempStorage temp_storage[4];  // 4 warps
+    __shared__ typename WarpReduce::TempStorage temp_storage[4]; // 4 warps
 
     const int warp_id = threadIdx.x / 32;
     const int lane_id = threadIdx.x % 32;
 
     // Each warp handles 2 columns. 8 columns per block (4 warps x 2).
     const int col_base = blockIdx.x * 8 + warp_id * 2;
-    if (col_base >= N) return;
+    if (col_base >= N)
+        return;
 
     const int num_k_blocks = K_dim / BS;
 
@@ -2607,7 +2614,7 @@ kbit_scalar_gemv(
     // Accumulators for both columns
     float acc_0[M_VAL];
     float acc_1[M_VAL];
-    #pragma unroll
+#pragma unroll
     for (int m = 0; m < M_VAL; m++) {
         acc_0[m] = 0.0f;
         acc_1[m] = 0.0f;
@@ -2617,62 +2624,66 @@ kbit_scalar_gemv(
     for (int k_iter = lane_id * VALUES_PER_ITER; k_iter < K_dim; k_iter += 32 * VALUES_PER_ITER) {
         const int block_idx = k_iter / BS;
         const int k_remainder = k_iter % BS;
-        
+
         // Load absmax for both columns (independent loads, can coalesce)
         float amax_0 = abs_col_0[block_idx];
         float amax_1 = (col_base + 1 < N) ? abs_col_1[block_idx] : 0.0f;
-        
+
         // Load bit-plane words for both columns
         unsigned int planes_0[K_BITS];
         unsigned int planes_1[K_BITS];
-        #pragma unroll
+#pragma unroll
         for (int b = 0; b < K_BITS; b++) {
             planes_0[b] = B_col_0[block_idx * K_BITS + b];
             planes_1[b] = (col_base + 1 < N) ? B_col_1[block_idx * K_BITS + b] : 0u;
         }
-        
-        // Process 32 elements in 4 chunks of 8 (int4 vector loads)
-        #pragma unroll
+
+// Process 32 elements in 4 chunks of 8 (int4 vector loads)
+#pragma unroll
         for (int sub = 0; sub < 4; sub++) {
             const int k_offset = k_remainder + sub * 8;
-            if (k_offset >= BS) break;
-            
+            if (k_offset >= BS)
+                break;
+
             const int k_pos = k_iter + sub * 8;
-            if (k_pos >= K_dim) break;
-            
-            #pragma unroll
+            if (k_pos >= K_dim)
+                break;
+
+#pragma unroll
             for (int m = 0; m < M_VAL; m++) {
                 // Vector-load 8 A values (shared between both columns)
                 int4 av = *reinterpret_cast<const int4*>(&A[m * K_dim + k_pos]);
                 const scalar_t* ap = reinterpret_cast<const scalar_t*>(&av);
-                
-                // Dequant + FMA for 8 elements - COLUMN 0
-                #pragma unroll
+
+// Dequant + FMA for 8 elements - COLUMN 0
+#pragma unroll
                 for (int j = 0; j < 8; j++) {
                     const int elem_idx = k_offset + j;
-                    if (elem_idx >= BS) break;
-                    
+                    if (elem_idx >= BS)
+                        break;
+
                     int idx_0 = 0;
-                    #pragma unroll
+#pragma unroll
                     for (int b = 0; b < K_BITS; b++)
                         idx_0 |= ((planes_0[b] >> elem_idx) & 1) << b;
-                    
+
                     float w_0 = __shfl_sync(0xFFFFFFFF, cb, idx_0) * amax_0;
                     acc_0[m] += w_0 * ScalarOps<scalar_t>::to_float(ap[j]);
                 }
-                
+
                 // Dequant + FMA for 8 elements - COLUMN 1 (if valid)
                 if (col_base + 1 < N) {
-                    #pragma unroll
+#pragma unroll
                     for (int j = 0; j < 8; j++) {
                         const int elem_idx = k_offset + j;
-                        if (elem_idx >= BS) break;
-                        
+                        if (elem_idx >= BS)
+                            break;
+
                         int idx_1 = 0;
-                        #pragma unroll
+#pragma unroll
                         for (int b = 0; b < K_BITS; b++)
                             idx_1 |= ((planes_1[b] >> elem_idx) & 1) << b;
-                        
+
                         float w_1 = __shfl_sync(0xFFFFFFFF, cb, idx_1) * amax_1;
                         acc_1[m] += w_1 * ScalarOps<scalar_t>::to_float(ap[j]);
                     }
@@ -2681,16 +2692,16 @@ kbit_scalar_gemv(
         }
     }
 
-    // Warp-level reduction for both columns
-    #pragma unroll
+// Warp-level reduction for both columns
+#pragma unroll
     for (int m = 0; m < M_VAL; m++) {
         acc_0[m] = WarpReduce(temp_storage[warp_id]).Sum(acc_0[m]);
-        
+
         // Lane 0 writes output for column 0
         if (lane_id == 0 && m < M) {
             C[m * N + col_base] = ScalarOps<scalar_t>::from_float(acc_0[m]);
         }
-        
+
         // Column 1 reduction and write
         if (col_base + 1 < N) {
             acc_1[m] = WarpReduce(temp_storage[warp_id]).Sum(acc_1[m]);
@@ -2704,36 +2715,36 @@ kbit_scalar_gemv(
 // ---- Scalar GEMV launcher ----
 template <int K, int MV, typename scalar_t>
 static void kbitScalarGemvLaunch(
-    const scalar_t* A, const unsigned int* B_packed,
-    const float* B_absmax, const float* codebook,
-    scalar_t* C, int M, int K_dim, int N
+    const scalar_t* A, const unsigned int* B_packed, const float* B_absmax, const float* codebook, scalar_t* C, int M,
+    int K_dim, int N
 ) {
-    constexpr int BLOCK_SIZE = 128;  // 4 warps, each handling 2 columns
+    constexpr int BLOCK_SIZE = 128; // 4 warps, each handling 2 columns
     constexpr int COLS_PER_BLOCK = 8;
     int grid_size = (N + COLS_PER_BLOCK - 1) / COLS_PER_BLOCK;
 
-    kbit_scalar_gemv<K, MV, scalar_t><<<grid_size, BLOCK_SIZE>>>(
-        A, B_packed, B_absmax, codebook, C, M, K_dim, N);
+    kbit_scalar_gemv<K, MV, scalar_t><<<grid_size, BLOCK_SIZE>>>(A, B_packed, B_absmax, codebook, C, M, K_dim, N);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 // Public entry point: selects M_VAL template
 template <int K, typename scalar_t>
 void kbitScalarGemv(
-    const scalar_t* A, const unsigned int* B_packed,
-    const float* B_absmax, const float* codebook,
-    scalar_t* C, int M, int K_dim, int N
+    const scalar_t* A, const unsigned int* B_packed, const float* B_absmax, const float* codebook, scalar_t* C, int M,
+    int K_dim, int N
 ) {
-    #define LAUNCH_SCALAR_GEMV(MV) \
-        kbitScalarGemvLaunch<K, MV, scalar_t>( \
-            A, B_packed, B_absmax, codebook, C, M, K_dim, N)
+#define LAUNCH_SCALAR_GEMV(MV) kbitScalarGemvLaunch<K, MV, scalar_t>(A, B_packed, B_absmax, codebook, C, M, K_dim, N)
 
-    if (M <= 1) { LAUNCH_SCALAR_GEMV(1); }
-    else if (M <= 2) { LAUNCH_SCALAR_GEMV(2); }
-    else if (M <= 3) { LAUNCH_SCALAR_GEMV(3); }
-    else { LAUNCH_SCALAR_GEMV(4); }
+    if (M <= 1) {
+        LAUNCH_SCALAR_GEMV(1);
+    } else if (M <= 2) {
+        LAUNCH_SCALAR_GEMV(2);
+    } else if (M <= 3) {
+        LAUNCH_SCALAR_GEMV(3);
+    } else {
+        LAUNCH_SCALAR_GEMV(4);
+    }
 
-    #undef LAUNCH_SCALAR_GEMV
+#undef LAUNCH_SCALAR_GEMV
 }
 
 // ===================================================================
@@ -2742,12 +2753,9 @@ void kbitScalarGemv(
 
 template <int K_BITS, int M_VAL, typename scalar_t>
 __global__ void kbit_grouped_scalar_gemv(
-    const scalar_t* __restrict__ A_concat,
-    const unsigned int* __restrict__ B_packed_all,
-    const unsigned char* __restrict__ B_absmax_all,  // E4M4-encoded (tiled layout)
-    const float* __restrict__ codebook,
-    scalar_t* __restrict__ C_concat,
-    const int* __restrict__ expert_offsets,
+    const scalar_t* __restrict__ A_concat, const unsigned int* __restrict__ B_packed_all,
+    const unsigned char* __restrict__ B_absmax_all, // E4M4-encoded (tiled layout)
+    const float* __restrict__ codebook, scalar_t* __restrict__ C_concat, const int* __restrict__ expert_offsets,
     const int K_dim, const int N, const int num_experts
 ) {
     constexpr int BS = 32;
@@ -2760,12 +2768,14 @@ __global__ void kbit_grouped_scalar_gemv(
     const int n_group = blockIdx.x;
     const int n_base = n_group * COLS_PER_BLOCK + warp_id;
 
-    if (n_base >= N) return;
+    if (n_base >= N)
+        return;
 
     const int row_start = expert_offsets[expert_id];
     const int row_end = expert_offsets[expert_id + 1];
     const int M = row_end - row_start;
-    if (M <= 0) return;
+    if (M <= 0)
+        return;
 
     const int num_k_blocks = K_dim / BS;
     const int expert_B_offset = expert_id * num_k_blocks * N * K_BITS;
@@ -2777,57 +2787,54 @@ __global__ void kbit_grouped_scalar_gemv(
     float cb = (lane_id < (1 << K_BITS)) ? codebook[lane_id] : 0.0f;
 
     float acc[M_VAL];
-    #pragma unroll
-    for (int m = 0; m < M_VAL; m++) acc[m] = 0.0f;
+#pragma unroll
+    for (int m = 0; m < M_VAL; m++)
+        acc[m] = 0.0f;
 
     for (int block_idx = lane_id; block_idx < num_k_blocks; block_idx += 32) {
         unsigned int planes[K_BITS];
-        #pragma unroll
+#pragma unroll
         for (int b = 0; b < K_BITS; b++)
             planes[b] = B_col[block_idx * K_BITS + b];
         float amax = load_absmax(abs_col, block_idx);
 
         int k_base = block_idx * BS;
 
-        #pragma unroll
+#pragma unroll
         for (int j = 0; j < 32; j++) {
             int idx = 0;
-            #pragma unroll
+#pragma unroll
             for (int b = 0; b < K_BITS; b++)
                 idx |= ((planes[b] >> j) & 1) << b;
             float w = __shfl_sync(0xFFFFFFFF, cb, idx) * amax;
-            #pragma unroll
+#pragma unroll
             for (int m = 0; m < M_VAL; m++) {
                 if (m < M)
-                    acc[m] += w * ScalarOps<scalar_t>::to_float(
-                        A_concat[(row_start + m) * K_dim + k_base + j]);
+                    acc[m] += w * ScalarOps<scalar_t>::to_float(A_concat[(row_start + m) * K_dim + k_base + j]);
             }
         }
     }
 
-    #pragma unroll
+#pragma unroll
     for (int m = 0; m < M_VAL; m++) {
-        #pragma unroll
+#pragma unroll
         for (int offset = 16; offset >= 1; offset /= 2)
             acc[m] += __shfl_down_sync(0xFFFFFFFF, acc[m], offset);
     }
 
     if (lane_id == 0) {
-        #pragma unroll
+#pragma unroll
         for (int m = 0; m < M_VAL; m++)
             if (m < M)
-                C_concat[(row_start + m) * N + n_base] =
-                    ScalarOps<scalar_t>::from_float(acc[m]);
+                C_concat[(row_start + m) * N + n_base] = ScalarOps<scalar_t>::from_float(acc[m]);
     }
 }
 
 // ---- Grouped scalar GEMV launcher ----
 template <int K, typename scalar_t>
 void kbitGroupedScalarGemv(
-    const scalar_t* A_concat, const unsigned int* B_packed_all,
-    const unsigned char* B_absmax_all, const float* codebook,
-    scalar_t* C_concat, const int* expert_offsets,
-    int K_dim, int N, int num_experts
+    const scalar_t* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,
+    const float* codebook, scalar_t* C_concat, const int* expert_offsets, int K_dim, int N, int num_experts
 ) {
     constexpr int COLS_PER_BLOCK = 4;
     constexpr int BLOCK_SIZE = 128;
@@ -2835,8 +2842,8 @@ void kbitGroupedScalarGemv(
     dim3 grid(n_groups, num_experts);
 
     kbit_grouped_scalar_gemv<K, 4, scalar_t><<<grid, BLOCK_SIZE>>>(
-        A_concat, B_packed_all, B_absmax_all, codebook, C_concat,
-        expert_offsets, K_dim, N, num_experts);
+        A_concat, B_packed_all, B_absmax_all, codebook, C_concat, expert_offsets, K_dim, N, num_experts
+    );
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -2881,8 +2888,7 @@ __global__ void test_mma_kernel(const half* __restrict__ A, const half* __restri
                  "{%8, %9}, "
                  "{%10, %11, %12, %13};\n"
                  : "=f"(c[0]), "=f"(c[1]), "=f"(c[2]), "=f"(c[3])
-                 : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]),
-                   "r"(frag_b[0]), "r"(frag_b[1]),
+                 : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]), "r"(frag_b[0]), "r"(frag_b[1]),
                    "f"(c[0]), "f"(c[1]), "f"(c[2]), "f"(c[3]));
 
     // Write C[16,8] row-major
@@ -2896,7 +2902,6 @@ void testMMA(const half* A, const half* B, float* C) {
     test_mma_kernel<<<1, 32>>>(A, B, C);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
-
 
 // ---- Template instantiations ----
 
@@ -2951,7 +2956,8 @@ INSTANTIATE_KBIT_DEQUANT(float, 4, half)
 INSTANTIATE_KBIT_DEQUANT(float, 5, half)
 
 // Repack instantiations: one per K value
-#define INSTANTIATE_KBIT_REPACK(K) template void repackKbit<K>(const unsigned int*, const float*, unsigned int*, unsigned char*, int, int);
+#define INSTANTIATE_KBIT_REPACK(K)                                                                                     \
+    template void repackKbit<K>(const unsigned int*, const float*, unsigned int*, unsigned char*, int, int);
 
 INSTANTIATE_KBIT_REPACK(2)
 INSTANTIATE_KBIT_REPACK(3)
@@ -2959,10 +2965,16 @@ INSTANTIATE_KBIT_REPACK(4)
 INSTANTIATE_KBIT_REPACK(5)
 
 // GEMM instantiations: one per K value (fp16 only)
-#define INSTANTIATE_KBIT_GEMM(K) \
-    template void kbitGemmMinimal<K>(const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int); \
-    template void kbitGemmPipelined<K>(const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int); \
-    template void kbitGemmSplitK<K>(const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*, int, int, int, int);
+#define INSTANTIATE_KBIT_GEMM(K)                                                                                       \
+    template void kbitGemmMinimal<K>(                                                                                  \
+        const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int                     \
+    );                                                                                                                 \
+    template void kbitGemmPipelined<K>(                                                                                \
+        const half*, const unsigned int*, const unsigned char*, const float*, half*, int, int, int                     \
+    );                                                                                                                 \
+    template void kbitGemmSplitK<K>(                                                                                   \
+        const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*, int, int, int, int  \
+    );
 
 INSTANTIATE_KBIT_GEMM(2)
 INSTANTIATE_KBIT_GEMM(3)
@@ -2970,9 +2982,14 @@ INSTANTIATE_KBIT_GEMM(4)
 INSTANTIATE_KBIT_GEMM(5)
 
 // Production kernel instantiations (fp16 and bf16)
-#define INSTANTIATE_KBIT_GEMM_PROD(K) \
-    template void kbitGemmProd<K, half>(const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*, int, int, int, int); \
-    template void kbitGemmProd<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, float*, int*, int, int, int, int);
+#define INSTANTIATE_KBIT_GEMM_PROD(K)                                                                                  \
+    template void kbitGemmProd<K, half>(                                                                               \
+        const half*, const unsigned int*, const unsigned char*, const float*, half*, float*, int*, int, int, int, int  \
+    );                                                                                                                 \
+    template void kbitGemmProd<K, __nv_bfloat16>(                                                                      \
+        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, float*, int*,   \
+        int, int, int, int                                                                                             \
+    );
 
 INSTANTIATE_KBIT_GEMM_PROD(2)
 INSTANTIATE_KBIT_GEMM_PROD(3)
@@ -2980,9 +2997,14 @@ INSTANTIATE_KBIT_GEMM_PROD(4)
 INSTANTIATE_KBIT_GEMM_PROD(5)
 
 // Grouped expert GEMM instantiations (fp16 and bf16)
-#define INSTANTIATE_KBIT_GROUPED_GEMM_PROD(K) \
-    template void kbitGroupedGemmProd<K, half>(const half*, const unsigned int*, const unsigned char*, const float*, half*, const int*, int, int, int); \
-    template void kbitGroupedGemmProd<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, const int*, int, int, int);
+#define INSTANTIATE_KBIT_GROUPED_GEMM_PROD(K)                                                                          \
+    template void kbitGroupedGemmProd<K, half>(                                                                        \
+        const half*, const unsigned int*, const unsigned char*, const float*, half*, const int*, int, int, int         \
+    );                                                                                                                 \
+    template void kbitGroupedGemmProd<K, __nv_bfloat16>(                                                               \
+        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, const int*,     \
+        int, int, int                                                                                                  \
+    );
 
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD(2)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD(3)
@@ -2990,9 +3012,13 @@ INSTANTIATE_KBIT_GROUPED_GEMM_PROD(4)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD(5)
 
 // Scalar GEMV instantiations (fp16 and bf16) — flat layout, float32 absmax, C=1
-#define INSTANTIATE_KBIT_SCALAR_GEMV(K) \
-    template void kbitScalarGemv<K, half>(const half*, const unsigned int*, const float*, const float*, half*, int, int, int); \
-    template void kbitScalarGemv<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const float*, const float*, __nv_bfloat16*, int, int, int);
+#define INSTANTIATE_KBIT_SCALAR_GEMV(K)                                                                                \
+    template void kbitScalarGemv<K, half>(                                                                             \
+        const half*, const unsigned int*, const float*, const float*, half*, int, int, int                             \
+    );                                                                                                                 \
+    template void kbitScalarGemv<K, __nv_bfloat16>(                                                                    \
+        const __nv_bfloat16*, const unsigned int*, const float*, const float*, __nv_bfloat16*, int, int, int           \
+    );
 
 INSTANTIATE_KBIT_SCALAR_GEMV(2)
 INSTANTIATE_KBIT_SCALAR_GEMV(3)
@@ -3000,9 +3026,14 @@ INSTANTIATE_KBIT_SCALAR_GEMV(4)
 INSTANTIATE_KBIT_SCALAR_GEMV(5)
 
 // Grouped scalar GEMV instantiations (fp16 and bf16)
-#define INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(K) \
-    template void kbitGroupedScalarGemv<K, half>(const half*, const unsigned int*, const unsigned char*, const float*, half*, const int*, int, int, int); \
-    template void kbitGroupedScalarGemv<K, __nv_bfloat16>(const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, const int*, int, int, int);
+#define INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(K)                                                                        \
+    template void kbitGroupedScalarGemv<K, half>(                                                                      \
+        const half*, const unsigned int*, const unsigned char*, const float*, half*, const int*, int, int, int         \
+    );                                                                                                                 \
+    template void kbitGroupedScalarGemv<K, __nv_bfloat16>(                                                             \
+        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const float*, __nv_bfloat16*, const int*,     \
+        int, int, int                                                                                                  \
+    );
 
 INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(2)
 INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(3)
@@ -3018,10 +3049,10 @@ INSTANTIATE_KBIT_GROUPED_SCALAR_GEMV(5)
 // Backward: dgate = dh * up * sigmoid(gate) * (1 + gate * (1 - sigmoid(gate)))
 //           dup   = dh * silu(gate)
 
-template <typename T>
-__global__ void kSwiGLUForward(const T* gate, const T* up, T* out, int n) {
+template <typename T> __global__ void kSwiGLUForward(const T* gate, const T* up, T* out, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n) return;
+    if (idx >= n)
+        return;
 
     float g = float(gate[idx]);
     float u = float(up[idx]);
@@ -3031,12 +3062,10 @@ __global__ void kSwiGLUForward(const T* gate, const T* up, T* out, int n) {
 }
 
 template <typename T>
-__global__ void kSwiGLUBackward(
-    const T* grad_h, const T* gate, const T* up,
-    T* grad_gate, T* grad_up, int n
-) {
+__global__ void kSwiGLUBackward(const T* grad_h, const T* gate, const T* up, T* grad_gate, T* grad_up, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n) return;
+    if (idx >= n)
+        return;
 
     float dh = float(grad_h[idx]);
     float g = float(gate[idx]);
@@ -3051,16 +3080,14 @@ __global__ void kSwiGLUBackward(
 }
 
 // C wrapper functions for SwiGLU
-template <typename T>
-void swiglu_forward(const T* gate, const T* up, T* out, int n) {
+template <typename T> void swiglu_forward(const T* gate, const T* up, T* out, int n) {
     int blocks = (n + 255) / 256;
     kSwiGLUForward<<<blocks, 256>>>(gate, up, out, n);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 template <typename T>
-void swiglu_backward(const T* grad_h, const T* gate, const T* up,
-                     T* grad_gate, T* grad_up, int n) {
+void swiglu_backward(const T* grad_h, const T* gate, const T* up, T* grad_gate, T* grad_up, int n) {
     int blocks = (n + 255) / 256;
     kSwiGLUBackward<<<blocks, 256>>>(grad_h, gate, up, grad_gate, grad_up, n);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
@@ -3070,7 +3097,9 @@ void swiglu_backward(const T* grad_h, const T* gate, const T* up,
 template void swiglu_forward<half>(const half*, const half*, half*, int);
 template void swiglu_forward<__nv_bfloat16>(const __nv_bfloat16*, const __nv_bfloat16*, __nv_bfloat16*, int);
 template void swiglu_backward<half>(const half*, const half*, const half*, half*, half*, int);
-template void swiglu_backward<__nv_bfloat16>(const __nv_bfloat16*, const __nv_bfloat16*, const __nv_bfloat16*, __nv_bfloat16*, __nv_bfloat16*, int);
+template void swiglu_backward<__nv_bfloat16>(
+    const __nv_bfloat16*, const __nv_bfloat16*, const __nv_bfloat16*, __nv_bfloat16*, __nv_bfloat16*, int
+);
 
 // ---------- RMSNorm forward+backward ----------
 // Forward: y = x * rsqrt(mean(x^2) + eps) * w
@@ -3079,14 +3108,13 @@ template void swiglu_backward<__nv_bfloat16>(const __nv_bfloat16*, const __nv_bf
 
 template <typename T, int BLOCK_SIZE>
 __global__ void kRMSNormForward(
-    const T* __restrict__ x,
-    const T* __restrict__ w,
-    T* __restrict__ out,
-    float* __restrict__ rrms_out,  // [num_rows] inverse RMS for backward
+    const T* __restrict__ x, const T* __restrict__ w, T* __restrict__ out,
+    float* __restrict__ rrms_out, // [num_rows] inverse RMS for backward
     int rows, int cols, float eps, bool add_unit_offset
 ) {
     int row = blockIdx.x;
-    if (row >= rows) return;
+    if (row >= rows)
+        return;
 
     const T* x_row = x + row * cols;
     T* out_row = out + row * cols;
@@ -3127,16 +3155,14 @@ __global__ void kRMSNormForward(
 
 template <typename T, int BLOCK_SIZE>
 __global__ void kRMSNormBackward(
-    const T* __restrict__ grad_out,
-    const T* __restrict__ x,
-    const T* __restrict__ w,
-    const float* __restrict__ rrms,
+    const T* __restrict__ grad_out, const T* __restrict__ x, const T* __restrict__ w, const float* __restrict__ rrms,
     T* __restrict__ grad_x,
-    float* __restrict__ grad_w_accum,  // [cols] accumulated across rows (atomicAdd)
+    float* __restrict__ grad_w_accum, // [cols] accumulated across rows (atomicAdd)
     int rows, int cols, bool add_unit_offset
 ) {
     int row = blockIdx.x;
-    if (row >= rows) return;
+    if (row >= rows)
+        return;
 
     const T* g_row = grad_out + row * cols;
     const T* x_row = x + row * cols;
@@ -3186,8 +3212,7 @@ __global__ void kRMSNormBackward(
 
 // C wrapper functions
 template <typename T>
-void rmsnorm_forward(const T* x, const T* w, T* out, float* rrms,
-                     int rows, int cols, float eps, bool add_unit_offset) {
+void rmsnorm_forward(const T* x, const T* w, T* out, float* rrms, int rows, int cols, float eps, bool add_unit_offset) {
     if (cols <= 256) {
         kRMSNormForward<T, 256><<<rows, 256>>>(x, w, out, rrms, rows, cols, eps, add_unit_offset);
     } else if (cols <= 512) {
@@ -3199,23 +3224,33 @@ void rmsnorm_forward(const T* x, const T* w, T* out, float* rrms,
 }
 
 template <typename T>
-void rmsnorm_backward(const T* grad_out, const T* x, const T* w, const float* rrms,
-                      T* grad_x, float* grad_w_accum,
-                      int rows, int cols, bool add_unit_offset) {
+void rmsnorm_backward(
+    const T* grad_out, const T* x, const T* w, const float* rrms, T* grad_x, float* grad_w_accum, int rows, int cols,
+    bool add_unit_offset
+) {
     if (cols <= 256) {
-        kRMSNormBackward<T, 256><<<rows, 256>>>(grad_out, x, w, rrms, grad_x, grad_w_accum, rows, cols, add_unit_offset);
+        kRMSNormBackward<T, 256>
+            <<<rows, 256>>>(grad_out, x, w, rrms, grad_x, grad_w_accum, rows, cols, add_unit_offset);
     } else if (cols <= 512) {
-        kRMSNormBackward<T, 512><<<rows, 512>>>(grad_out, x, w, rrms, grad_x, grad_w_accum, rows, cols, add_unit_offset);
+        kRMSNormBackward<T, 512>
+            <<<rows, 512>>>(grad_out, x, w, rrms, grad_x, grad_w_accum, rows, cols, add_unit_offset);
     } else {
-        kRMSNormBackward<T, 1024><<<rows, 1024>>>(grad_out, x, w, rrms, grad_x, grad_w_accum, rows, cols, add_unit_offset);
+        kRMSNormBackward<T, 1024>
+            <<<rows, 1024>>>(grad_out, x, w, rrms, grad_x, grad_w_accum, rows, cols, add_unit_offset);
     }
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
 template void rmsnorm_forward<half>(const half*, const half*, half*, float*, int, int, float, bool);
-template void rmsnorm_forward<__nv_bfloat16>(const __nv_bfloat16*, const __nv_bfloat16*, __nv_bfloat16*, float*, int, int, float, bool);
-template void rmsnorm_backward<half>(const half*, const half*, const half*, const float*, half*, float*, int, int, bool);
-template void rmsnorm_backward<__nv_bfloat16>(const __nv_bfloat16*, const __nv_bfloat16*, const __nv_bfloat16*, const float*, __nv_bfloat16*, float*, int, int, bool);
+template void rmsnorm_forward<__nv_bfloat16>(
+    const __nv_bfloat16*, const __nv_bfloat16*, __nv_bfloat16*, float*, int, int, float, bool
+);
+template void
+    rmsnorm_backward<half>(const half*, const half*, const half*, const float*, half*, float*, int, int, bool);
+template void rmsnorm_backward<__nv_bfloat16>(
+    const __nv_bfloat16*, const __nv_bfloat16*, const __nv_bfloat16*, const float*, __nv_bfloat16*, float*, int, int,
+    bool
+);
 
 // ---------- RoPE forward+backward ----------
 // In-place rotary position embedding:
@@ -3225,15 +3260,16 @@ template void rmsnorm_backward<__nv_bfloat16>(const __nv_bfloat16*, const __nv_b
 
 template <typename T>
 __global__ void kRoPEForward(
-    T* __restrict__ q,   // [total_tokens, n_heads, head_dim]
-    const T* __restrict__ cos_cache,  // [total_tokens, head_dim/2]
-    const T* __restrict__ sin_cache,  // [total_tokens, head_dim/2]
+    T* __restrict__ q,               // [total_tokens, n_heads, head_dim]
+    const T* __restrict__ cos_cache, // [total_tokens, head_dim/2]
+    const T* __restrict__ sin_cache, // [total_tokens, head_dim/2]
     int total_tokens, int n_heads, int head_dim
 ) {
     int half_dim = head_dim / 2;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     int total_elements = total_tokens * n_heads * half_dim;
-    if (tid >= total_elements) return;
+    if (tid >= total_elements)
+        return;
 
     int d = tid % half_dim;
     int remaining = tid / half_dim;
@@ -3247,13 +3283,12 @@ __global__ void kRoPEForward(
     float c = float(cos_cache[t * half_dim + d]);
     float s = float(sin_cache[t * half_dim + d]);
 
-    q[base_idx + d]            = T(q_r * c - q_i * s);
+    q[base_idx + d] = T(q_r * c - q_i * s);
     q[base_idx + half_dim + d] = T(q_i * c + q_r * s);
 }
 
 template <typename T>
-void rope_forward(T* q, const T* cos_cache, const T* sin_cache,
-                  int total_tokens, int n_heads, int head_dim) {
+void rope_forward(T* q, const T* cos_cache, const T* sin_cache, int total_tokens, int n_heads, int head_dim) {
     int half_dim = head_dim / 2;
     int total = total_tokens * n_heads * half_dim;
     int blocks = (total + 255) / 256;
@@ -3273,14 +3308,15 @@ template void rope_forward<__nv_bfloat16>(__nv_bfloat16*, const __nv_bfloat16*, 
 
 template <typename T, int BLOCK_SIZE>
 __global__ void kCrossEntropyForward(
-    const T* __restrict__ logits,   // [N, V]
-    const long* __restrict__ labels, // [N]
-    float* __restrict__ losses,      // [N]
+    const T* __restrict__ logits,      // [N, V]
+    const long* __restrict__ labels,   // [N]
+    float* __restrict__ losses,        // [N]
     float* __restrict__ logsumexp_out, // [N] stored for backward
     int N, int V, int ignore_index
 ) {
     int row = blockIdx.x;
-    if (row >= N) return;
+    if (row >= N)
+        return;
 
     long label = labels[row];
     if (label == ignore_index) {
@@ -3337,15 +3373,16 @@ __global__ void kCrossEntropyForward(
 
 template <typename T, int BLOCK_SIZE>
 __global__ void kCrossEntropyBackward(
-    const T* __restrict__ logits,       // [N, V]
-    const long* __restrict__ labels,     // [N]
+    const T* __restrict__ logits,          // [N, V]
+    const long* __restrict__ labels,       // [N]
     const float* __restrict__ grad_output, // [N] scalar per sample
     const float* __restrict__ logsumexp,   // [N] from forward
-    T* __restrict__ grad_logits,         // [N, V]
+    T* __restrict__ grad_logits,           // [N, V]
     int N, int V, int ignore_index
 ) {
     int row = blockIdx.x;
-    if (row >= N) return;
+    if (row >= N)
+        return;
 
     long label = labels[row];
     const T* logits_row = logits + row * V;
@@ -3373,8 +3410,9 @@ __global__ void kCrossEntropyBackward(
 
 // C wrapper functions
 template <typename T>
-void cross_entropy_forward(const T* logits, const long* labels, float* losses, float* logsumexp,
-                           int N, int V, int ignore_index) {
+void cross_entropy_forward(
+    const T* logits, const long* labels, float* losses, float* logsumexp, int N, int V, int ignore_index
+) {
     if (V <= 256) {
         kCrossEntropyForward<T, 256><<<N, 256>>>(logits, labels, losses, logsumexp, N, V, ignore_index);
     } else if (V <= 512) {
@@ -3386,15 +3424,19 @@ void cross_entropy_forward(const T* logits, const long* labels, float* losses, f
 }
 
 template <typename T>
-void cross_entropy_backward(const T* logits, const long* labels, const float* grad_output,
-                            const float* logsumexp, T* grad_logits,
-                            int N, int V, int ignore_index) {
+void cross_entropy_backward(
+    const T* logits, const long* labels, const float* grad_output, const float* logsumexp, T* grad_logits, int N, int V,
+    int ignore_index
+) {
     if (V <= 256) {
-        kCrossEntropyBackward<T, 256><<<N, 256>>>(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
+        kCrossEntropyBackward<T, 256>
+            <<<N, 256>>>(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
     } else if (V <= 512) {
-        kCrossEntropyBackward<T, 512><<<N, 512>>>(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
+        kCrossEntropyBackward<T, 512>
+            <<<N, 512>>>(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
     } else {
-        kCrossEntropyBackward<T, 1024><<<N, 1024>>>(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
+        kCrossEntropyBackward<T, 1024>
+            <<<N, 1024>>>(logits, labels, grad_output, logsumexp, grad_logits, N, V, ignore_index);
     }
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
@@ -3402,4 +3444,6 @@ void cross_entropy_backward(const T* logits, const long* labels, const float* gr
 template void cross_entropy_forward<half>(const half*, const long*, float*, float*, int, int, int);
 template void cross_entropy_forward<__nv_bfloat16>(const __nv_bfloat16*, const long*, float*, float*, int, int, int);
 template void cross_entropy_backward<half>(const half*, const long*, const float*, const float*, half*, int, int, int);
-template void cross_entropy_backward<__nv_bfloat16>(const __nv_bfloat16*, const long*, const float*, const float*, __nv_bfloat16*, int, int, int);
+template void cross_entropy_backward<__nv_bfloat16>(
+    const __nv_bfloat16*, const long*, const float*, const float*, __nv_bfloat16*, int, int, int
+);

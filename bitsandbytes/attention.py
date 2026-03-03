@@ -15,6 +15,7 @@ def _import_flash_attn():
     """Lazy import of flash_attn to give clear error messages."""
     try:
         from flash_attn import flash_attn_func
+
         return flash_attn_func
     except ImportError:
         raise ImportError(
@@ -62,7 +63,9 @@ def chunked_flash_attention(
     # If sequence fits in one chunk, just call flash_attn directly
     if S <= chunk_size:
         return flash_attn_func(
-            Q, K, V,
+            Q,
+            K,
+            V,
             causal=causal,
             softmax_scale=softmax_scale,
         )
@@ -84,7 +87,9 @@ def chunked_flash_attention(
             v_slice = V
 
         out_chunk = flash_attn_func(
-            q_chunk, k_slice, v_slice,
+            q_chunk,
+            k_slice,
+            v_slice,
             causal=causal,
             softmax_scale=softmax_scale,
         )
@@ -131,7 +136,9 @@ def chunked_flash_attention_full(
     # If everything fits in one chunk, call directly
     if S <= q_chunk_size and S <= kv_chunk_size:
         return flash_attn_func(
-            Q, K, V,
+            Q,
+            K,
+            V,
             causal=causal,
             softmax_scale=softmax_scale,
         )
@@ -171,7 +178,9 @@ def chunked_flash_attention_full(
 
             # Get partial attention output and LSE
             partial_out, partial_lse, _ = flash_attn_func(
-                q_chunk, k_chunk, v_chunk,
+                q_chunk,
+                k_chunk,
+                v_chunk,
                 causal=chunk_causal,
                 softmax_scale=softmax_scale,
                 return_attn_probs=True,

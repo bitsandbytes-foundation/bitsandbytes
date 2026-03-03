@@ -8,11 +8,11 @@ import json
 import os
 import time
 
-import torch
 from datasets import load_dataset
+import torch
 from transformers import AutoTokenizer
 
-from bitsandbytes.checkpoint import save_quantized, save_lora, load_lora
+from bitsandbytes.checkpoint import save_lora
 from bitsandbytes.kbit_lora import KbitLoraModel
 
 
@@ -65,7 +65,7 @@ def train_streaming(model, input_ids_list, labels_list, n_steps=100, lr=1e-4):
             print(f"  Step {step:3d} | loss={loss_val:.4f} | {elapsed:.1f}s")
 
     elapsed = time.time() - t0
-    print(f"  Training complete: {n_steps} steps in {elapsed:.1f}s ({elapsed/n_steps:.2f}s/step)")
+    print(f"  Training complete: {n_steps} steps in {elapsed:.1f}s ({elapsed / n_steps:.2f}s/step)")
     return losses
 
 
@@ -99,7 +99,7 @@ def train_standard(model, input_ids_list, labels_list, n_steps=100, lr=1e-4):
             print(f"  Step {step:3d} | loss={loss_val:.4f} | {elapsed:.1f}s")
 
     elapsed = time.time() - t0
-    print(f"  Training complete: {n_steps} steps in {elapsed:.1f}s ({elapsed/n_steps:.2f}s/step)")
+    print(f"  Training complete: {n_steps} steps in {elapsed:.1f}s ({elapsed / n_steps:.2f}s/step)")
     return losses
 
 
@@ -119,7 +119,7 @@ def compare_losses(losses_streaming, losses_standard, tolerance=0.05):
                 print(f"  Step {i}: streaming={ls:.4f} standard={ln:.4f} diff={rel_diff:.4f}")
 
     print(f"  Max relative difference: {max_rel_diff:.4f}")
-    print(f"  Steps exceeding {tolerance*100}% tolerance: {mismatches}/{len(losses_streaming)}")
+    print(f"  Steps exceeding {tolerance * 100}% tolerance: {mismatches}/{len(losses_streaming)}")
     return mismatches == 0, max_rel_diff
 
 
@@ -144,7 +144,9 @@ def main():
     print("\n=== Streaming path (from_quantized) ===")
     torch.manual_seed(42)
     model_stream = KbitLoraModel.from_quantized(
-        quantized_path, weight_streaming=True, lora_r=16,
+        quantized_path,
+        weight_streaming=True,
+        lora_r=16,
     )
     losses_streaming = train_streaming(model_stream, input_ids_list, labels_list, n_steps=n_steps, lr=lr)
 
@@ -161,7 +163,9 @@ def main():
     print("\n=== Non-streaming path (standard forward) ===")
     torch.manual_seed(42)
     model_standard = KbitLoraModel.from_quantized(
-        quantized_path, weight_streaming=False, lora_r=16,
+        quantized_path,
+        weight_streaming=False,
+        lora_r=16,
     )
     losses_standard = train_standard(model_standard, input_ids_list, labels_list, n_steps=n_steps, lr=lr)
 
@@ -180,7 +184,9 @@ def main():
     print("\n=== LoRA reload test ===")
     torch.manual_seed(42)
     model_reload = KbitLoraModel.from_quantized(
-        quantized_path, weight_streaming=False, lora_r=16,
+        quantized_path,
+        weight_streaming=False,
+        lora_r=16,
         lora_checkpoint=lora_path,
     )
     # Quick inference test

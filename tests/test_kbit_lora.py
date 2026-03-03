@@ -46,7 +46,6 @@ def kbit_model(qwen3_model):
 
 
 class TestKbitLoraModel:
-
     def test_creation(self, kbit_model):
         """Model should be created successfully."""
         assert kbit_model is not None
@@ -67,8 +66,7 @@ class TestKbitLoraModel:
         trainable = kbit_model.get_trainable_parameters()
         for name, p in kbit_model.named_parameters():
             if p.requires_grad:
-                assert "_lora_params" in name or "_norm_weights" in name, \
-                    f"Unexpected trainable parameter: {name}"
+                assert "_lora_params" in name or "_norm_weights" in name, f"Unexpected trainable parameter: {name}"
 
     def test_forward_with_loss(self, kbit_model):
         """Forward pass with labels should produce finite loss."""
@@ -162,15 +160,13 @@ class TestMixedKQuantization:
         """Attention projections should use k=4."""
         for layer_info in mixed_k_model._layer_data:
             for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
-                assert layer_info[proj]["k"] == 4, \
-                    f"Attention {proj} should have k=4"
+                assert layer_info[proj]["k"] == 4, f"Attention {proj} should have k=4"
 
     def test_mlp_uses_correct_k(self, mixed_k_model):
         """MLP projections should use k=3."""
         for layer_info in mixed_k_model._layer_data:
             for proj in ["gate_proj", "up_proj", "down_proj"]:
-                assert layer_info[proj]["k"] == 3, \
-                    f"MLP {proj} should have k=3"
+                assert layer_info[proj]["k"] == 3, f"MLP {proj} should have k=3"
 
     def test_lm_head_uses_correct_k(self, mixed_k_model):
         """LM head should use k=2."""

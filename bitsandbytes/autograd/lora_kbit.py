@@ -36,17 +36,17 @@ class LoRA_W_Kbit(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
-        X,         # [M, K]
-        packed,    # int32, kbit packed weight
-        absmax,    # float32, per-block absmax
+        X,  # [M, K]
+        packed,  # int32, kbit packed weight
+        absmax,  # float32, per-block absmax
         codebook,  # float32, 2^k entries
-        A,         # [r, K] lora_A weight
-        B,         # [N, r] lora_B weight
-        s,         # scalar scaling factor
-        k,         # bit width
-        K_dim,     # reduction dimension
+        A,  # [r, K] lora_A weight
+        B,  # [N, r] lora_B weight
+        s,  # scalar scaling factor
+        k,  # bit width
+        K_dim,  # reduction dimension
         N_padded,  # padded output dimension
-        N,         # original output dimension
+        N,  # original output dimension
         compute_dtype,
         out=None,  # optional pre-allocated output buffer [M, N]
     ):
@@ -56,12 +56,12 @@ class LoRA_W_Kbit(torch.autograd.Function):
         W = w_deq[:n_elements].reshape(N_padded, K_dim)[:N, :]  # [N, K]
 
         # Base matmul + LoRA contribution
-        XA = torch.mm(X, A.t())                    # [M, r] — small
+        XA = torch.mm(X, A.t())  # [M, r] — small
         if out is not None:
-            torch.mm(X, W.t(), out=out)             # out = X @ W^T, no alloc
+            torch.mm(X, W.t(), out=out)  # out = X @ W^T, no alloc
             torch.addmm(out, XA, B.t(), beta=1.0, alpha=s, out=out)  # out += s * XA @ B^T
         else:
-            out = X @ W.t()                         # [M, N]
+            out = X @ W.t()  # [M, N]
             out = out + (XA @ B.t()) * s
 
         # Save for backward
@@ -89,25 +89,30 @@ class LoRA_W_Kbit(torch.autograd.Function):
 
         if ctx.needs_input_grad[4]:  # grad_A
             # dL/dA = s * (grad_output @ B)^T @ X  = s * B^T @ grad_output^T @ X  [r, K]
-            gB = grad_output @ B                    # [M, r] — bracket optimized
-            grad_A = (gB.t() @ X) * s               # [r, M] @ [M, K] = [r, K]
+            gB = grad_output @ B  # [M, r] — bracket optimized
+            grad_A = (gB.t() @ X) * s  # [r, M] @ [M, K] = [r, K]
 
         if ctx.needs_input_grad[5]:  # grad_B
             # dL/dB = s * grad_output^T @ (X @ A^T) = s * grad_output^T @ Z  [N, r]
-            Z = X @ A.t()                           # [M, r]
-            grad_B = (grad_output.t() @ Z) * s      # [N, M] @ [M, r] = [N, r]
+            Z = X @ A.t()  # [M, r]
+            grad_B = (grad_output.t() @ Z) * s  # [N, M] @ [M, r] = [N, r]
 
         if ctx.needs_input_grad[0]:  # grad_X
             # dL/dX = grad_output @ W_deq + s * grad_output @ B @ A  [M, K]
             n_elements = ctx.N_padded * ctx.K_dim
             w_deq = F.dequantize_kbit(
-                packed, absmax, codebook, ctx.k, n_elements, ctx.compute_dtype,
+                packed,
+                absmax,
+                codebook,
+                ctx.k,
+                n_elements,
+                ctx.compute_dtype,
             )
-            W = w_deq[:n_elements].reshape(ctx.N_padded, ctx.K_dim)[:ctx.N, :]
-            grad_X = grad_output @ W                # [M, N] @ [N, K] = [M, K]
+            W = w_deq[:n_elements].reshape(ctx.N_padded, ctx.K_dim)[: ctx.N, :]
+            grad_X = grad_output @ W  # [M, N] @ [N, K] = [M, K]
             if gB is None:
                 gB = grad_output @ B
-            grad_X = grad_X + (gB @ A) * s          # [M, r] @ [r, K] = [M, K]
+            grad_X = grad_X + (gB @ A) * s  # [M, r] @ [r, K] = [M, K]
 
         # No gradient for: packed, absmax, codebook, s, k, K_dim, N_padded, N, compute_dtype, out
         return grad_X, None, None, None, grad_A, grad_B, None, None, None, None, None, None, None
@@ -127,17 +132,38 @@ class LoRA_QKV_Kbit(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
-        X,          # [M, K]
+        X,  # [M, K]
         # Q projection
-        packed_q, absmax_q, codebook_q, A_q, B_q, s_q,
+        packed_q,
+        absmax_q,
+        codebook_q,
+        A_q,
+        B_q,
+        s_q,
         # K projection
-        packed_k, absmax_k, codebook_k, A_k, B_k, s_k,
+        packed_k,
+        absmax_k,
+        codebook_k,
+        A_k,
+        B_k,
+        s_k,
         # V projection
-        packed_v, absmax_v, codebook_v, A_v, B_v, s_v,
+        packed_v,
+        absmax_v,
+        codebook_v,
+        A_v,
+        B_v,
+        s_v,
         # Shared params
-        k, K_dim, N_padded, N, compute_dtype,
+        k,
+        K_dim,
+        N_padded,
+        N,
+        compute_dtype,
         # Optional pre-allocated output buffers
-        out_q=None, out_k=None, out_v=None,
+        out_q=None,
+        out_k=None,
+        out_v=None,
     ):
         n_elements = N_padded * K_dim
 
@@ -160,9 +186,21 @@ class LoRA_QKV_Kbit(torch.autograd.Function):
 
         ctx.save_for_backward(
             X,
-            packed_q, absmax_q, codebook_q, A_q, B_q,
-            packed_k, absmax_k, codebook_k, A_k, B_k,
-            packed_v, absmax_v, codebook_v, A_v, B_v,
+            packed_q,
+            absmax_q,
+            codebook_q,
+            A_q,
+            B_q,
+            packed_k,
+            absmax_k,
+            codebook_k,
+            A_k,
+            B_k,
+            packed_v,
+            absmax_v,
+            codebook_v,
+            A_v,
+            B_v,
         )
         ctx.s_q, ctx.s_k, ctx.s_v = s_q, s_k, s_v
         ctx.k = k
@@ -177,9 +215,21 @@ class LoRA_QKV_Kbit(torch.autograd.Function):
     def backward(ctx, grad_q, grad_k, grad_v):
         (
             X,
-            packed_q, absmax_q, codebook_q, A_q, B_q,
-            packed_k, absmax_k, codebook_k, A_k, B_k,
-            packed_v, absmax_v, codebook_v, A_v, B_v,
+            packed_q,
+            absmax_q,
+            codebook_q,
+            A_q,
+            B_q,
+            packed_k,
+            absmax_k,
+            codebook_k,
+            A_k,
+            B_k,
+            packed_v,
+            absmax_v,
+            codebook_v,
+            A_v,
+            B_v,
         ) = ctx.saved_tensors
 
         n_elements = ctx.N_padded * ctx.K_dim
@@ -206,9 +256,14 @@ class LoRA_QKV_Kbit(torch.autograd.Function):
 
             if grad_X is not None:
                 w_deq = F.dequantize_kbit(
-                    packed, absmax, codebook, ctx.k, n_elements, ctx.compute_dtype,
+                    packed,
+                    absmax,
+                    codebook,
+                    ctx.k,
+                    n_elements,
+                    ctx.compute_dtype,
                 )
-                W = w_deq[:n_elements].reshape(ctx.N_padded, ctx.K_dim)[:ctx.N, :]
+                W = w_deq[:n_elements].reshape(ctx.N_padded, ctx.K_dim)[: ctx.N, :]
                 grad_X += grad_out @ W + (gB @ A) * s
 
         # Return: X, packed_q, absmax_q, codebook_q, A_q, B_q, s_q,
@@ -218,11 +273,32 @@ class LoRA_QKV_Kbit(torch.autograd.Function):
         #         out_q, out_k, out_v
         return (
             grad_X,
-            None, None, None, all_grad_A[0], all_grad_B[0], None,
-            None, None, None, all_grad_A[1], all_grad_B[1], None,
-            None, None, None, all_grad_A[2], all_grad_B[2], None,
-            None, None, None, None, None,
-            None, None, None,
+            None,
+            None,
+            None,
+            all_grad_A[0],
+            all_grad_B[0],
+            None,
+            None,
+            None,
+            None,
+            all_grad_A[1],
+            all_grad_B[1],
+            None,
+            None,
+            None,
+            None,
+            all_grad_A[2],
+            all_grad_B[2],
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         )
 
 
@@ -241,18 +317,38 @@ class LoRA_MLP_Kbit(torch.autograd.Function):
     @staticmethod
     def forward(
         ctx,
-        X,           # [M, K]
+        X,  # [M, K]
         # Gate projection
-        packed_gate, absmax_gate, codebook_gate, A_gate, B_gate, s_gate,
+        packed_gate,
+        absmax_gate,
+        codebook_gate,
+        A_gate,
+        B_gate,
+        s_gate,
         # Up projection
-        packed_up, absmax_up, codebook_up, A_up, B_up, s_up,
+        packed_up,
+        absmax_up,
+        codebook_up,
+        A_up,
+        B_up,
+        s_up,
         # Down projection
-        packed_down, absmax_down, codebook_down, A_down, B_down, s_down,
+        packed_down,
+        absmax_down,
+        codebook_down,
+        A_down,
+        B_down,
+        s_down,
         # Shared params
-        k, K_dim_in, N_hidden, N_hidden_padded,
-        K_dim_hidden, N_out, N_out_padded,
+        k,
+        K_dim_in,
+        N_hidden,
+        N_hidden_padded,
+        K_dim_hidden,
+        N_out,
+        N_out_padded,
         compute_dtype,
-        out=None,    # optional pre-allocated output buffer [M, N_out]
+        out=None,  # optional pre-allocated output buffer [M, N_out]
     ):
         n_gate = N_hidden_padded * K_dim_in
         n_down = N_out_padded * K_dim_hidden
@@ -285,10 +381,26 @@ class LoRA_MLP_Kbit(torch.autograd.Function):
             out = h @ W_down.t() + (hA_down @ B_down.t()) * s_down
 
         ctx.save_for_backward(
-            X, e, sig_e, g, h,
-            packed_gate, absmax_gate, codebook_gate, A_gate, B_gate,
-            packed_up, absmax_up, codebook_up, A_up, B_up,
-            packed_down, absmax_down, codebook_down, A_down, B_down,
+            X,
+            e,
+            sig_e,
+            g,
+            h,
+            packed_gate,
+            absmax_gate,
+            codebook_gate,
+            A_gate,
+            B_gate,
+            packed_up,
+            absmax_up,
+            codebook_up,
+            A_up,
+            B_up,
+            packed_down,
+            absmax_down,
+            codebook_down,
+            A_down,
+            B_down,
         )
         ctx.s_gate = s_gate
         ctx.s_up = s_up
@@ -307,25 +419,46 @@ class LoRA_MLP_Kbit(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         (
-            X, e, sig_e, g, h,
-            packed_gate, absmax_gate, codebook_gate, A_gate, B_gate,
-            packed_up, absmax_up, codebook_up, A_up, B_up,
-            packed_down, absmax_down, codebook_down, A_down, B_down,
+            X,
+            e,
+            sig_e,
+            g,
+            h,
+            packed_gate,
+            absmax_gate,
+            codebook_gate,
+            A_gate,
+            B_gate,
+            packed_up,
+            absmax_up,
+            codebook_up,
+            A_up,
+            B_up,
+            packed_down,
+            absmax_down,
+            codebook_down,
+            A_down,
+            B_down,
         ) = ctx.saved_tensors
 
         # --- Down projection backward ---
         n_down = ctx.N_out_padded * ctx.K_dim_hidden
         w_deq = F.dequantize_kbit(
-            packed_down, absmax_down, codebook_down, ctx.k, n_down, ctx.compute_dtype,
+            packed_down,
+            absmax_down,
+            codebook_down,
+            ctx.k,
+            n_down,
+            ctx.compute_dtype,
         )
-        W_down = w_deq[:n_down].reshape(ctx.N_out_padded, ctx.K_dim_hidden)[:ctx.N_out, :]
+        W_down = w_deq[:n_down].reshape(ctx.N_out_padded, ctx.K_dim_hidden)[: ctx.N_out, :]
 
         # grad_h = grad_output @ W_down + s_down * grad_output @ B_down @ A_down
-        gB_down = grad_output @ B_down                          # [M, r]
+        gB_down = grad_output @ B_down  # [M, r]
         grad_h = grad_output @ W_down + (gB_down @ A_down) * ctx.s_down  # [M, K_hidden]
 
-        grad_A_down = (gB_down.t() @ h) * ctx.s_down           # [r, K_hidden]
-        Z_down = h @ A_down.t()                                 # [M, r]
+        grad_A_down = (gB_down.t() @ h) * ctx.s_down  # [r, K_hidden]
+        Z_down = h @ A_down.t()  # [M, r]
         grad_B_down = (grad_output.t() @ Z_down) * ctx.s_down  # [N_out, r]
 
         # --- SwiGLU backward ---
@@ -340,27 +473,37 @@ class LoRA_MLP_Kbit(torch.autograd.Function):
         # --- Gate projection backward ---
         n_gate = ctx.N_hidden_padded * ctx.K_dim_in
         w_deq = F.dequantize_kbit(
-            packed_gate, absmax_gate, codebook_gate, ctx.k, n_gate, ctx.compute_dtype,
+            packed_gate,
+            absmax_gate,
+            codebook_gate,
+            ctx.k,
+            n_gate,
+            ctx.compute_dtype,
         )
-        W_gate = w_deq[:n_gate].reshape(ctx.N_hidden_padded, ctx.K_dim_in)[:ctx.N_hidden, :]
+        W_gate = w_deq[:n_gate].reshape(ctx.N_hidden_padded, ctx.K_dim_in)[: ctx.N_hidden, :]
 
-        gB_gate = grad_e @ B_gate                                # [M, r]
-        grad_A_gate = (gB_gate.t() @ X) * ctx.s_gate            # [r, K_in]
-        Z_gate = X @ A_gate.t()                                  # [M, r]
-        grad_B_gate = (grad_e.t() @ Z_gate) * ctx.s_gate        # [N_hidden, r]
+        gB_gate = grad_e @ B_gate  # [M, r]
+        grad_A_gate = (gB_gate.t() @ X) * ctx.s_gate  # [r, K_in]
+        Z_gate = X @ A_gate.t()  # [M, r]
+        grad_B_gate = (grad_e.t() @ Z_gate) * ctx.s_gate  # [N_hidden, r]
 
         grad_X = grad_e @ W_gate + (gB_gate @ A_gate) * ctx.s_gate  # [M, K_in]
 
         # --- Up projection backward ---
         w_deq = F.dequantize_kbit(
-            packed_up, absmax_up, codebook_up, ctx.k, n_gate, ctx.compute_dtype,
+            packed_up,
+            absmax_up,
+            codebook_up,
+            ctx.k,
+            n_gate,
+            ctx.compute_dtype,
         )
-        W_up = w_deq[:n_gate].reshape(ctx.N_hidden_padded, ctx.K_dim_in)[:ctx.N_hidden, :]
+        W_up = w_deq[:n_gate].reshape(ctx.N_hidden_padded, ctx.K_dim_in)[: ctx.N_hidden, :]
 
-        gB_up = grad_g @ B_up                                    # [M, r]
-        grad_A_up = (gB_up.t() @ X) * ctx.s_up                  # [r, K_in]
-        Z_up = X @ A_up.t()                                      # [M, r]
-        grad_B_up = (grad_g.t() @ Z_up) * ctx.s_up              # [N_hidden, r]
+        gB_up = grad_g @ B_up  # [M, r]
+        grad_A_up = (gB_up.t() @ X) * ctx.s_up  # [r, K_in]
+        Z_up = X @ A_up.t()  # [M, r]
+        grad_B_up = (grad_g.t() @ Z_up) * ctx.s_up  # [N_hidden, r]
 
         grad_X = grad_X + grad_g @ W_up + (gB_up @ A_up) * ctx.s_up
 
@@ -372,10 +515,31 @@ class LoRA_MLP_Kbit(torch.autograd.Function):
         #    K_dim_hidden, N_out, N_out_padded, compute_dtype, out
         return (
             grad_X,
-            None, None, None, grad_A_gate, grad_B_gate, None,
-            None, None, None, grad_A_up, grad_B_up, None,
-            None, None, None, grad_A_down, grad_B_down, None,
-            None, None, None, None,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            grad_A_gate,
+            grad_B_gate,
+            None,
+            None,
+            None,
+            None,
+            grad_A_up,
+            grad_B_up,
+            None,
+            None,
+            None,
+            None,
+            grad_A_down,
+            grad_B_down,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             None,
         )

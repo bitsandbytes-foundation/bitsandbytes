@@ -17,7 +17,7 @@ def _make_model_pair():
     """Create matching non-streaming and streaming models from same checkpoint."""
     from transformers import LlamaConfig, LlamaForCausalLM
 
-    from bitsandbytes.checkpoint import save_quantized, save_lora
+    from bitsandbytes.checkpoint import save_lora, save_quantized
     from bitsandbytes.kbit_lora import KbitLoraModel
 
     config = LlamaConfig(
@@ -32,8 +32,13 @@ def _make_model_pair():
     model = LlamaForCausalLM(config).to(torch.float16).cuda()
 
     kbit = KbitLoraModel(
-        model, lora_r=4, lora_alpha=8.0, k=4,
-        attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+        model,
+        lora_r=4,
+        lora_alpha=8.0,
+        k=4,
+        attn_chunk_size=64,
+        mlp_chunk_size=64,
+        ce_chunk_size=256,
         compute_dtype=torch.bfloat16,
     )
 
@@ -45,8 +50,12 @@ def _make_model_pair():
 
     # Non-streaming reference (standard autograd works correctly)
     non_streaming = KbitLoraModel.from_quantized(
-        quant_path, lora_r=4, lora_alpha=8.0,
-        attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+        quant_path,
+        lora_r=4,
+        lora_alpha=8.0,
+        attn_chunk_size=64,
+        mlp_chunk_size=64,
+        ce_chunk_size=256,
         compute_dtype=torch.bfloat16,
         weight_streaming=False,
         lora_checkpoint=lora_path,
@@ -54,8 +63,12 @@ def _make_model_pair():
 
     # Streaming model
     streaming = KbitLoraModel.from_quantized(
-        quant_path, lora_r=4, lora_alpha=8.0,
-        attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+        quant_path,
+        lora_r=4,
+        lora_alpha=8.0,
+        attn_chunk_size=64,
+        mlp_chunk_size=64,
+        ce_chunk_size=256,
         compute_dtype=torch.bfloat16,
         weight_streaming=True,
         lora_checkpoint=lora_path,
@@ -69,11 +82,11 @@ def model_pair():
     non_streaming, streaming, tmpdir = _make_model_pair()
     yield non_streaming, streaming
     import shutil
+
     shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 class TestForwardBackwardSeparation:
-
     def test_gradient_match(self, model_pair):
         """Streaming gradients must match non-streaming standard forward+backward."""
         non_streaming, streaming = model_pair
@@ -114,16 +127,19 @@ class TestForwardBackwardSeparation:
                 grads_stream[f"norm_{name}"] = p.grad.clone()
 
         # Compare losses
-        assert torch.allclose(loss_ref, loss_stream, atol=1e-5), \
+        assert torch.allclose(loss_ref, loss_stream, atol=1e-5), (
             f"Loss mismatch: {loss_ref.item()} vs {loss_stream.item()}"
+        )
 
         # Compare gradients
-        assert set(grads_ref.keys()) == set(grads_stream.keys()), \
+        assert set(grads_ref.keys()) == set(grads_stream.keys()), (
             f"Gradient key mismatch: {set(grads_ref) - set(grads_stream)} vs {set(grads_stream) - set(grads_ref)}"
+        )
 
         for name in grads_ref:
-            assert torch.allclose(grads_ref[name], grads_stream[name], atol=1e-5, rtol=1e-4), \
+            assert torch.allclose(grads_ref[name], grads_stream[name], atol=1e-5, rtol=1e-4), (
                 f"Gradient mismatch for {name}: max diff {(grads_ref[name] - grads_stream[name]).abs().max().item()}"
+            )
 
     def test_loss_curve_match(self, model_pair):
         """Loss curves must match between non-streaming and streaming over 20 steps."""
@@ -131,16 +147,12 @@ class TestForwardBackwardSeparation:
         lr = 1e-3
 
         # Set both models to same initial state
-        for (n1, p1), (n2, p2) in zip(
-            non_streaming._lora_params.items(), streaming._lora_params.items()
-        ):
+        for (n1, p1), (n2, p2) in zip(non_streaming._lora_params.items(), streaming._lora_params.items()):
             torch.manual_seed(42)
             val = torch.randn_like(p1.data) * 0.01
             p1.data.copy_(val)
             p2.data.copy_(val)
-        for (n1, p1), (n2, p2) in zip(
-            non_streaming._norm_weights.items(), streaming._norm_weights.items()
-        ):
+        for (n1, p1), (n2, p2) in zip(non_streaming._norm_weights.items(), streaming._norm_weights.items()):
             p1.data.fill_(1.0)
             p2.data.fill_(1.0)
 
@@ -178,8 +190,9 @@ class TestForwardBackwardSeparation:
             if lr_val == 0:
                 continue
             rel_diff = abs(lr_val - ls_val) / abs(lr_val)
-            assert rel_diff < 0.05, \
+            assert rel_diff < 0.05, (
                 f"Step {i}: ref loss {lr_val:.6f} vs stream loss {ls_val:.6f} (rel diff {rel_diff:.4f})"
+            )
 
     def test_context_freed_after_backward(self, model_pair):
         """backward_streaming should free the context's checkpoint memory."""

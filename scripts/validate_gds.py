@@ -22,10 +22,7 @@ def train_steps(model, input_ids_list, labels_list, n_steps=20, label=""):
         [p for p in model._lora_params.parameters() if p.requires_grad],
         lr=1e-4,
     )
-    norm_params = [
-        p for p in model.parameters()
-        if p.requires_grad and p not in set(model._lora_params.parameters())
-    ]
+    norm_params = [p for p in model.parameters() if p.requires_grad and p not in set(model._lora_params.parameters())]
     if norm_params:
         optimizer.add_param_group({"params": norm_params, "lr": 1e-4})
 
@@ -62,7 +59,7 @@ def train_steps(model, input_ids_list, labels_list, n_steps=20, label=""):
         step_times.append(t1 - t0)
         losses.append(loss.item())
         if step % 5 == 0:
-            print(f"  [{label}] Step {step:2d} | loss={loss.item():.4f} | {t1-t0:.3f}s")
+            print(f"  [{label}] Step {step:2d} | loss={loss.item():.4f} | {t1 - t0:.3f}s")
 
     return step_times, losses
 
@@ -81,6 +78,7 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     from datasets import load_dataset
+
     ds = load_dataset("tatsu-lab/alpaca", split="train").select(range(50))
     input_ids_list = []
     labels_list = []
@@ -93,7 +91,9 @@ def main():
     print(f"  {len(input_ids_list)} samples prepared")
 
     # Compute model size for bandwidth calculation
-    import struct, json
+    import json
+    import struct
+
     with open(quantized_path, "rb") as f:
         header_size = struct.unpack("<Q", f.read(8))[0]
         header_json = json.loads(f.read(header_size))
@@ -106,15 +106,16 @@ def main():
     torch.manual_seed(42)
     with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
         model_gds = KbitLoraModel.from_quantized(
-            quantized_path, weight_streaming=True, use_gds=True, lora_r=16,
+            quantized_path,
+            weight_streaming=True,
+            use_gds=True,
+            lora_r=16,
         )
     print(f"  RAM strategy: {model_gds._ram_strategy}")
     print(f"  GDS enabled: {model_gds._use_gds}")
     print(f"  Resident layers: {model_gds._n_resident}")
 
-    gds_times, gds_losses = train_steps(
-        model_gds, input_ids_list, labels_list, n_steps=n_steps, label="GDS"
-    )
+    gds_times, gds_losses = train_steps(model_gds, input_ids_list, labels_list, n_steps=n_steps, label="GDS")
 
     del model_gds
     torch.cuda.empty_cache()
@@ -124,7 +125,10 @@ def main():
     torch.manual_seed(42)
     with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
         model_pinned = KbitLoraModel.from_quantized(
-            quantized_path, weight_streaming=True, use_gds=False, lora_r=16,
+            quantized_path,
+            weight_streaming=True,
+            use_gds=False,
+            lora_r=16,
         )
     print(f"  RAM strategy: {model_pinned._ram_strategy}")
     print(f"  Resident layers: {model_pinned._n_resident}")
@@ -142,7 +146,7 @@ def main():
     pinned_avg = sum(pinned_times) / len(pinned_times)
     print(f"  GDS avg step time:    {gds_avg:.3f}s")
     print(f"  Pinned avg step time: {pinned_avg:.3f}s")
-    print(f"  Speedup (pinned/GDS): {pinned_avg/gds_avg:.2f}x")
+    print(f"  Speedup (pinned/GDS): {pinned_avg / gds_avg:.2f}x")
 
     # Estimate streaming bandwidth
     # Each step does forward (48 layers) + backward (48 layers) = 96 layer loads
@@ -156,7 +160,7 @@ def main():
 
     gds_bw = data_per_step_gb / gds_avg
     pinned_bw = data_per_step_gb / pinned_avg
-    print(f"\n  Estimated streaming bandwidth:")
+    print("\n  Estimated streaming bandwidth:")
     print(f"    GDS:    {gds_bw:.1f} GB/s ({data_per_step_gb:.1f} GB/step)")
     print(f"    Pinned: {pinned_bw:.1f} GB/s")
 

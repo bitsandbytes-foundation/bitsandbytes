@@ -5,13 +5,14 @@ across shapes matching real model projections.
 """
 
 import sys
+
 import torch
 
 sys.path.insert(0, ".")
-import bitsandbytes  # noqa: E402
-from bitsandbytes import _ops  # noqa: E402, F401
-from bitsandbytes.functional import dequantize_kbit, quantize_kbit  # noqa: E402
-from scipy.stats import norm  # noqa: E402
+from scipy.stats import norm
+
+from bitsandbytes import _ops  # noqa: F401
+from bitsandbytes.functional import dequantize_kbit, quantize_kbit
 
 BLOCKSIZE = 32
 WARMUP = 200
@@ -29,17 +30,11 @@ def create_normal_float_codebook(k: int) -> torch.Tensor:
 def prepare_weights(K_dim, N, k):
     codebook = create_normal_float_codebook(k).cuda()
     W = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
-    packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(
-        W.reshape(-1), codebook, k
-    )
+    packed_flat, absmax_flat = torch.ops.bitsandbytes.quantize_kbit(W.reshape(-1), codebook, k)
     # Repacked data for MMA reference
-    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(
-        packed_flat, absmax_flat.cuda(), K_dim, N, k
-    )
+    packed_tiled, absmax_tiled = torch.ops.bitsandbytes.repack_kbit(packed_flat, absmax_flat.cuda(), K_dim, N, k)
     # Also prepare for dequant kernel
-    packed_flat2, absmax_flat2, cb_flat2 = quantize_kbit(
-        W.reshape(-1).float().half(), k=k, absmax_format="e4m4"
-    )
+    packed_flat2, absmax_flat2, cb_flat2 = quantize_kbit(W.reshape(-1).float().half(), k=k, absmax_format="e4m4")
     return packed_flat, absmax_flat, packed_tiled, absmax_tiled, codebook, W, packed_flat2, absmax_flat2, cb_flat2
 
 
@@ -74,16 +69,18 @@ def main():
         ("dense down   5120x2048", 5120, 2048),
         ("Q proj       2048x4096", 2048, 4096),
         ("O proj       4096x2048", 4096, 2048),
-        ("KV proj      2048x512",  2048, 512),
+        ("KV proj      2048x512", 2048, 512),
         ("linear key   2048x2048", 2048, 2048),
-        ("MoE gate/up  2048x512",  2048, 512),
-        ("MoE down     512x2048",  512,  2048),
+        ("MoE gate/up  2048x512", 2048, 512),
+        ("MoE down     512x2048", 512, 2048),
     ]
 
     M_values = [1, 2, 3, 4]
 
-    print(f"{'Shape':<26} {'M':>2}  {'Scalar':>8} {'MMA':>8} {'cuBLAS':>8} {'Dq+cuB':>8}  "
-          f"{'S BW':>6} {'vs MMA':>7} {'vs cuB':>7} {'vs Dq+C':>7}")
+    print(
+        f"{'Shape':<26} {'M':>2}  {'Scalar':>8} {'MMA':>8} {'cuBLAS':>8} {'Dq+cuB':>8}  "
+        f"{'S BW':>6} {'vs MMA':>7} {'vs cuB':>7} {'vs Dq+C':>7}"
+    )
     print("-" * 115)
 
     for label, K_dim, N in shapes:
@@ -96,12 +93,16 @@ def main():
 
             # Scalar GEMV (flat layout, float32 absmax)
             C_out = torch.empty(M, N, device="cuda", dtype=torch.float16)
-            t_scalar = bench_fn(lambda: torch.ops.bitsandbytes.kbit_scalar_gemv(
-                A, packed_flat, absmax_flat, codebook, K_dim, N, k, 0, out=C_out))
+            t_scalar = bench_fn(
+                lambda: torch.ops.bitsandbytes.kbit_scalar_gemv(
+                    A, packed_flat, absmax_flat, codebook, K_dim, N, k, 0, out=C_out
+                )
+            )
 
             # MMA kernel (uses repacked tiled data)
-            t_mma = bench_fn(lambda: torch.ops.bitsandbytes.kbit_gemm_prod(
-                A, packed_tiled, absmax_tiled, codebook, K_dim, N, k, 1))
+            t_mma = bench_fn(
+                lambda: torch.ops.bitsandbytes.kbit_gemm_prod(A, packed_tiled, absmax_tiled, codebook, K_dim, N, k, 1)
+            )
 
             # cuBLAS
             t_cublas = bench_fn(lambda: torch.mm(A, W_fp16.t()))
@@ -111,6 +112,7 @@ def main():
                 W_deq = dequantize_kbit(pf2, af2, cf2, k=k, n=n, dtype=torch.float16)
                 W_deq = W_deq.reshape(N, K_dim)
                 return torch.mm(A, W_deq.t())
+
             t_dq_cublas = bench_fn(dequant_cublas)
 
             # Bandwidth
@@ -121,8 +123,10 @@ def main():
             speedup_cublas = t_cublas / t_scalar
             speedup_dq = t_dq_cublas / t_scalar
 
-            print(f"{label:<26} {M:>2}  {t_scalar:>7.1f}u {t_mma:>7.1f}u {t_cublas:>7.1f}u {t_dq_cublas:>7.1f}u  "
-                  f"{bw_scalar:>5.0f}G {speedup_mma:>6.2f}x {speedup_cublas:>6.2f}x {speedup_dq:>6.2f}x")
+            print(
+                f"{label:<26} {M:>2}  {t_scalar:>7.1f}u {t_mma:>7.1f}u {t_cublas:>7.1f}u {t_dq_cublas:>7.1f}u  "
+                f"{bw_scalar:>5.0f}G {speedup_mma:>6.2f}x {speedup_cublas:>6.2f}x {speedup_dq:>6.2f}x"
+            )
 
         print()
 
