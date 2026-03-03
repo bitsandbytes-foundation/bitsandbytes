@@ -1,24 +1,45 @@
-# Coordinator Agent Guide
+# Agent Dispatch Guide
 
-You are a coordinator agent. Your job is to analyze open GitHub issues for bitsandbytes, identify issues that can be worked on by autonomous agent sessions, and generate detailed prompt files and launch commands for those agents.
+You are the Dispatcher. Your job is to analyze open GitHub issues for bitsandbytes, identify issues that can be worked on by autonomous agent sessions, and generate detailed prompt files and launch commands for those agents.
 
 ## Prerequisites
 
 Before starting, refresh the issue data:
 
 ```bash
-python3 ~/git/lab_tools/github/fetch_issues.py
+python3 agents/fetch_issues.py
 ```
 
 Read `agents/github_tools_guide.md` for the full reference on how to use the query tools.
+
+## Step 0: Check Existing Reviews on Open PRs
+
+Before looking at issues, check whether there are open PRs from external contributors that need review. But **do not assume a PR needs review just because it is open** — check whether a review has already been posted.
+
+```bash
+# List open PRs
+gh pr list --state open --limit 30
+
+# For each external contributor PR, check for existing reviews
+gh api repos/bitsandbytes-foundation/bitsandbytes/pulls/<NUMBER>/reviews \
+  --jq '.[] | "\(.user.login) | \(.state) | \(.submitted_at)"'
+```
+
+A PR only needs a new review if:
+
+- **No review exists at all** from a maintainer or agent
+- **The author has pushed new commits** since the last review (check commit dates vs review dates)
+- **The author has responded to review feedback** and the review needs a re-review
+
+If a review already exists and the author has not responded or pushed changes, the ball is in the author's court — skip that PR. Do not generate a prompt to re-review work that has already been reviewed.
 
 ## Step 1: Find Candidate Issues
 
 Start by getting the landscape of open issues:
 
 ```bash
-python3 ~/git/lab_tools/github/query_issues.py list
-python3 ~/git/lab_tools/github/query_issues.py list --sort reactions
+python3 agents/query_issues.py list
+python3 agents/query_issues.py list --sort reactions
 ```
 
 Look for issues that are actionable — see the "Identifying Actionable Issues" section of `agents/github_tools_guide.md`. Good candidates have:
@@ -32,13 +53,13 @@ Also check for low-hanging fruit:
 
 ```bash
 # Issues with open PRs that may just need review/testing/completion
-python3 ~/git/lab_tools/github/query_issues.py search "PR" --state open
+python3 agents/query_issues.py search "PR" --state open
 
 # Issues already labeled for external contribution
-python3 ~/git/lab_tools/github/query_issues.py list --label "Contributions Welcome"
+python3 agents/query_issues.py list --label "Contributions Welcome"
 
 # Issues proposed for closing (may just need verification)
-python3 ~/git/lab_tools/github/query_issues.py list --label "Proposing to Close"
+python3 agents/query_issues.py list --label "Proposing to Close"
 ```
 
 ## Step 2: Deep-Dive Each Candidate
@@ -47,25 +68,31 @@ For each candidate issue, gather full context. This step is critical — the qua
 
 ```bash
 # Full issue with all comments
-python3 ~/git/lab_tools/github/query_issues.py show <NUMBER>
+python3 agents/query_issues.py show <NUMBER>
+
+# Check for existing open PRs that already address this issue
+gh pr list --search "<NUMBER>" --state open
+gh pr list --search "keyword from issue" --state open
 
 # Find related/duplicate issues (with body previews and last comments)
-python3 ~/git/lab_tools/github/query_issues.py related <NUMBER> -v
+python3 agents/query_issues.py related <NUMBER> -v
 
 # Check if it was already resolved
-python3 ~/git/lab_tools/github/query_issues.py related <NUMBER> --state closed -v
+python3 agents/query_issues.py related <NUMBER> --state closed -v
 
 # Targeted searches for specific error messages or terms from the issue
-python3 ~/git/lab_tools/github/query_issues.py search "specific error text"
+python3 agents/query_issues.py search "specific error text"
 ```
 
 For each promising related issue that shows up, run `show` on it to get the full context. Don't stop at the `related` output — read the full body and comments of related issues, especially closed ones where the resolution may be documented.
+
+**IMPORTANT: Check for existing PRs.** If `gh pr list` or the cross-references in the `show` output reveal an open PR that already addresses the issue, do NOT generate a prompt that duplicates that work. Either skip the issue or generate a prompt that tells the worker to review/test/complete the existing PR instead.
 
 For each issue, determine:
 
 1. **What is the root cause?** Read the full body, comments, and tracebacks.
 2. **Has this been fixed before?** Check related closed issues for prior fixes.
-3. **Is there an existing PR?** Check cross-references in the `show` output.
+3. **Is there an existing PR?** Check cross-references in the `show` output AND run `gh pr list --search` to find PRs that may not be cross-referenced. If a PR exists, the worker should review it rather than start from scratch.
 4. **What files need to change?** Look for code pointers in the issue body and comments. If possible, read the actual source files in the bitsandbytes repo to verify.
 5. **How do we verify the fix?** Is there a reproduction script? What tests apply?
 6. **What patterns or context from other issues are relevant?** Maybe three other issues report the same error with different trigger conditions. Maybe a closed issue's fix didn't fully address the problem. This broader context is valuable for the worker agent.
@@ -94,12 +121,12 @@ Write each prompt file using the Write tool. The file name should be `issue-<NUM
 
 Every prompt file should have these sections:
 
-**1. Setup instructions.** The exact commands to create a worktree, plus a pointer to build/test docs:
+**1. Setup instructions.** The exact commands to create a worktree, plus a pointer to build/test docs. **The worktree step is mandatory — the worker agent must NOT work directly in `~/git/bitsandbytes`.**
 
 ```markdown
 ## Setup
 
-Create your working environment by running these commands:
+IMPORTANT: You MUST create a worktree. Do NOT work in ~/git/bitsandbytes directly.
 
     cd ~/git/bitsandbytes
     git worktree add ~/git/bnb-fix-<NUMBER> -b fix/issue-<NUMBER>
@@ -113,37 +140,47 @@ project before making changes so you can verify your setup works.
 
 **3. Related issues — full context.** For each related issue that you identified during your deep-dive, include the full `show` output or a thorough excerpt. For closed issues, the comments often contain the resolution — make sure those are included. Explain how each related issue connects to the target issue.
 
-**4. Additional context from your analysis.** This is where you include everything else you discovered:
+**4. Existing PRs.** If any open PRs already address (or partially address) this issue, list them with their PR number, branch, and a summary of what they change. Tell the worker agent to review the existing PR first and build on it rather than starting from scratch. If no existing PRs were found, state that explicitly so the worker knows it checked.
+
+**5. Additional context from your analysis.** This is where you include everything else you discovered:
 
 - Patterns across multiple issues (e.g. "Issues #933, #966, #1190, #1394, and #1434 all report the same CUDA Setup failure with different CUDA versions — the root cause appears to be X")
 - Relevant technical details from maintainer comments on other issues
 - Source code observations if you read the bitsandbytes source
-- Information about existing PRs — what they change, whether they look correct
 - Anything else the worker agent should know
 
-**5. Your recommended approach.** What you think the fix should look like. Be specific — name files, functions, line numbers. Frame it as guidance, not commands — the worker agent may find things you didn't and should use its own judgment.
+**6. Your recommended approach.** What you think the fix should look like. Be specific — name files, functions, line numbers. Frame it as guidance, not commands — the worker agent may find things you didn't and should use its own judgment. Include which specific test file(s) or test function(s) the agent should run to verify its fix — not the full suite.
 
-**6. Completion workflow.** Every prompt file must include this section verbatim, with the issue number filled in:
+**7. Completion workflow.** Every prompt file must include this section verbatim, with the issue number filled in:
 
 ```markdown
 ## When You Are Done
 
 After implementing and verifying the fix:
 
-1. **Commit** your changes with a message referencing the issue:
+1. **Run only the tests relevant to your change.** Do NOT run the full
+   test suite — it takes 10+ minutes and will be run separately later.
+   Instead, run the specific test file(s) that cover the code you changed:
+
+       pytest tests/test_autograd.py -v --tb=short -k "relevant_test_name"
+
+   If you wrote a new test, run that plus the existing tests in the same
+   file to check for regressions in that area.
+
+2. **Commit** your changes with a message referencing the issue:
 
        git add <files>
        git commit -m "Fix <brief description> (#<NUMBER>)"
 
-2. **Push** the branch:
+3. **Push** the branch:
 
        git push -u origin fix/issue-<NUMBER>
 
-3. **Create a pull request** with `gh pr create`. The PR body must
+4. **Create a pull request** with `gh pr create`. The PR body must
    include "Fixes #<NUMBER>" so GitHub auto-links and auto-closes the
    issue on merge. Describe what the fix does and how you verified it.
 
-4. **Post to the bitsandbytes Slack channel** to notify the team.
+5. **Post to the bitsandbytes Slack channel** to notify the team.
    Write a temporary Python script to `/tmp/slack_notify.py` and run it:
 
        import json, urllib.request, sys
@@ -169,7 +206,7 @@ push, and create the PR — but note the failures in the PR description
 and explain what you tried. Do not silently abandon work.
 ```
 
-**7. What NOT to do.** If there are traps, scope boundaries, or things that look tempting but are wrong, list them explicitly. For example: "Don't change the 8bit_blockwise dispatch — only the 32bit dispatch is affected."
+**8. What NOT to do.** If there are traps, scope boundaries, or things that look tempting but are wrong, list them explicitly. For example: "Don't change the 8bit_blockwise dispatch — only the 32bit dispatch is affected."
 
 ### Example Prompt File
 
@@ -245,7 +282,8 @@ whether it is correct and complete before implementing from scratch.
 
 ## When You Are Done
 
-[the standard completion workflow section with issue number 1810 filled in]
+[the standard completion workflow section with issue number 1810 filled in.
+Remember: tell the agent to run only the relevant tests, not the full suite.]
 
 ## What NOT to Do
 

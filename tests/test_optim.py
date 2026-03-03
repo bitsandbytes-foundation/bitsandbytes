@@ -102,6 +102,11 @@ str2optimizers["momentum8bit_blockwise"] = (
     lambda pxx: bnb.optim.SGD8bit(pxx, 0.01, 0.9, block_wise=True),
 )
 
+str2optimizers["lars"] = (
+    lambda pxx: bnb.optim.PytorchLARS(pxx, 0.01, 0.9),
+    lambda pxx: bnb.optim.LARS(pxx, 0.01, 0.9),
+)
+
 str2optimizers["rmsprop"] = (
     lambda pxx: torch.optim.RMSprop(pxx, 0.01, 0.9),
     lambda pxx: bnb.optim.RMSprop(pxx, 0.01, 0.9, block_wise=False),
@@ -118,6 +123,7 @@ str2statenames["paged_adam"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["lion"] = [("exp_avg", "state1")]
 str2statenames["paged_lion"] = [("exp_avg", "state1")]
 str2statenames["momentum"] = [("momentum_buffer", "state1")]
+str2statenames["lars"] = [("momentum_buffer", "state1")]
 str2statenames["lamb"] = [("exp_avg", "state1"), ("exp_avg_sq", "state2")]
 str2statenames["rmsprop"] = [("square_avg", "state1")]
 
@@ -155,6 +161,7 @@ optimizer_names_32bit = [
     "paged_adamw",
     "paged_adam",
     "momentum",
+    "lars",
     "rmsprop",
     "lion",
     "paged_lion",
@@ -181,7 +188,7 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name, device):
     if optim_name.startswith("paged_") and device == "xpu":
         pytest.skip("Paged optimizers are not supported on XPU currently.")
 
-    if gtype == torch.bfloat16 and optim_name in ["momentum", "rmsprop"]:
+    if gtype == torch.bfloat16 and optim_name in ["momentum", "lars", "rmsprop"]:
         pytest.skip()
     if dim1 == 1 and dim2 == 1:
         return
@@ -592,3 +599,111 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name, device):
     params = (total_steps - total_steps // 5) * dim1 * dim2
     print(optim_name, gtype, s, params, s / params)
     # assert s < 3.9
+
+
+ademamix_state_dict_opts = [
+    ("AdEMAMix8bit", lambda p: bnb.optim.AdEMAMix8bit(p, lr=1e-3)),
+    ("AdEMAMix32bit", lambda p: bnb.optim.AdEMAMix(p, lr=1e-3)),
+    ("AdEMAMix8bit_scheduled", lambda p: bnb.optim.AdEMAMix8bit(p, lr=1e-3, t_alpha=100, t_beta3=100)),
+    ("AdEMAMix32bit_scheduled", lambda p: bnb.optim.AdEMAMix(p, lr=1e-3, t_alpha=100, t_beta3=100)),
+]
+
+
+@pytest.mark.parametrize(
+    "optim_name,optim_factory",
+    ademamix_state_dict_opts,
+    ids=[x[0] for x in ademamix_state_dict_opts],
+)
+@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+@pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No device")
+def test_ademamix_state_dict_no_nan(optim_name, optim_factory, device):
+    """Test that AdEMAMix can save/load state_dict and continue training without NaN.
+
+    Regression test for https://github.com/bitsandbytes-foundation/bitsandbytes/issues/1382
+    """
+    if device not in ["cuda", "xpu"]:
+        pytest.skip("Optimizers are only supported on CUDA and XPU")
+
+    import torch.nn as nn
+
+    torch.manual_seed(42)
+    model = nn.Linear(256, 64).to(device)
+    opt = optim_factory(model.parameters())
+
+    # Train a few steps to populate optimizer state
+    for _ in range(10):
+        x = torch.randn(8, 256, device=device)
+        loss = model(x).sum()
+        loss.backward()
+        opt.step()
+        opt.zero_grad()
+
+    # Save state
+    model_sd = {k: v.clone() for k, v in model.state_dict().items()}
+    opt_sd = opt.state_dict()
+    path = get_temp_dir()
+    torch.save(opt_sd, join(path, "opt.pt"))
+    torch.save(model_sd, join(path, "model.pt"))
+
+    # Create fresh model and optimizer, load state
+    model2 = nn.Linear(256, 64).to(device)
+    model2.load_state_dict(torch.load(join(path, "model.pt")))
+    opt2 = optim_factory(model2.parameters())
+    opt2.load_state_dict(torch.load(join(path, "opt.pt")))
+    rm_path(path)
+
+    # Verify loaded state matches original byte-for-byte
+    orig_params = list(model.parameters())
+    loaded_params = list(model2.parameters())
+    for p_idx in range(len(orig_params)):
+        s1 = opt.state[orig_params[p_idx]]
+        s2 = opt2.state[loaded_params[p_idx]]
+        for k in s1:
+            if isinstance(s1[k], torch.Tensor):
+                assert s1[k].shape == s2[k].shape, f"Shape mismatch for param {p_idx} {k}"
+                assert s1[k].dtype == s2[k].dtype, f"Dtype mismatch for param {p_idx} {k}"
+                torch.testing.assert_close(s1[k], s2[k])
+
+    # Resume training and verify no NaN
+    for i in range(10):
+        x = torch.randn(8, 256, device=device)
+        loss = model2(x).sum()
+        assert not torch.isnan(loss), f"NaN loss at step {i} after loading state_dict"
+        assert not torch.isinf(loss), f"Inf loss at step {i} after loading state_dict"
+        loss.backward()
+        opt2.step()
+        opt2.zero_grad()
+
+        # Check parameters for NaN/Inf after each step
+        for p in model2.parameters():
+            assert not p.isnan().any(), f"NaN in parameters at step {i} after loading state_dict"
+            assert not p.isinf().any(), f"Inf in parameters at step {i} after loading state_dict"
+
+    # Verify the original and loaded optimizers produce identical updates
+    # from the same starting point (immediately after loading, before any divergence)
+    torch.manual_seed(999)
+    x_orig = torch.randn(8, 256, device=device)
+    x_loaded = x_orig.clone()
+
+    # Reset models to the saved checkpoint weights
+    model.load_state_dict(model_sd)
+    model2.load_state_dict(model_sd)
+
+    # Reload optimizer states from the same checkpoint into two fresh optimizers
+    opt_fresh = optim_factory(model.parameters())
+    opt_fresh.load_state_dict(opt_sd)
+    opt_fresh2 = optim_factory(model2.parameters())
+    opt_fresh2.load_state_dict(opt_sd)
+
+    loss_a = model(x_orig).sum()
+    loss_a.backward()
+    opt_fresh.step()
+    opt_fresh.zero_grad()
+
+    loss_b = model2(x_loaded).sum()
+    loss_b.backward()
+    opt_fresh2.step()
+    opt_fresh2.zero_grad()
+
+    for p_a, p_b in zip(model.parameters(), model2.parameters()):
+        torch.testing.assert_close(p_a, p_b)

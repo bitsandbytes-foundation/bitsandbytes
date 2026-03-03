@@ -209,6 +209,7 @@ def _get_col_absmax(
 
 @register_kernel("bitsandbytes::quantize_blockwise", "cuda")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
+    A = A.contiguous()
     torch._check_is_size(blocksize)
 
     if ROCM_WARP_SIZE_64:
@@ -269,6 +270,7 @@ def _(
 def _dequantize_blockwise_impl(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
 ) -> None:
+    A = A.contiguous()
     if ROCM_WARP_SIZE_64:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
     else:
@@ -303,6 +305,7 @@ def _dequantize_blockwise_impl(
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    A = A.contiguous()
     if ROCM_WARP_SIZE_64:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
     else:
@@ -385,6 +388,7 @@ def _dequantize_4bit_impl(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
+    A = A.contiguous()
     if ROCM_WARP_SIZE_64:
         torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64])
     else:
@@ -574,6 +578,10 @@ str2optimizer32bit = {
         lib.cademamix32bit_grad_fp16,
         lib.cademamix32bit_grad_bf16,
     ),
+    "lars": (
+        lib.cmomentum32bit_grad_32,
+        lib.cmomentum32bit_grad_16,
+    ),
 }
 
 str2optimizer8bit_blockwise = {
@@ -633,7 +641,7 @@ def _optimizer_update_32bit_impl(
     optim_fns = str2optimizer32bit.get(optimizer_name, None)
     if optim_fns is None:
         raise ValueError(
-            f"Unsupported optimizer name: {optimizer_name}. Supported optimizers: {list(str2optimizer8bit_blockwise.keys())}"
+            f"Unsupported optimizer name: {optimizer_name}. Supported optimizers: {list(str2optimizer32bit.keys())}"
         )
     if g.dtype == torch.float32:
         optim_func = optim_fns[0]
@@ -1439,3 +1447,451 @@ def _(
         )
 
     return grad_logits
+
+
+# NVFP4 quantization
+@register_kernel("bitsandbytes::quantize_nvfp4", "cuda")
+def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    A = A.contiguous()
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
+    torch._check(
+        A.dtype in [torch.float16, torch.bfloat16, torch.float32],
+        lambda: f"NVFP4 quantization requires float16/bfloat16/float32, got {A.dtype}",
+    )
+
+    if tensor_scale is None:
+        tensor_scale = A.abs().max().item()
+
+    packed = torch.zeros(n // 2, dtype=torch.uint8, device=A.device)
+    block_scales = torch.zeros(n // 16, dtype=torch.uint8, device=A.device)
+
+    with _cuda_device_of(A):
+        if A.dtype == torch.float16:
+            lib.cquantize_nvfp4_fp16(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
+        elif A.dtype == torch.bfloat16:
+            lib.cquantize_nvfp4_bf16(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
+        else:
+            lib.cquantize_nvfp4_fp32(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
+
+    ts_out = torch.tensor([tensor_scale], dtype=torch.float32, device=A.device)
+    return packed, block_scales, ts_out
+
+
+# NVFP4 dequantization
+@register_kernel("bitsandbytes::dequantize_nvfp4", "cuda")
+def _(
+    packed: torch.Tensor, block_scales: torch.Tensor, tensor_scale: float, numel: int, dtype: torch.dtype
+) -> torch.Tensor:
+    packed = packed.contiguous()
+    block_scales = block_scales.contiguous()
+    output = torch.zeros(numel, dtype=dtype, device=packed.device)
+
+    with _cuda_device_of(packed):
+        if dtype == torch.float16:
+            lib.cdequantize_nvfp4_fp16(
+                get_ptr(packed),
+                get_ptr(block_scales),
+                ct.c_float(tensor_scale),
+                get_ptr(output),
+                ct.c_int(numel),
+                ct.c_void_p(0),
+            )
+        elif dtype == torch.bfloat16:
+            lib.cdequantize_nvfp4_bf16(
+                get_ptr(packed),
+                get_ptr(block_scales),
+                ct.c_float(tensor_scale),
+                get_ptr(output),
+                ct.c_int(numel),
+                ct.c_void_p(0),
+            )
+        else:
+            lib.cdequantize_nvfp4_fp32(
+                get_ptr(packed),
+                get_ptr(block_scales),
+                ct.c_float(tensor_scale),
+                get_ptr(output),
+                ct.c_int(numel),
+                ct.c_void_p(0),
+            )
+
+    return output
+
+
+# NVFP4 Hadamard rotation (in-place)
+@register_kernel("bitsandbytes::hadamard_rotate_nvfp4", "cuda")
+def _(A: torch.Tensor) -> None:
+    A_contig = A.contiguous()
+    n = A_contig.numel()
+    torch._check(n % 16 == 0, lambda: f"Hadamard rotation requires numel divisible by 16, got {n}")
+
+    with _cuda_device_of(A_contig):
+        if A_contig.dtype == torch.float16:
+            lib.chadamard_rotate16_fp16(get_ptr(A_contig), ct.c_int(n))
+        elif A_contig.dtype == torch.bfloat16:
+            lib.chadamard_rotate16_bf16(get_ptr(A_contig), ct.c_int(n))
+        else:
+            lib.chadamard_rotate16_fp32(get_ptr(A_contig), ct.c_int(n))
+
+    if not A.is_contiguous():
+        A.copy_(A_contig)
+
+
+# Fused Hadamard rotation + NVFP4 quantize
+@register_kernel("bitsandbytes::fused_hadamard_quantize_nvfp4", "cuda")
+def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    A = A.contiguous()
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
+
+    if tensor_scale is None:
+        # Compute scale on rotated data
+        A_copy = A.clone()
+        torch.ops.bitsandbytes.hadamard_rotate_nvfp4(A_copy)
+        tensor_scale = A_copy.abs().max().item()
+
+    packed = torch.zeros(n // 2, dtype=torch.uint8, device=A.device)
+    block_scales = torch.zeros(n // 16, dtype=torch.uint8, device=A.device)
+
+    with _cuda_device_of(A):
+        if A.dtype == torch.float16:
+            lib.cfused_hadamard_quantize_nvfp4_fp16(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
+        elif A.dtype == torch.bfloat16:
+            lib.cfused_hadamard_quantize_nvfp4_bf16(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
+        else:
+            lib.cfused_hadamard_quantize_nvfp4_fp32(
+                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
+            )
+
+    ts_out = torch.tensor([tensor_scale], dtype=torch.float32, device=A.device)
+    return packed, block_scales, ts_out
+
+
+# CUTLASS-based fused quantize for NVFP4 (SM_120+)
+# Uses QuTLASS GEMM-as-quantize approach with always-on randomized Hadamard
+# rotation. The 16x16 rotation matrix is generated once per device and cached.
+_rotation_matrices: dict[torch.device, torch.Tensor] = {}
+
+# Fixed seed for reproducible rotation across weight quantization and inference.
+_ROTATION_SEED = 42
+
+
+def _get_rotation_matrix(device: torch.device) -> torch.Tensor:
+    """Get cached 16x16 randomized Hadamard matrix for fused quantize.
+
+    Builds R = H * D where H is the 16x16 normalized Hadamard matrix and D is
+    a diagonal sign-flip matrix (±1 per column) from a fixed seed. The CUTLASS
+    GEMM computes ``A @ R`` (no transpose), so dequant must apply ``@ R^T``.
+    The same matrix must be used for both weight and activation quantization.
+    """
+    if device not in _rotation_matrices:
+        # Build normalized 16x16 Hadamard via Sylvester construction
+        h = torch.tensor([[1.0]], dtype=torch.float32)
+        for _ in range(4):  # 2^4 = 16
+            h = torch.cat([torch.cat([h, h], dim=1), torch.cat([h, -h], dim=1)], dim=0)
+        h /= 4.0  # normalize by 1/sqrt(16)
+
+        # Apply random sign flips per column (H @ D)
+        gen = torch.Generator().manual_seed(_ROTATION_SEED)
+        signs = torch.randint(0, 2, (16,), generator=gen) * 2 - 1  # ±1
+        h = h * signs.float()
+
+        _rotation_matrices[device] = h.to(dtype=torch.bfloat16, device=device)
+    return _rotation_matrices[device]
+
+
+def _fused_quantize_nvfp4_raw(
+    A_flat: torch.Tensor,
+    rotation: torch.Tensor,
+    packed_out: torch.Tensor,
+    scales_out: torch.Tensor,
+    global_scale: torch.Tensor,
+    M: int,
+) -> None:
+    """Raw CUTLASS fused quantize — zero allocations, CUDA-graph-safe.
+
+    All buffers must be pre-allocated and pre-filled by the caller. Input A
+    must already be padded so that M is a multiple of 128. The global_scale
+    buffer must contain ``1.0 / tensor_scale``.
+
+    This is the innermost call used by both the convenience wrapper and
+    CUDA graph capture paths.
+    """
+    lib.cfused_quantize_nvfp4_absmax(
+        get_ptr(A_flat),
+        get_ptr(rotation),
+        get_ptr(packed_out),
+        get_ptr(scales_out),
+        get_ptr(global_scale),
+        ct.c_int(M),
+        ct.c_int(16),
+        ct.c_int(16),
+        _get_tensor_stream(A_flat),
+    )
+
+
+def _fused_quantize_nvfp4_impl(
+    A: torch.Tensor,
+    tensor_scale: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Convenience wrapper that allocates outputs. Not graph-safe."""
+    A = A.contiguous()
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
+    torch._check(
+        A.dtype == torch.bfloat16,
+        lambda: f"CUTLASS fused quantize requires bfloat16, got {A.dtype}",
+    )
+
+    K = 16
+    orig_M = n // K
+    padded_M = ((orig_M + 127) // 128) * 128
+
+    if padded_M != orig_M:
+        A_2d = A.view(orig_M, K)
+        A_2d = torch.nn.functional.pad(A_2d, (0, 0, 0, padded_M - orig_M))
+        A_flat = A_2d.reshape(-1)
+    else:
+        A_flat = A
+
+    global_scale = torch.tensor(
+        [1.0 / tensor_scale if tensor_scale > 0 else 0.0],
+        dtype=torch.float32,
+        device=A.device,
+    )
+    packed_padded = torch.zeros(padded_M * K // 2, dtype=torch.uint8, device=A.device)
+    scales_padded = torch.zeros(padded_M, dtype=torch.uint8, device=A.device)
+
+    _fused_quantize_nvfp4_raw(
+        A_flat,
+        _get_rotation_matrix(A.device),
+        packed_padded,
+        scales_padded,
+        global_scale,
+        padded_M,
+    )
+
+    packed = packed_padded[: orig_M * K // 2] if padded_M != orig_M else packed_padded
+    block_scales = scales_padded[:orig_M] if padded_M != orig_M else scales_padded
+
+    ts_out = torch.tensor([tensor_scale], dtype=torch.float32, device=A.device)
+    return packed, block_scales, ts_out
+
+
+@register_kernel("bitsandbytes::cutlass_fused_quantize_nvfp4", "cuda")
+def _(
+    A: torch.Tensor,
+    tensor_scale: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """CUTLASS-based fused quantize with randomized Hadamard rotation."""
+    return _fused_quantize_nvfp4_impl(A, tensor_scale)
+
+
+# Scale reordering for CUTLASS block-scaled GEMM
+@register_kernel("bitsandbytes::scale_to_blocked", "cuda")
+def _(scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
+    """Reorder flat row-major scales to CUTLASS block-scaled layout.
+
+    Called once at quantization time to pre-compute the swizzled scales
+    that CUTLASS needs. The result is stored in NVFP4QuantState.
+    """
+    n_row_blocks = (H + 127) // 128
+    n_col_blocks = (W + 3) // 4
+    out_size = n_row_blocks * n_col_blocks * 128 * 4
+    out = torch.empty(out_size, dtype=torch.uint8, device=scales.device)
+    with _cuda_device_of(scales):
+        lib.cscale_to_blocked(
+            get_ptr(scales),
+            get_ptr(out),
+            ct.c_int(H),
+            ct.c_int(W),
+            _get_tensor_stream(scales),
+        )
+    return out
+
+
+# Hand-written NVFP4 GEMM (SM_120+)
+#
+# Uses mma.sync.aligned.block_scale instructions for small-M decode.
+# Expects flat (non-swizzled) row-major scales.
+# Uses automatic split-K when tile count is low relative to SM count.
+#
+# Output variants:
+#   _gemm_nvfp4_hw_raw      — FP32 output (cgemm_nvfp4)
+#   _gemm_nvfp4_hw_bf16_raw — BF16 output (cgemm_nvfp4_bf16), needs FP32 workspace for split-K
+def _gemm_nvfp4_hw_raw(
+    A_packed: torch.Tensor,
+    B_packed: torch.Tensor,
+    A_scales: torch.Tensor,
+    B_scales: torch.Tensor,
+    D_out: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
+) -> None:
+    """Raw hand-written NVFP4 GEMM (FP32 output) — zero allocations, CUDA-graph-safe.
+
+    All buffers must be pre-allocated. D_out must be FP32 of shape (M, N).
+    Scales are flat row-major (not swizzled). Uses auto split-K internally
+    with cudaMemsetAsync (graph-capturable).
+    """
+    lib.cgemm_nvfp4(
+        get_ptr(A_packed),
+        get_ptr(B_packed),
+        get_ptr(A_scales),
+        get_ptr(B_scales),
+        get_ptr(D_out),
+        ct.c_int(M),
+        ct.c_int(N),
+        ct.c_int(K),
+        _get_tensor_stream(A_packed),
+    )
+
+
+def _gemm_nvfp4_hw_bf16_raw(
+    A_packed: torch.Tensor,
+    B_packed: torch.Tensor,
+    A_scales: torch.Tensor,
+    B_scales: torch.Tensor,
+    D_out: torch.Tensor,
+    workspace: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
+) -> None:
+    """Raw hand-written NVFP4 GEMM (BF16 output) — zero allocations, CUDA-graph-safe.
+
+    All buffers must be pre-allocated. D_out must be BF16 of shape (M, N).
+    workspace must be FP32 of shape (M, N) — used for split-K accumulation.
+    Scales are flat row-major (not swizzled).
+    """
+    lib.cgemm_nvfp4_bf16(
+        get_ptr(A_packed),
+        get_ptr(B_packed),
+        get_ptr(A_scales),
+        get_ptr(B_scales),
+        get_ptr(D_out),
+        get_ptr(workspace),
+        ct.c_int(M),
+        ct.c_int(N),
+        ct.c_int(K),
+        _get_tensor_stream(A_packed),
+    )
+
+
+def _gemm_nvfp4_hw_splitk_raw(
+    A_packed: torch.Tensor,
+    B_packed: torch.Tensor,
+    A_scales: torch.Tensor,
+    B_scales: torch.Tensor,
+    D_out: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
+    split_k: int,
+) -> None:
+    """Raw hand-written NVFP4 GEMM with explicit split-K (FP32 output)."""
+    lib.cgemm_nvfp4_splitk(
+        get_ptr(A_packed),
+        get_ptr(B_packed),
+        get_ptr(A_scales),
+        get_ptr(B_scales),
+        get_ptr(D_out),
+        ct.c_int(M),
+        ct.c_int(N),
+        ct.c_int(K),
+        ct.c_int(split_k),
+        _get_tensor_stream(A_packed),
+    )
+
+
+# NVFP4 GEMM (CUTLASS-based)
+#
+# Expects pre-swizzled scales in CUTLASS block-scaled layout (computed at
+# quantization time by scale_to_blocked). Tensor scales are folded into
+# the CUTLASS epilogue alpha. Output is BF16, converted to FP32 for
+# API compatibility.
+def _gemm_nvfp4_raw(
+    A_packed: torch.Tensor,
+    B_packed: torch.Tensor,
+    A_scales: torch.Tensor,
+    B_scales: torch.Tensor,
+    D_out: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
+    alpha: torch.Tensor,
+) -> None:
+    """Raw NVFP4 GEMM — zero allocations, CUDA-graph-safe.
+
+    All buffers must be pre-allocated by the caller. The alpha buffer must
+    contain ``A_tensor_scale * B_tensor_scale``.
+    """
+    lib.cgemm_nvfp4_cutlass(
+        get_ptr(A_packed),
+        get_ptr(B_packed),
+        get_ptr(A_scales),
+        get_ptr(B_scales),
+        get_ptr(D_out),
+        ct.c_int(M),
+        ct.c_int(N),
+        ct.c_int(K),
+        get_ptr(alpha),
+        _get_tensor_stream(A_packed),
+    )
+
+
+def _gemm_nvfp4_impl(
+    A_packed: torch.Tensor,
+    B_packed: torch.Tensor,
+    A_scales: torch.Tensor,
+    B_scales: torch.Tensor,
+    A_tensor_scale: float,
+    B_tensor_scale: float,
+    M: int,
+    N: int,
+    K: int,
+) -> torch.Tensor:
+    """Convenience wrapper that allocates outputs. Not graph-safe."""
+    with _cuda_device_of(A_packed):
+        alpha = torch.tensor([A_tensor_scale * B_tensor_scale], dtype=torch.float32, device=A_packed.device)
+        D_out = torch.empty(M, N, dtype=torch.bfloat16, device=A_packed.device)
+        _gemm_nvfp4_raw(A_packed, B_packed, A_scales, B_scales, D_out, M, N, K, alpha)
+    return D_out.float()
+
+
+@register_kernel("bitsandbytes::gemm_nvfp4", "cuda")
+def _(
+    A_packed: torch.Tensor,
+    B_packed: torch.Tensor,
+    A_scales: torch.Tensor,
+    B_scales: torch.Tensor,
+    A_tensor_scale: float,
+    B_tensor_scale: float,
+    M: int,
+    N: int,
+    K: int,
+) -> torch.Tensor:
+    """NVFP4 GEMM: A @ B^T with block-scaled FP4 inputs."""
+    return _gemm_nvfp4_impl(
+        A_packed,
+        B_packed,
+        A_scales,
+        B_scales,
+        A_tensor_scale,
+        B_tensor_scale,
+        M,
+        N,
+        K,
+    )

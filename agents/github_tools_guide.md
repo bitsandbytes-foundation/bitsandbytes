@@ -1,16 +1,16 @@
 # Using GitHub Tools for bitsandbytes Issue Analysis
 
-The lab_tools repository (`~/git/lab_tools/github/`) contains scripts for fetching and querying GitHub issues. This guide covers how to use them for bitsandbytes specifically.
+The `agents/` directory contains scripts for fetching and querying GitHub issues. This guide covers how to use them for bitsandbytes specifically.
 
 ## Data Setup
 
 Before starting any analysis, refresh the local issue data:
 
 ```bash
-python3 ~/git/lab_tools/github/fetch_issues.py
+python3 agents/fetch_issues.py
 ```
 
-This fetches all open and closed issues (~1200 total) into `~/git/lab_tools/github/bitsandbytes_issues.json`. Takes ~13 API calls, safe to run every session. The data includes full issue bodies, all comments, labels, reactions, cross-references, and timeline events.
+This fetches all open and closed issues (~1200 total) into `agents/bitsandbytes_issues.json` (gitignored). Takes ~13 API calls, safe to run every session. The data includes full issue bodies, all comments, labels, reactions, cross-references, and timeline events.
 
 ## Getting the Landscape
 
@@ -18,21 +18,21 @@ Start with an overview of all open issues:
 
 ```bash
 # All open issues, most recently updated first
-python3 ~/git/lab_tools/github/query_issues.py list
+python3 agents/query_issues.py list
 
 # Only unlabeled issues (often untriaged)
-python3 ~/git/lab_tools/github/query_issues.py list --unlabeled
+python3 agents/query_issues.py list --unlabeled
 
 # Most community-demanded issues
-python3 ~/git/lab_tools/github/query_issues.py list --sort reactions
+python3 agents/query_issues.py list --sort reactions
 
 # Most discussed issues
-python3 ~/git/lab_tools/github/query_issues.py list --sort comments
+python3 agents/query_issues.py list --sort comments
 
 # Issues by category
-python3 ~/git/lab_tools/github/query_issues.py list --label "Bug"
-python3 ~/git/lab_tools/github/query_issues.py list --label "Optimizers"
-python3 ~/git/lab_tools/github/query_issues.py list --label "CUDA Setup"
+python3 agents/query_issues.py list --label "Bug"
+python3 agents/query_issues.py list --label "Optimizers"
+python3 agents/query_issues.py list --label "CUDA Setup"
 ```
 
 The `list` output includes linked PRs (shown as `PR#1234`), which indicates someone has already started work.
@@ -42,19 +42,19 @@ The `list` output includes linked PRs (shown as `PR#1234`), which indicates some
 To get full context on a specific issue (body, all comments, cross-references):
 
 ```bash
-python3 ~/git/lab_tools/github/query_issues.py show 1810
+python3 agents/query_issues.py show 1810
 ```
 
 For multiple issues at once:
 
 ```bash
-python3 ~/git/lab_tools/github/query_issues.py show 1810 782 547
+python3 agents/query_issues.py show 1810 782 547
 ```
 
 Use `--brief` when you only need the headline information (truncated body, first + last comment):
 
 ```bash
-python3 ~/git/lab_tools/github/query_issues.py show --brief 1810
+python3 agents/query_issues.py show --brief 1810
 ```
 
 ## Finding Related and Duplicate Issues
@@ -63,23 +63,23 @@ To find issues related to a specific issue:
 
 ```bash
 # With body previews and last comment (recommended)
-python3 ~/git/lab_tools/github/query_issues.py related 1810 -v
+python3 agents/query_issues.py related 1810 -v
 
 # Only closed (resolved) issues — useful for finding prior fixes
-python3 ~/git/lab_tools/github/query_issues.py related 1810 --state closed -v
+python3 agents/query_issues.py related 1810 --state closed -v
 ```
 
 For multiple issues at once:
 
 ```bash
-python3 ~/git/lab_tools/github/query_issues.py batch-related 1810 1815 1849 -v
+python3 agents/query_issues.py batch-related 1810 1815 1849 -v
 ```
 
 The `related` command uses keyword and error-signature matching. It is a filtering tool, not a semantic similarity engine. When it doesn't find good matches, fall back to keyword search:
 
 ```bash
-python3 ~/git/lab_tools/github/query_issues.py search "LARS optimizer"
-python3 ~/git/lab_tools/github/query_issues.py search "str2optimizer"
+python3 agents/query_issues.py search "LARS optimizer"
+python3 agents/query_issues.py search "str2optimizer"
 ```
 
 ## Screenshot-Only Issues

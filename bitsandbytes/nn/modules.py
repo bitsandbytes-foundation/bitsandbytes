@@ -11,7 +11,6 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
-from bitsandbytes.cextension import ROCM_WARP_SIZE_64
 from bitsandbytes.functional import (
     QuantState,
     _convert_weight_packed_for_cpu,
@@ -226,7 +225,7 @@ class Params4bit(torch.nn.Parameter):
             data = torch.empty(0)
 
         if blocksize is None:
-            blocksize = 64 if not ROCM_WARP_SIZE_64 else 128
+            blocksize = 64
 
         self = torch.Tensor._make_subclass(cls, data, requires_grad)
         self.blocksize = blocksize
@@ -255,6 +254,43 @@ class Params4bit(torch.nn.Parameter):
         self.quant_storage = state["quant_storage"]
         self.bnb_quantized = state["bnb_quantized"]
         self.module = state["module"]
+
+    # Map from state_dict key names (as produced by QuantState.as_dict) to
+    # the actual QuantState attribute/access path. FSDP's _get_fqns() resolves
+    # dotted FQN keys via getattr, so "weight.quant_map" becomes
+    # getattr(weight, "quant_map") — we must map that to quant_state.code.
+    _QUANT_STATE_ATTR_MAP = {
+        # Direct QuantState attributes
+        "absmax": lambda qs: qs.absmax,
+        "code": lambda qs: qs.code,
+        "blocksize": lambda qs: qs.blocksize,
+        "dtype": lambda qs: qs.dtype,
+        "shape": lambda qs: qs.shape,
+        "offset": lambda qs: qs.offset,
+        "state2": lambda qs: qs.state2,
+        # as_dict serializes code → "quant_map"
+        "quant_map": lambda qs: qs.code,
+        "quant_type": lambda qs: qs.quant_type,
+        # as_dict serializes nested state2 attributes under "nested_*" keys
+        "nested_absmax": lambda qs: qs.state2.absmax,
+        "nested_blocksize": lambda qs: qs.state2.blocksize,
+        "nested_quant_map": lambda qs: qs.state2.code,
+        "nested_dtype": lambda qs: qs.state2.dtype,
+        "nested_offset": lambda qs: qs.offset,
+    }
+
+    def __getattr__(self, name):
+        # Proxy known QuantState attributes so that PyTorch's FSDP state_dict
+        # machinery (which traverses FQN paths via getattr) can find them.
+        accessor = self._QUANT_STATE_ATTR_MAP.get(name)
+        if accessor is not None:
+            quant_state = self.__dict__.get("quant_state")
+            if quant_state is not None:
+                try:
+                    return accessor(quant_state)
+                except AttributeError:
+                    pass
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
     def __deepcopy__(self, memo):
         new_instance = type(self).__new__(type(self))
@@ -435,7 +471,7 @@ class Linear4bit(nn.Linear):
     import torch.nn as nn
 
     import bitsandbytes as bnb
-    from bnb.nn import Linear4bit
+    from bitsandbytes.nn import Linear4bit
 
     fp16_model = nn.Sequential(
         nn.Linear(64, 64),
@@ -1002,6 +1038,75 @@ def prepare_model_for_kbit_training(
     return model
 
 
+class LinearNVFP4(nn.Linear):
+    """NVFP4 (E2M1) quantized linear layer for Blackwell GPUs (SM_120).
+
+    Quantizes weights to NVFP4 on first forward pass. Uses the hardware
+    block-scaled MMA instruction for inference. Supports optional Hadamard
+    rotation for improved accuracy.
+
+    Args:
+        input_features: Number of input features.
+        output_features: Number of output features.
+        bias: Whether to use bias. Defaults to True.
+        device: Device for initialization.
+    """
+
+    def __init__(
+        self,
+        input_features,
+        output_features,
+        bias=True,
+        device=None,
+    ):
+        super().__init__(input_features, output_features, bias, device)
+        self.weight_quantized = False
+        self.weight_packed = None
+        self.weight_state = None
+
+    def _quantize_weight(self):
+        """Quantize the weight tensor to NVFP4."""
+        from bitsandbytes.functional import quantize_nvfp4
+
+        # Weight is (out_features, in_features) = (N, K) in GEMM terms
+        w = self.weight.data.to(torch.bfloat16).contiguous()
+        packed, state = quantize_nvfp4(w)
+        self.weight_packed = packed
+        self.weight_state = state
+        self.weight_quantized = True
+        # Free the original weight to save memory
+        self.weight = nn.Parameter(torch.empty(0, device=w.device, dtype=w.dtype), requires_grad=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if not self.weight_quantized:
+            self._quantize_weight()
+
+        from bitsandbytes.functional import gemm_nvfp4, quantize_nvfp4
+
+        inp_dtype = x.dtype
+        input_shape = x.shape
+
+        # Reshape input: (*, K) -> (M, K). Use BF16 for CUTLASS fused quantize.
+        x_2d = x.reshape(-1, input_shape[-1]).to(torch.bfloat16).contiguous()
+        N = self.weight_state.shape[0]  # out_features
+
+        # Quantize activations to NVFP4
+        x_packed, x_state = quantize_nvfp4(x_2d)
+
+        # Run NVFP4 GEMM: x @ weight^T
+        out = gemm_nvfp4(x_packed, x_state, self.weight_packed, self.weight_state)
+
+        # Reshape output back: (M, N) -> (*, N)
+        out = out.reshape(*input_shape[:-1], N)
+
+        # Add bias
+        if self.bias is not None:
+            out = out + self.bias.to(out.dtype)
+
+        return out.to(inp_dtype)
+
+
+
 class Int8Params(torch.nn.Parameter):
     def __new__(
         cls,
@@ -1315,7 +1420,7 @@ class Linear8bitLt(nn.Linear):
     import torch.nn as nn
 
     import bitsandbytes as bnb
-    from bnb.nn import Linear8bitLt
+    from bitsandbytes.nn import Linear8bitLt
 
     fp16_model = nn.Sequential(
         nn.Linear(64, 64),
@@ -1352,6 +1457,17 @@ class Linear8bitLt(nn.Linear):
                 Number of output features of the linear layer.
             bias (`bool`, defaults to `True`):
                 Whether the linear class uses the bias term as well.
+            has_fp16_weights (`bool`, defaults to `True`):
+                If False, weights are quantized to int8 on ``.to(device)``. If True,
+                weights remain in fp16 and are quantized on-the-fly during each forward pass.
+            threshold (`float`, defaults to `0.0`):
+                Outlier threshold for mixed-precision decomposition (LLM.int8()). During the
+                forward pass, activation columns where any value exceeds this threshold are
+                computed in fp16, while the remaining columns use int8. This operates on
+                **activations** (inputs), not on weight values. Set to 0.0 to disable
+                mixed-precision decomposition and quantize all columns to int8.
+            index: Indices for weight reordering (used internally).
+            device: Device to initialize the layer on.
         """
         super().__init__(input_features, output_features, bias, device)
         self.state = bnb.MatmulLtState()

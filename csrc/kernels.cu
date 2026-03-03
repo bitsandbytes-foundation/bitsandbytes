@@ -121,6 +121,310 @@ __device__ unsigned char dQuantizeFP4(float x) {
 
 __device__ __forceinline__ float dDequantizeNF4(unsigned char val) { return nf4_dequantization_lut[val & 0x0F]; }
 
+// ============================================================================
+// NVFP4 (E2M1) device functions
+// E2M1 format: 1 sign + 2 exponent (bias=1) + 1 mantissa
+// Representable magnitudes: {0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0}
+// ============================================================================
+
+// E2M1 dequantization LUT - maps 3-bit unsigned magnitude code to float
+__device__ static float nvfp4_dequant_lut[8] = {0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f};
+
+// Dequantize a 4-bit E2M1 code to float
+// Bit layout: [sign(1) | exponent(2) | mantissa(1)]
+__device__ __forceinline__ float dDequantizeNVFP4(unsigned char val) {
+    float sign = (val & 0x08) ? -1.0f : 1.0f;
+    return nvfp4_dequant_lut[val & 0x07] * sign;
+}
+
+// Quantize a float to 4-bit E2M1 code using round-to-nearest
+// Input should be pre-scaled so that the representable range [-6, 6] is appropriate
+__device__ unsigned char dQuantizeNVFP4(float x) {
+    unsigned char sign = (x < 0.0f) ? 0x08 : 0x00;
+    float ax = fabsf(x);
+
+    // Decision boundaries are midpoints between adjacent representable values
+    unsigned char code;
+    if (ax > 5.0f)
+        code = 0x07; // 6.0
+    else if (ax > 3.5f)
+        code = 0x06; // 4.0
+    else if (ax > 2.5f)
+        code = 0x05; // 3.0
+    else if (ax > 1.75f)
+        code = 0x04; // 2.0
+    else if (ax > 1.25f)
+        code = 0x03; // 1.5
+    else if (ax > 0.75f)
+        code = 0x02; // 1.0
+    else if (ax > 0.25f)
+        code = 0x01; // 0.5
+    else
+        code = 0x00; // 0.0
+
+    return code | sign;
+}
+
+// Convert positive float to unsigned E4M3 (8-bit: 4 exponent bits, bias=7, 3 mantissa bits)
+// Range: [0, 448]. Used for NVFP4 block scale factors.
+__device__ unsigned char dFloatToE4M3(float x) {
+    if (x <= 0.0f)
+        return 0;
+    if (x >= 448.0f)
+        return 0x7E; // Max normal (exp=14, mant=6). exp=15 mant=7 is NaN.
+
+    unsigned int bits = __float_as_uint(x);
+    int fp32_exp = ((bits >> 23) & 0xFF) - 127; // Unbiased FP32 exponent
+    int e4m3_exp = fp32_exp + 7;                // E4M3 bias is 7
+
+    if (e4m3_exp <= 0) {
+        // Subnormal in E4M3: value = mantissa/8 * 2^(-6)
+        int mant = __float2int_rn(x * 512.0f); // 512 = 8 * 2^6
+        if (mant <= 0)
+            return 0;
+        if (mant > 7)
+            mant = 7;
+        return (unsigned char)mant;
+    }
+
+    // Normal: extract top 3 mantissa bits with round-to-nearest
+    unsigned int fp32_mant = bits & 0x7FFFFF;
+    unsigned int mant_3bit = (fp32_mant + (1 << 19)) >> 20;
+
+    if (mant_3bit >= 8) {
+        mant_3bit = 0;
+        e4m3_exp++;
+    }
+
+    if (e4m3_exp > 15)
+        return 0x7E;
+    if (e4m3_exp == 15 && mant_3bit >= 7)
+        return 0x7E; // Clamp, don't produce NaN
+
+    return (unsigned char)((e4m3_exp << 3) | mant_3bit);
+}
+
+// Convert unsigned E4M3 byte to float
+__device__ float dE4M3ToFloat(unsigned char val) {
+    if (val == 0)
+        return 0.0f;
+
+    int exp = (val >> 3) & 0x0F;
+    int mant = val & 0x07;
+
+    if (exp == 0) {
+        // Subnormal: value = mant/8 * 2^(1-7) = mant / 512
+        return (float)mant / 512.0f;
+    }
+
+    // Normal: value = (1 + mant/8) * 2^(exp-7)
+    return (1.0f + (float)mant * 0.125f) * exp2f((float)(exp - 7));
+}
+
+// ============================================================================
+// NVFP4 quantization kernel
+// Two-level scaling: FP32 tensor_scale + E4M3 block_scale (per 16 elements)
+// Input: T* tensor, float tensor_scale (precomputed)
+// Output: packed uint8 (2 values per byte), uint8 block_scales (E4M3)
+// ============================================================================
+template <typename T>
+__global__ void kQuantizeNVFP4(
+    const T* __restrict__ input,
+    unsigned char* __restrict__ output,       // Packed FP4: n/2 bytes
+    unsigned char* __restrict__ block_scales, // E4M3 scales: n/16 bytes
+    const float tensor_scale, const int n
+) {
+    // Each thread handles 2 consecutive elements (packs into 1 byte)
+    // 8 threads per 16-element quantization block
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int element_idx = tid * 2;
+
+    if (element_idx >= n)
+        return;
+
+    const float inv_tensor_scale = (tensor_scale > 0.0f) ? (1.0f / tensor_scale) : 0.0f;
+
+    // Load 2 elements, divide by tensor_scale
+    float val0 = (element_idx < n) ? (float)input[element_idx] * inv_tensor_scale : 0.0f;
+    float val1 = (element_idx + 1 < n) ? (float)input[element_idx + 1] * inv_tensor_scale : 0.0f;
+
+    // Compute per-thread absmax
+    float local_max = fmaxf(fabsf(val0), fabsf(val1));
+
+// Warp-shuffle reduction within 8-thread quantization block
+// Threads 0-7 handle block 0, 8-15 handle block 1, etc.
+// XOR offsets 4, 2, 1 stay within each 8-thread group
+#pragma unroll
+    for (int offset = 4; offset >= 1; offset >>= 1) {
+        float other = __shfl_xor_sync(0xFFFFFFFF, local_max, offset);
+        local_max = fmaxf(local_max, other);
+    }
+
+    // Compute E4M3 block scale: block_absmax / 6.0 (E2M1 max)
+    float block_scale_f32 = local_max / 6.0f;
+    unsigned char block_scale_e4m3 = dFloatToE4M3(block_scale_f32);
+    float block_scale_deq = dE4M3ToFloat(block_scale_e4m3);
+
+    // Avoid division by zero for all-zero blocks
+    float inv_block_scale = (block_scale_deq > 0.0f) ? (1.0f / block_scale_deq) : 0.0f;
+
+    // Store block scale (first thread in each 8-thread group)
+    int lane_in_block = threadIdx.x & 7;
+    if (lane_in_block == 0) {
+        int block_idx = element_idx / 16;
+        block_scales[block_idx] = block_scale_e4m3;
+    }
+
+    // Quantize values to E2M1
+    unsigned char q0 = dQuantizeNVFP4(val0 * inv_block_scale);
+    unsigned char q1 = dQuantizeNVFP4(val1 * inv_block_scale);
+
+    // Pack: low nibble = first element, high nibble = second element
+    unsigned char packed = ((q1 & 0x0F) << 4) | (q0 & 0x0F);
+
+    // Store packed byte
+    output[element_idx / 2] = packed;
+}
+
+// ============================================================================
+// NVFP4 dequantization kernel
+// Reverses the two-level scaling: unpacks FP4, multiplies by block_scale * tensor_scale
+// ============================================================================
+template <typename T>
+__global__ void kDequantizeNVFP4(
+    const unsigned char* __restrict__ input,        // Packed FP4: n/2 bytes
+    const unsigned char* __restrict__ block_scales, // E4M3 scales: n/16 bytes
+    const float tensor_scale, T* __restrict__ output, const int n
+) {
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const int element_idx = tid * 2;
+
+    if (element_idx >= n)
+        return;
+
+    // Load and unpack
+    unsigned char packed = input[element_idx / 2];
+    unsigned char q0 = packed & 0x0F;        // Low nibble
+    unsigned char q1 = (packed >> 4) & 0x0F; // High nibble
+
+    // Load block scale
+    int block_idx = element_idx / 16;
+    float block_scale_f32 = dE4M3ToFloat(block_scales[block_idx]);
+
+    // Combined scale factor
+    float scale = block_scale_f32 * tensor_scale;
+
+    // Dequantize and write
+    float val0 = dDequantizeNVFP4(q0) * scale;
+    float val1 = dDequantizeNVFP4(q1) * scale;
+
+    if (element_idx < n)
+        output[element_idx] = (T)val0;
+    if (element_idx + 1 < n)
+        output[element_idx + 1] = (T)val1;
+}
+
+// ============================================================================
+// Block-diagonal Hadamard rotation kernel (Had16)
+// Applies a 16x16 normalized Hadamard transform to each consecutive
+// 16-element chunk using the Fast Walsh-Hadamard Transform (FWHT).
+// 4 butterfly stages: stride 8, 4, 2, 1. Normalization by 1/4 = 1/sqrt(16).
+// In-place operation on FP16/BF16/FP32 tensors.
+// ============================================================================
+template <typename T> __global__ void kHadamardRotate16(T* __restrict__ data, const int n) {
+    // Each thread handles one element.
+    // 16 threads form one Hadamard block.
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= n)
+        return;
+
+    float val = (float)data[tid];
+
+// Fast Walsh-Hadamard Transform: 4 butterfly stages
+// Threads within the same 16-element group exchange via warp shuffles
+// lane_in_block: position 0-15 within the 16-element Hadamard block
+#pragma unroll
+    for (int stride = 8; stride >= 1; stride >>= 1) {
+        float other = __shfl_xor_sync(0xFFFFFFFF, val, stride);
+        // Butterfly: if bit is 0, add; if bit is 1, subtract
+        int bit = tid & stride;
+        val = bit ? (other - val) : (val + other);
+    }
+
+    // Normalize by 1/sqrt(16) = 0.25 to make the transform orthogonal
+    val *= 0.25f;
+
+    data[tid] = (T)val;
+}
+
+// ============================================================================
+// Fused Hadamard rotation + NVFP4 quantization kernel
+// Combines Had16 rotation with two-level NVFP4 quantization in a single kernel.
+// Each CUDA block processes multiple 16-element Hadamard/quantization blocks.
+// ============================================================================
+template <typename T>
+__global__ void kFusedHadamardQuantizeNVFP4(
+    const T* __restrict__ input,
+    unsigned char* __restrict__ output,       // Packed FP4: n/2 bytes
+    unsigned char* __restrict__ block_scales, // E4M3 scales: n/16 bytes
+    const float tensor_scale, const int n
+) {
+    // Each thread handles 1 element for the Hadamard transform,
+    // then pairs of threads pack 2 elements into 1 byte.
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= n)
+        return;
+
+    // Load and convert to float
+    float val = (float)input[tid];
+
+// Apply Hadamard rotation (FWHT, 4 butterfly stages)
+#pragma unroll
+    for (int stride = 8; stride >= 1; stride >>= 1) {
+        float other = __shfl_xor_sync(0xFFFFFFFF, val, stride);
+        int bit = tid & stride;
+        val = bit ? (other - val) : (val + other);
+    }
+    val *= 0.25f; // Normalize
+
+    // Divide by tensor_scale
+    float inv_tensor_scale = (tensor_scale > 0.0f) ? (1.0f / tensor_scale) : 0.0f;
+    float scaled_val = val * inv_tensor_scale;
+
+    // Compute block absmax via warp shuffle (16 threads per Hadamard block)
+    float local_max = fabsf(scaled_val);
+#pragma unroll
+    for (int offset = 8; offset >= 1; offset >>= 1) {
+        float other = __shfl_xor_sync(0xFFFFFFFF, local_max, offset);
+        local_max = fmaxf(local_max, other);
+    }
+
+    // Compute E4M3 block scale
+    float block_scale_f32 = local_max / 6.0f;
+    unsigned char block_scale_e4m3 = dFloatToE4M3(block_scale_f32);
+    float block_scale_deq = dE4M3ToFloat(block_scale_e4m3);
+    float inv_block_scale = (block_scale_deq > 0.0f) ? (1.0f / block_scale_deq) : 0.0f;
+
+    // Store block scale (first thread in each 16-thread group)
+    int lane_in_block = tid & 15;
+    if (lane_in_block == 0) {
+        block_scales[tid / 16] = block_scale_e4m3;
+    }
+
+    // Quantize to E2M1
+    unsigned char q = dQuantizeNVFP4(scaled_val * inv_block_scale);
+
+    // Pack pairs of values: even thread writes low nibble, odd thread writes high nibble
+    // Get partner's quantized value
+    unsigned char partner_q = __shfl_xor_sync(0xFFFFFFFF, q, 1);
+
+    if ((tid & 1) == 0) {
+        // Even thread: pack self as low nibble, partner (odd) as high nibble
+        unsigned char packed = ((partner_q & 0x0F) << 4) | (q & 0x0F);
+        output[tid / 2] = packed;
+    }
+}
+
 __device__ unsigned char dQuantizeNF4(float x) {
 
     // the values for this tree was generated by test_normal_map_tree
@@ -2565,6 +2869,51 @@ template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, General
 );
 template __global__ void kDequantizeBlockwise<__nv_bfloat16, 512, 64, 8, NF4>(
     float* code, unsigned char* A, float* absmax, __nv_bfloat16* out, const int blocksize, const int n
+);
+
+// NVFP4 kernel template instantiations
+template __global__ void kQuantizeNVFP4<half>(
+    const half* __restrict__ input, unsigned char* __restrict__ output, unsigned char* __restrict__ block_scales,
+    const float tensor_scale, const int n
+);
+template __global__ void kQuantizeNVFP4<__nv_bfloat16>(
+    const __nv_bfloat16* __restrict__ input, unsigned char* __restrict__ output,
+    unsigned char* __restrict__ block_scales, const float tensor_scale, const int n
+);
+template __global__ void kQuantizeNVFP4<float>(
+    const float* __restrict__ input, unsigned char* __restrict__ output, unsigned char* __restrict__ block_scales,
+    const float tensor_scale, const int n
+);
+template __global__ void kDequantizeNVFP4<half>(
+    const unsigned char* __restrict__ input, const unsigned char* __restrict__ block_scales, const float tensor_scale,
+    half* __restrict__ output, const int n
+);
+template __global__ void kDequantizeNVFP4<__nv_bfloat16>(
+    const unsigned char* __restrict__ input, const unsigned char* __restrict__ block_scales, const float tensor_scale,
+    __nv_bfloat16* __restrict__ output, const int n
+);
+template __global__ void kDequantizeNVFP4<float>(
+    const unsigned char* __restrict__ input, const unsigned char* __restrict__ block_scales, const float tensor_scale,
+    float* __restrict__ output, const int n
+);
+
+// Hadamard rotation kernel instantiations
+template __global__ void kHadamardRotate16<half>(half* __restrict__ data, const int n);
+template __global__ void kHadamardRotate16<__nv_bfloat16>(__nv_bfloat16* __restrict__ data, const int n);
+template __global__ void kHadamardRotate16<float>(float* __restrict__ data, const int n);
+
+// Fused Hadamard + NVFP4 quantize kernel instantiations
+template __global__ void kFusedHadamardQuantizeNVFP4<half>(
+    const half* __restrict__ input, unsigned char* __restrict__ output, unsigned char* __restrict__ block_scales,
+    const float tensor_scale, const int n
+);
+template __global__ void kFusedHadamardQuantizeNVFP4<__nv_bfloat16>(
+    const __nv_bfloat16* __restrict__ input, unsigned char* __restrict__ output,
+    unsigned char* __restrict__ block_scales, const float tensor_scale, const int n
+);
+template __global__ void kFusedHadamardQuantizeNVFP4<float>(
+    const float* __restrict__ input, unsigned char* __restrict__ output, unsigned char* __restrict__ block_scales,
+    const float tensor_scale, const int n
 );
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread)                              \

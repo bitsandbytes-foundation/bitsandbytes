@@ -1,15 +1,147 @@
 # Quickstart
 
-## How does it work?
+Welcome to bitsandbytes! This library enables accessible large language models via k-bit quantization for PyTorch, dramatically reducing memory consumption for inference and training.
 
-... work in progress ...
+## Installation
 
-(Community contributions would we very welcome!)
+```bash
+pip install bitsandbytes
+```
 
-## Minimal examples
+**Requirements:** Python 3.10+, PyTorch 2.3+
 
-The following code illustrates the steps above.
+For detailed installation instructions, see the [Installation Guide](./installation).
+
+## What is bitsandbytes?
+
+bitsandbytes provides three main features:
+
+- **LLM.int8()**: 8-bit quantization for inference (50% memory reduction)
+- **QLoRA**: 4-bit quantization for training (75% memory reduction)
+- **8-bit Optimizers**: Memory-efficient optimizers for training
+
+## Quick Examples
+
+### 8-bit Inference
+
+Load and run a model using 8-bit quantization:
 
 ```py
-code examples will soon follow
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-2-7b-hf",
+    device_map="auto",
+    quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+)
+
+tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
+inputs = tokenizer("Hello, my name is", return_tensors="pt").to("cuda")
+outputs = model.generate(**inputs, max_new_tokens=20)
+print(tokenizer.decode(outputs[0]))
 ```
+
+> **Learn more:** See the [Integrations guide](./integrations) for more details on using bitsandbytes with Transformers.
+
+### 4-bit Quantization
+
+For even greater memory savings:
+
+```py
+import torch
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_quant_type="nf4",
+)
+
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-2-7b-hf",
+    quantization_config=bnb_config,
+    device_map="auto",
+)
+```
+
+### QLoRA Fine-tuning
+
+Combine 4-bit quantization with LoRA for efficient training:
+
+```py
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+
+# Load 4-bit model
+bnb_config = BitsAndBytesConfig(load_in_4bit=True)
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-2-7b-hf",
+    quantization_config=bnb_config,
+)
+
+# Prepare for training
+model = prepare_model_for_kbit_training(model)
+
+# Add LoRA adapters
+lora_config = LoraConfig(
+    r=16,
+    lora_alpha=32,
+    target_modules=["q_proj", "v_proj"],
+    task_type="CAUSAL_LM",
+)
+model = get_peft_model(model, lora_config)
+
+# Now train with your preferred trainer
+```
+
+> **Learn more:** See the [FSDP-QLoRA guide](./fsdp_qlora) for advanced training techniques and the [Integrations guide](./integrations) for using with PEFT.
+
+### 8-bit Optimizers
+
+Use 8-bit optimizers to reduce training memory by 75%:
+
+```py
+import bitsandbytes as bnb
+
+model = YourModel()
+
+# Replace standard optimizer with 8-bit version
+optimizer = bnb.optim.Adam8bit(model.parameters(), lr=1e-3)
+
+# Use in training loop as normal
+for batch in dataloader:
+    loss = model(batch)
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+```
+
+> **Learn more:** See the [8-bit Optimizers guide](./optimizers) for detailed usage and configuration options.
+
+### Custom Quantized Layers
+
+Use quantized linear layers directly in your models:
+
+```py
+import torch
+import bitsandbytes as bnb
+
+# 8-bit linear layer
+linear_8bit = bnb.nn.Linear8bitLt(1024, 1024, has_fp16_weights=False)
+
+# 4-bit linear layer
+linear_4bit = bnb.nn.Linear4bit(1024, 1024, compute_dtype=torch.bfloat16)
+```
+
+## Next Steps
+
+- [8-bit Optimizers Guide](./optimizers) - Detailed optimizer usage
+- [FSDP-QLoRA](./fsdp_qlora) - Train 70B+ models on consumer GPUs
+- [Integrations](./integrations) - Use with Transformers, PEFT, Accelerate
+- [FAQs](./faqs) - Common questions and troubleshooting
+
+## Getting Help
+
+- Check the [FAQs](./faqs) and [Common Errors](./errors)
+- Visit [official documentation](https://huggingface.co/docs/bitsandbytes)
+- Open an issue on [GitHub](https://github.com/bitsandbytes-foundation/bitsandbytes/issues)

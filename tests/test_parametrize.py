@@ -37,10 +37,7 @@ class ParametrizeTestModule(nn.Module):
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
-@pytest.mark.parametrize(
-    "blocksize",
-    [64, 128, 256] if not ROCM_WARP_SIZE_64 else [128, 256],
-)
+@pytest.mark.parametrize("blocksize", [64, 128, 256])
 def test_replace_parameter_4bit(device, dtype, quant_type, compress_statistics, blocksize):
     """Test basic parameter replacement with 4-bit quantization on different dtypes."""
     if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
@@ -267,7 +264,7 @@ def test_quant_state_preservation(device, dtype):
 
     module = ParametrizeTestModule(device=device, dtype=dtype)
 
-    blocksize = 128 if ROCM_WARP_SIZE_64 else 64
+    blocksize = 64
 
     # Apply parametrization with specific settings
     replace_parameter_4bit(module, "weight_2d", quant_type="nf4", compress_statistics=True, blocksize=blocksize)

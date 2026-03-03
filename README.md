@@ -26,7 +26,7 @@ bitsandbytes has the following minimum requirements for all platforms:
 #### Accelerator support:
 
 <small>Note: this table reflects the status of the current development branch. For the latest stable release, see the
-[document in the 0.49.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.49.0/README.md#accelerator-support).
+[document in the 0.49.2 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.49.2/README.md#accelerator-support).
 </small>
 
 ##### Legend:
@@ -75,7 +75,7 @@ bitsandbytes has the following minimum requirements for all platforms:
         RDNA: gfx1100, gfx1101, gfx1150, gfx1151, gfx1200, gfx1201
       </td>
       <td>✅</td>
-      <td>〰️</td>
+      <td>✅</td>
       <td>✅</td>
     </tr>
     <tr>

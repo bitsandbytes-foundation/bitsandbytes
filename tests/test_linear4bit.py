@@ -1,7 +1,9 @@
 import copy
 import os
+import pathlib
 import pickle
 import platform
+import subprocess
 import sys
 from tempfile import TemporaryDirectory
 
@@ -431,3 +433,96 @@ def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_st
     grad_compiled = x.grad.clone()
 
     torch.testing.assert_close(grad_compiled, grad_ref)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+def test_params4bit_quant_state_attr_access(device, quant_type, compress_statistics):
+    """Test that Params4bit proxies QuantState attributes for FSDP state_dict traversal (#1405).
+
+    PyTorch's FSDP state_dict machinery traverses FQN paths like
+    'model.layers.0.weight.absmax' using getattr(). This test verifies
+    that Params4bit and QuantState expose the attributes that appear as
+    state_dict keys so that _get_fqns() traversal succeeds.
+    """
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
+
+    layer = bnb.nn.Linear4bit(
+        64,
+        64,
+        bias=False,
+        compress_statistics=compress_statistics,
+        quant_type=quant_type,
+    )
+    layer = layer.to(device)
+    w = layer.weight
+
+    assert w.quant_state is not None, "quant_state should be set after quantization"
+
+    # Direct QuantState attributes proxied through Params4bit
+    assert torch.equal(w.absmax, w.quant_state.absmax)
+    assert torch.equal(w.code, w.quant_state.code)
+
+    # "quant_map" is how as_dict() serializes "code" — FSDP uses this key name
+    assert torch.equal(w.quant_map, w.quant_state.code)
+
+    # QuantState packed key: as_dict(packed=True) produces "quant_state.bitsandbytes__<type>"
+    # FSDP resolves this as getattr(quant_state_obj, "bitsandbytes__<type>")
+    packed_attr = f"bitsandbytes__{quant_type}"
+    assert hasattr(w.quant_state, packed_attr)
+    packed_val = getattr(w.quant_state, packed_attr)
+    assert isinstance(packed_val, torch.Tensor)
+
+    # Simulate the full FSDP _get_fqns traversal for all state_dict keys
+    state_dict_keys = list(w.quant_state.as_dict(packed=True).keys())
+    for key in state_dict_keys:
+        # Each key is relative to "weight.", e.g. "absmax" or "quant_state.bitsandbytes__nf4"
+        parts = key.split(".")
+        obj = w
+        for part in parts:
+            obj = getattr(obj, part)
+        assert obj is not None
+
+    # hasattr should return True for proxied attrs, False for unknown ones
+    assert hasattr(w, "absmax")
+    assert hasattr(w, "code")
+    assert hasattr(w, "quant_map")
+    assert not hasattr(w, "nonexistent_attribute")
+
+    # Unknown attributes must still raise AttributeError
+    with pytest.raises(AttributeError, match="nonexistent_attribute"):
+        _ = w.nonexistent_attribute
+
+    # Verify that normal Params4bit attributes are unaffected by __getattr__
+    assert isinstance(w.quant_state, bnb.functional.QuantState)
+    assert isinstance(w.bnb_quantized, bool)
+    assert w.bnb_quantized is True
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="FSDP requires CUDA")
+@pytest.mark.skipif(
+    not torch.distributed.is_nccl_available(),
+    reason="FSDP test requires NCCL backend",
+)
+def test_fsdp_state_dict_save_4bit():
+    """Integration test: FSDP get_model_state_dict with cpu_offload on a 4-bit model (#1405).
+
+    Launches a single-GPU FSDP process via torchrun to exercise the real
+    _get_fqns() code path that previously crashed with:
+        AttributeError: 'Params4bit' object has no attribute 'absmax'
+    """
+    script = pathlib.Path(__file__).with_name("fsdp_state_dict_save.py")
+    result = subprocess.run(
+        ["torchrun", "--nproc_per_node=1", str(script)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        pytest.fail(
+            f"FSDP state_dict test failed (exit {result.returncode}):\n"
+            f"stdout: {result.stdout}\n"
+            f"stderr: {result.stderr}"
+        )

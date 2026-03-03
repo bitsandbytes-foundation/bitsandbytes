@@ -135,15 +135,21 @@ def _print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
 def _print_hip_diagnostics(cuda_specs: CUDASpecs) -> None:
     print(f"PyTorch settings found: ROCM_VERSION={cuda_specs.cuda_version_string}")
 
+    rocm_override = os.environ.get("BNB_ROCM_VERSION")
+    if rocm_override:
+        print(f"BNB_ROCM_VERSION override: {rocm_override}")
+
     binary_path = get_cuda_bnb_library_path(cuda_specs)
     if not binary_path.exists():
         print_dedented(
             f"""
-        Library not found: {binary_path}.
-        Maybe you need to compile it from source? If you compiled from source, check that ROCm version
-        in PyTorch Settings matches your ROCm install. If not, reinstall PyTorch for your ROCm version
-        and rebuild bitsandbytes.
-        """,
+            Library not found: {binary_path}.
+            Maybe you need to compile it from source? If you compiled from source, check that ROCm version
+            in PyTorch Settings matches your ROCm install. If not, you can either:
+                1. Reinstall PyTorch for your ROCm version and rebuild bitsandbytes.
+                2. Set BNB_ROCM_VERSION to match the version the library was built with.
+                   For example: export BNB_ROCM_VERSION=72
+            """,
         )
 
     hip_major, hip_minor = cuda_specs.cuda_version_tuple
@@ -192,7 +198,7 @@ def _print_cuda_runtime_diagnostics() -> None:
 def _print_hip_runtime_diagnostics() -> None:
     cudart_paths = list(find_cudart_libraries())
     if not cudart_paths:
-        print("WARNING! ROCm runtime files not found in any environmental path.")
+        print("ROCm SETUP: WARNING! ROCm runtime files not found in any environmental path.")
     elif len(cudart_paths) > 1:
         print_dedented(
             f"""
@@ -200,14 +206,18 @@ def _print_hip_runtime_diagnostics() -> None:
 
             We select the PyTorch default ROCm runtime, which is {torch.version.hip},
             but this might mismatch with the ROCm version that is needed for bitsandbytes.
+            To override this behavior set the `BNB_ROCM_VERSION=<version string, e.g. 72>` environmental variable.
 
-            To resolve it, install PyTorch built for the ROCm version you want to use
+            For example, if you want to use the ROCm version 7.2,
+                BNB_ROCM_VERSION=72 python ...
 
-            and set LD_LIBRARY_PATH to your ROCm install path, e.g.
-            export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm-6.1.2/lib,
+            OR set the environmental variable in your .bashrc:
+                export BNB_ROCM_VERSION=72
+
+            In the case of a manual override, make sure you set LD_LIBRARY_PATH, e.g.
+            export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm-7.2.0/lib,
             """,
         )
-
         for pth in cudart_paths:
             print(f"* Found ROCm runtime at: {pth}")
 

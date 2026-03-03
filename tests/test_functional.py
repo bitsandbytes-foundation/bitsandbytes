@@ -118,6 +118,9 @@ class Test8BitBlockwiseQuantizeFunctional:
         for i in range(iters):
             A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested)
+            if i == 0:
+                d = S.as_dict()
+                S = F.QuantState.from_dict(d, device=torch.device(device))
             A2 = F.dequantize_blockwise(C, S)
             diff = torch.abs(A1 - A2).float()
             reldiff = diff / torch.abs(A1.float() + 1e-8)
@@ -134,6 +137,9 @@ class Test8BitBlockwiseQuantizeFunctional:
         for i in range(iters):
             A1 = torch.rand(1024, 1024, device=device, dtype=dtype)
             C, S = F.quantize_blockwise(A1, blocksize=blocksize, nested=nested, code=code)
+            if i == 0:
+                d = S.as_dict()
+                S = F.QuantState.from_dict(d, device=torch.device(device))
             A2 = F.dequantize_blockwise(C, S)
             diff = torch.abs(A1 - A2).float()
             reldiff = diff / torch.abs(A1.float() + 1e-8)
@@ -271,6 +277,9 @@ class Test8BitBlockwiseQuantizeFunctional:
             for i in range(10):
                 A1 = torch.randn(1024, 1024, device=device)
                 C, SC = F.quantize_blockwise(A1, code=code)
+                if i == 0:
+                    d = SC.as_dict()
+                    SC = F.QuantState.from_dict(d, device=torch.device(device))
                 A2 = F.dequantize_blockwise(C, SC)
                 diff = torch.abs(A1 - A2)
                 reldiff = diff / torch.abs(A1 + 1e-8)
@@ -430,6 +439,15 @@ class TestIGEMMFunctional:
     @pytest.mark.parametrize("seq_dim", [16, 256], ids=id_formatter("seq_dim"))
     @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
     def test_igemm(self, hidden_dim, batch_dim, transpose, seq_dim):
+        if (
+            torch.version.cuda == "13.0"
+            and torch.__version__ >= (2, 10)
+            and not any(transpose)
+            and batch_dim == 256
+            and seq_dim == 256
+        ):
+            pytest.xfail("Failure due to regression in cuBLAS for CUDA Toolkit 13.0.2.")
+
         hidden_dim = hidden_dim - (hidden_dim % 32)
         batch_dim = batch_dim - (batch_dim % 16)
         seq_dim = seq_dim - (seq_dim % 16)
@@ -570,6 +588,9 @@ class TestIGEMMFunctional:
     @pytest.mark.parametrize("dim4", [32, 256], ids=id_formatter("dim4"))
     @pytest.mark.parametrize("transpose", BOOLEAN_TUPLES, ids=id_formatter("transpose"))
     def test_ibmm(self, dim1, dim2, dim3, dim4, transpose):
+        if torch.version.cuda == "13.0" and torch.__version__ >= (2, 10) and dim1 == 64:
+            pytest.xfail("Failure due to regression in cuBLAS for CUDA Toolkit 13.0.2.")
+
         dim2 = dim2 - (dim2 % 16)
         dim3 = dim3 - (dim3 % 16)
         dim4 = dim4 - (dim4 % 16)
@@ -1106,6 +1127,8 @@ class TestQuantize4BitFunctional:
 
         A1 = torch.randn(1024, 1024, device=device, dtype=dtype)
         qa, SA = F.quantize_4bit(A1, blocksize=blocksize, quant_type=quant_type)
+        d = SA.as_dict()
+        SA = F.QuantState.from_dict(d, device=torch.device(device))
         A2 = F.dequantize_4bit(qa, SA, blocksize=blocksize, quant_type=quant_type)
         del qa, SA
 
