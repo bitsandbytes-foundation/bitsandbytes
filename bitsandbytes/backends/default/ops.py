@@ -248,6 +248,9 @@ def _(
 
     # Quantize with the lookup table
     code = CODE[quant_type].to(scaled.device).to(scaled.dtype)
+    # Pad to even length so packing pairs all elements
+    if scaled.numel() % 2 != 0:
+        scaled = torch.nn.functional.pad(scaled, (0, 1), value=0.0)
     quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - code), dim=-1, keepdim=True).to(torch.uint8)
 
     # Pack two quantized values per byte
