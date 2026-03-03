@@ -277,17 +277,20 @@ def _dequantize_4bit_impl(
     A = A.reshape(-1)
     # Map nf4 to [-1, 1]
     out_dq = torch.empty(A.size(0) * 2, dtype=torch.int32, device=A.device)
-    n = out_dq.numel()
     out_dq[1::2] = A & 0xF
     out_dq[::2] = A >> 4
     # code is fp32, cast to dtype to avoid the mismatch issue
     code = CODE[quant_type].to(dtype).to(A.device)
     out_dq = code[out_dq]
 
+    # Use the actual output size, not the unpacked size (which may include padding)
+    n = 1
+    for s in shape:
+        n *= s
+    # Trim any extra elements from padding during quantization
+    out_dq = out_dq[:n]
+
     # Apply scales
-    if out_dq.numel() != n:
-        assert out_dq.numel() == n + 1
-        out_dq = torch.narrow(out_dq, 0, 0, n)
     blocks = n // blocksize
     blocks += 1 if n % blocksize > 0 else 0
     rem = n % blocksize
