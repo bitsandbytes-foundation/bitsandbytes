@@ -557,6 +557,66 @@ def _(
     return out
 
 
+# VQ (Vector Quantization) quantize/dequantize
+
+torch.library.define(
+    "bitsandbytes::quantize_vq",
+    "(Tensor A, Tensor codebook, int p) -> (Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::quantize_vq")
+def _(A: torch.Tensor, codebook: torch.Tensor, p: int) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(codebook.shape == (256, p), lambda: f"codebook must be [256, {p}], got {codebook.shape}")
+    n = A.numel()
+    num_blocks = -(n // -32)
+    words_per_block = 32 // p // 4  # p=2: 4, p=4: 2
+    packed = torch.empty(num_blocks * words_per_block, device=A.device, dtype=torch.int32)
+    absmax = torch.empty(num_blocks, device=A.device, dtype=torch.uint8)
+    return packed, absmax
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_vq",
+    "(Tensor packed, Tensor codebook, Tensor absmax, int p, int n, ScalarType dtype) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::dequantize_vq")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    p: int,
+    n: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    num_blocks = -(n // -32)
+    return torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_vq_",
+    "(Tensor packed, Tensor codebook, Tensor absmax, int p, int n, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::dequantize_vq_")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    p: int,
+    n: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    return out
+
+
 # K-bit repack: flat bit-plane layout -> GEMM-tiled layout
 
 torch.library.define(

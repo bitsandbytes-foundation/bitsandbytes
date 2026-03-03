@@ -956,6 +956,109 @@ def _(
     return out
 
 
+_VQ_DTYPE_SUFFIX = {
+    torch.float16: "fp16",
+    torch.bfloat16: "bf16",
+    torch.float32: "fp32",
+}
+
+
+@register_kernel("bitsandbytes::quantize_vq", "cuda")
+def _(A: torch.Tensor, codebook: torch.Tensor, p: int) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(
+        A.dtype in _VQ_DTYPE_SUFFIX,
+        lambda: f"quantize_vq only supports float16/bfloat16/float32, got {A.dtype}",
+    )
+    torch._check(codebook.dtype == torch.float16, lambda: f"codebook must be float16, got {codebook.dtype}")
+
+    n = A.numel()
+    num_blocks = -(n // -32)
+    words_per_block = 32 // p // 4
+    packed = torch.zeros(num_blocks * words_per_block, device=A.device, dtype=torch.int32)
+    absmax = torch.zeros(num_blocks, device=A.device, dtype=torch.uint8)
+
+    with _cuda_device_of(A):
+        tname = _VQ_DTYPE_SUFFIX[A.dtype]
+        fn = getattr(lib, f"cquantize_vq_{tname}_p{p}")
+        fn(
+            get_ptr(codebook),
+            get_ptr(A),
+            get_ptr(absmax),
+            get_ptr(packed),
+            ct.c_int(n),
+            _get_tensor_stream(A),
+        )
+
+    return packed, absmax
+
+
+def _dequantize_vq_impl(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    p: int,
+    n: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(
+        dtype in _VQ_DTYPE_SUFFIX,
+        lambda: f"dequantize_vq only supports float16/bfloat16/float32, got {dtype}",
+    )
+    torch._check(codebook.dtype == torch.float16, lambda: f"codebook must be float16, got {codebook.dtype}")
+
+    # If fp32 absmax, encode to E4M4 first
+    if absmax.dtype == torch.float32:
+        from bitsandbytes.functional import encode_absmax_e4m4
+
+        absmax = encode_absmax_e4m4(absmax)
+
+    tname = _VQ_DTYPE_SUFFIX[dtype]
+    aname = _KBIT_ABSMAX_SUFFIX[absmax.dtype]
+
+    with _cuda_device_of(packed):
+        fn = getattr(lib, f"cdequantize_vq_{tname}_{aname}_p{p}")
+        fn(
+            get_ptr(packed),
+            get_ptr(codebook),
+            get_ptr(absmax),
+            get_ptr(out),
+            ct.c_int(n),
+            _get_tensor_stream(packed),
+        )
+
+
+@register_kernel("bitsandbytes::dequantize_vq", "cuda")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    p: int,
+    n: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    num_blocks = -(n // -32)
+    out = torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+    _dequantize_vq_impl(packed, codebook, absmax, p, n, dtype, out)
+    return out
+
+
+@register_kernel("bitsandbytes::dequantize_vq_", "cuda")
+def _(
+    packed: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax: torch.Tensor,
+    p: int,
+    n: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    _dequantize_vq_impl(packed, codebook, absmax, p, n, dtype, out)
+    return out
+
+
 @register_kernel("bitsandbytes::repack_kbit", "cuda")
 def _(
     packed_flat: torch.Tensor,

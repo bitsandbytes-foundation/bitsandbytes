@@ -1310,6 +1310,72 @@ def dequantize_kbit(
     return result[:n]
 
 
+def quantize_vq(
+    A: Tensor,
+    p: int = 2,
+    codebook: Optional[Tensor] = None,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Quantize a tensor using VQ codebook quantization (blocksize=32).
+
+    Each group of p consecutive weights is mapped to the nearest entry in a
+    256-entry codebook. Produces 8/p bits per weight (p=2: 4 bits, p=4: 2 bits).
+
+    Args:
+        A: Input tensor. Supports float16, bfloat16, or float32.
+        p: VQ dimension (2 or 4). Each byte index maps to p weight values.
+        codebook: Optional fp16 codebook tensor of shape [256, p].
+            If None, uses precomputed Gaussian codebook.
+
+    Returns:
+        Tuple of (packed, absmax, codebook):
+        - packed: int32 tensor of packed byte indices.
+        - absmax: uint8 tensor of E4M4 per-block absmax values.
+        - codebook: The codebook tensor used.
+    """
+    if codebook is None:
+        codebook = create_vq_codebook(p, device=A.device)
+    else:
+        codebook = codebook.to(device=A.device, dtype=torch.float16)
+
+    A_flat = A.contiguous().view(-1)
+    packed, absmax = torch.ops.bitsandbytes.quantize_vq(A_flat, codebook, p)
+    return packed, absmax, codebook
+
+
+def dequantize_vq(
+    packed: Tensor,
+    absmax: Tensor,
+    codebook: Tensor,
+    p: int,
+    n: int,
+    dtype: torch.dtype = torch.float16,
+    out: Optional[Tensor] = None,
+) -> Tensor:
+    """Dequantize a VQ codebook quantized tensor.
+
+    Args:
+        packed: int32 tensor of packed byte indices (from quantize_vq).
+        absmax: Per-block absmax values (uint8 E4M4 or float32).
+        codebook: fp16 codebook tensor of shape [256, p].
+        p: VQ dimension (2 or 4).
+        n: Number of original elements.
+        dtype: Output dtype. Defaults to float16.
+        out: Optional pre-allocated output tensor.
+
+    Returns:
+        Dequantized tensor of shape (n,) with the given dtype.
+    """
+    num_blocks = -(n // -32)
+    padded_n = num_blocks * 32
+
+    if out is not None:
+        torch.ops.bitsandbytes.dequantize_vq_(packed, codebook, absmax, p, n, dtype, out)
+        return out[:n]
+
+    result = torch.ops.bitsandbytes.dequantize_vq(packed, codebook, absmax, p, n, dtype)
+    return result[:n]
+
+
 def dequantize_kbit_tiled(
     packed: Tensor,
     absmax: Tensor,

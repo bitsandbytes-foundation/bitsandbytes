@@ -511,6 +511,47 @@ MAKE_KBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 3)
 MAKE_KBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 4)
 MAKE_KBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 5)
 
+// Forward declarations of VQ template functions
+template <int P_VAL, typename T>
+void quantize_vq(const half*, const T*, unsigned char*, unsigned int*, int, cudaStream_t);
+template <int P_VAL, typename T, typename ABSMAX_T>
+void dequantize_vq(const unsigned int*, const half*, const ABSMAX_T*, T*, int, cudaStream_t);
+
+// Unmangled VQ quantize wrappers
+#define MAKE_VQ_QUANT(tname, T, P)                                                                                     \
+    void quantize_vq_##tname##_p##P(                                                                                   \
+        const half* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n, cudaStream_t stream   \
+    ) {                                                                                                                \
+        quantize_vq<P, T>(codebook, A, absmax, packed_out, n, stream);                                                 \
+    }
+
+MAKE_VQ_QUANT(fp16, half, 2)
+MAKE_VQ_QUANT(fp16, half, 4)
+MAKE_VQ_QUANT(bf16, __nv_bfloat16, 2)
+MAKE_VQ_QUANT(bf16, __nv_bfloat16, 4)
+MAKE_VQ_QUANT(fp32, float, 2)
+MAKE_VQ_QUANT(fp32, float, 4)
+
+// Unmangled VQ dequant wrappers: output type × absmax type × P
+#define MAKE_VQ_DEQUANT(tname, T, aname, ABSMAX_T, P)                                                                  \
+    void dequantize_vq_##tname##_##aname##_p##P(                                                                       \
+        const unsigned int* packed_in, const half* codebook, const ABSMAX_T* absmax, T* out, int n,                    \
+        cudaStream_t stream                                                                                            \
+    ) {                                                                                                                \
+        dequantize_vq<P, T, ABSMAX_T>(packed_in, codebook, absmax, out, n, stream);                                    \
+    }
+
+// uint8 E4M4 absmax
+MAKE_VQ_DEQUANT(fp16, half, u8abs, unsigned char, 2)
+MAKE_VQ_DEQUANT(fp16, half, u8abs, unsigned char, 4)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+// float32 absmax
+MAKE_VQ_DEQUANT(fp16, half, fp32abs, float, 2)
+MAKE_VQ_DEQUANT(fp16, half, fp32abs, float, 4)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 4)
+
 // Forward declaration of repack launcher
 template <int K>
 void repackKbit(const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int, cudaStream_t);
@@ -1494,6 +1535,41 @@ MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 2)
 MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 3)
 MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 4)
 MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 5)
+
+// VQ quantize extern C wrappers
+#define MAKE_CVQ_QUANT(tname, T, P)                                                                                    \
+    void cquantize_vq_##tname##_p##P(                                                                                  \
+        const half* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n, cudaStream_t stream   \
+    ) {                                                                                                                \
+        quantize_vq_##tname##_p##P(codebook, A, absmax, packed_out, n, stream);                                        \
+    }
+
+MAKE_CVQ_QUANT(fp16, half, 2)
+MAKE_CVQ_QUANT(fp16, half, 4)
+MAKE_CVQ_QUANT(bf16, __nv_bfloat16, 2)
+MAKE_CVQ_QUANT(bf16, __nv_bfloat16, 4)
+MAKE_CVQ_QUANT(fp32, float, 2)
+MAKE_CVQ_QUANT(fp32, float, 4)
+
+// VQ dequant extern C wrappers
+#define MAKE_CVQ_DEQUANT(tname, T, aname, ABSMAX_T, P)                                                                 \
+    void cdequantize_vq_##tname##_##aname##_p##P(                                                                      \
+        const unsigned int* packed_in, const half* codebook, const ABSMAX_T* absmax, T* out, int n,                    \
+        cudaStream_t stream                                                                                            \
+    ) {                                                                                                                \
+        dequantize_vq_##tname##_##aname##_p##P(packed_in, codebook, absmax, out, n, stream);                           \
+    }
+
+// uint8 E4M4 absmax
+MAKE_CVQ_DEQUANT(fp16, half, u8abs, unsigned char, 2)
+MAKE_CVQ_DEQUANT(fp16, half, u8abs, unsigned char, 4)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+// float32 absmax
+MAKE_CVQ_DEQUANT(fp16, half, fp32abs, float, 2)
+MAKE_CVQ_DEQUANT(fp16, half, fp32abs, float, 4)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 4)
 
 // Production GEMM extern C wrappers (fp16 and bf16)
 #define MAKE_CKBIT_GEMM_PROD(K)                                                                                        \

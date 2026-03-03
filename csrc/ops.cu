@@ -836,6 +836,150 @@ __global__ void kDequantizeBlockwise_kbit_vec(
     }
 }
 
+// ---- VQ (Vector Quantization) kernels ----
+// VQ replaces bit-plane format with byte-indexed codebook lookup.
+// Each 8-bit index maps to P_VAL fp16 weight values from a 256-entry codebook.
+// P_VAL=2: 4 bits/weight (256 entries of half2), P_VAL=4: 2 bits/weight (256 entries of 4×half).
+
+// VQ quantize: find nearest codebook entry for each group of P_VAL weights.
+// One warp per 32-element quantization block. Not performance-critical (offline quantization).
+template <int P_VAL, typename scalar_t>
+__global__ void kQuantize_VQ(
+    const half* __restrict__ codebook,      // [256, P_VAL] codebook in fp16
+    const scalar_t* __restrict__ A,         // input weights (flat)
+    unsigned char* __restrict__ absmax_out,  // E4M4 encoded absmax per block
+    unsigned int* __restrict__ packed_out,   // packed byte indices
+    const int n                             // total number of weight elements
+) {
+    constexpr int GROUPS_PER_BLOCK = 32 / P_VAL;
+    constexpr int WORDS_PER_BLOCK = GROUPS_PER_BLOCK / 4;
+
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int local_warp = threadIdx.x / 32;
+    const int block_start = warp_id * 32;
+
+    if (block_start >= n)
+        return;
+
+    // Load codebook into shared memory (shared across all warps in the CUDA block)
+    __shared__ half cb[256 * P_VAL];
+    for (int i = threadIdx.x; i < 256 * P_VAL; i += blockDim.x)
+        cb[i] = codebook[i];
+
+    // Per-warp shared memory for normalized weights and indices
+    __shared__ float norm_shmem[8][32];
+    __shared__ unsigned char idx_shmem[8][32];  // only first GROUPS_PER_BLOCK used
+
+    __syncthreads();
+
+    // Load weight value
+    float val = (block_start + lane_id < n) ? (float)A[block_start + lane_id] : 0.0f;
+
+    // Compute absmax via warp reduction
+    float amax = warp_reduce_absmax_kbit(fabsf(val));
+    float amax_safe = fmaxf(amax, 1e-8f);
+
+    // Store E4M4 absmax
+    if (lane_id == 0)
+        absmax_out[warp_id] = encode_e4m4_absmax(amax);
+
+    // Normalize to [-1, 1]
+    float normalized = val / amax_safe;
+    norm_shmem[local_warp][lane_id] = normalized;
+    __syncwarp();
+
+    // Find nearest codebook entry for each group
+    if (lane_id < GROUPS_PER_BLOCK) {
+        float w[P_VAL];
+#pragma unroll
+        for (int d = 0; d < P_VAL; d++)
+            w[d] = norm_shmem[local_warp][lane_id * P_VAL + d];
+
+        unsigned char best_idx = 0;
+        float best_dist = 1e10f;
+
+        for (int c = 0; c < 256; c++) {
+            float dist = 0.0f;
+#pragma unroll
+            for (int d = 0; d < P_VAL; d++) {
+                float diff = w[d] - __half2float(cb[c * P_VAL + d]);
+                dist += diff * diff;
+            }
+            if (dist < best_dist) {
+                best_dist = dist;
+                best_idx = (unsigned char)c;
+            }
+        }
+        idx_shmem[local_warp][lane_id] = best_idx;
+    }
+    __syncwarp();
+
+    // Pack byte indices into uint32 words (4 bytes per word)
+    if (lane_id < WORDS_PER_BLOCK) {
+        unsigned int word = 0;
+#pragma unroll
+        for (int b = 0; b < 4; b++) {
+            word |= (unsigned int)idx_shmem[local_warp][lane_id * 4 + b] << (b * 8);
+        }
+        packed_out[warp_id * WORDS_PER_BLOCK + lane_id] = word;
+    }
+}
+
+// VQ dequantize (flat layout): read packed byte indices, look up codebook, write fp16/bf16.
+template <int P_VAL, typename T, typename ABSMAX_T>
+__global__ void kDequantize_VQ(
+    const unsigned int* __restrict__ packed_in, // packed byte indices
+    const half* __restrict__ codebook,          // [256, P_VAL] codebook in fp16
+    const ABSMAX_T* __restrict__ absmax,        // absmax per block
+    T* __restrict__ out,                        // output weights (flat)
+    const int n                                 // total number of weight elements
+) {
+    constexpr int GROUPS_PER_BLOCK = 32 / P_VAL;
+    constexpr int WORDS_PER_BLOCK = GROUPS_PER_BLOCK / 4;
+
+    const int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int block_start = warp_id * 32;
+
+    if (block_start >= n)
+        return;
+
+    // Load codebook into shared memory
+    __shared__ half cb[256 * P_VAL];
+    for (int i = threadIdx.x; i < 256 * P_VAL; i += blockDim.x)
+        cb[i] = codebook[i];
+    __syncthreads();
+
+    float amax = load_absmax(absmax, warp_id);
+
+    // Load packed words for this block — each word has 4 byte indices
+    unsigned int words[WORDS_PER_BLOCK];
+#pragma unroll
+    for (int w = 0; w < WORDS_PER_BLOCK; w++) {
+        int word_lane = w;
+        unsigned int word_val = (lane_id == word_lane) ? packed_in[warp_id * WORDS_PER_BLOCK + w] : 0;
+        words[w] = __shfl_sync(0xFFFFFFFF, word_val, word_lane);
+    }
+
+    // Each lane extracts its weight value(s) from the packed data
+    // lane_id maps to a specific weight index in the block of 32
+    int group = lane_id / P_VAL;
+    int component = lane_id % P_VAL;
+
+    if (lane_id < 32 && block_start + lane_id < n) {
+        // Get byte index for this group
+        int word_idx = group / 4;
+        int byte_pos = group % 4;
+        unsigned char idx = (words[word_idx] >> (byte_pos * 8)) & 0xFF;
+
+        // Codebook lookup
+        float val = __half2float(cb[idx * P_VAL + component]) * amax;
+        out[block_start + lane_id] = (T)val;
+    }
+}
+
+
 // ---- Launch wrappers ----
 
 #define KBIT_WARPS_PER_BLOCK 8
@@ -944,6 +1088,30 @@ void dequantizeBlockwise_kbit_tiled(
     int num_cuda_blocks = (num_warps + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
     kDequantizeBlockwise_kbit_tiled<T, K, BPW, ABSMAX_T>
         <<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(packed_in, codebook, absmax, out, K_dim, N);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// ---- VQ kernel launchers ----
+
+template <int P_VAL, typename T>
+void quantize_vq(
+    const half* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n, cudaStream_t stream
+) {
+    int num_blocks_quant = (n + 31) / 32;
+    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kQuantize_VQ<P_VAL, T>
+        <<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(codebook, A, absmax, packed_out, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <int P_VAL, typename T, typename ABSMAX_T>
+void dequantize_vq(
+    const unsigned int* packed_in, const half* codebook, const ABSMAX_T* absmax, T* out, int n, cudaStream_t stream
+) {
+    int num_blocks_quant = (n + 31) / 32;
+    int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
+    kDequantize_VQ<P_VAL, T, ABSMAX_T>
+        <<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(packed_in, codebook, absmax, out, n);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -3168,3 +3336,31 @@ INSTANTIATE_KBIT_SCALAR_GEMV_V2_FP16(2)
 INSTANTIATE_KBIT_SCALAR_GEMV_V2_FP16(3)
 INSTANTIATE_KBIT_SCALAR_GEMV_V2_FP16(4)
 INSTANTIATE_KBIT_SCALAR_GEMV_V2_FP16(5)
+
+// ---- VQ template instantiations ----
+// quantize_vq: P_VAL × scalar_t
+#define INSTANTIATE_VQ_QUANT(P)                                                                                        \
+    template void quantize_vq<P, half>(const half*, const half*, unsigned char*, unsigned int*, int, cudaStream_t);     \
+    template void quantize_vq<P, __nv_bfloat16>(                                                                      \
+        const half*, const __nv_bfloat16*, unsigned char*, unsigned int*, int, cudaStream_t                             \
+    );                                                                                                                 \
+    template void quantize_vq<P, float>(const half*, const float*, unsigned char*, unsigned int*, int, cudaStream_t);
+INSTANTIATE_VQ_QUANT(2)
+INSTANTIATE_VQ_QUANT(4)
+
+// dequantize_vq: P_VAL × T × ABSMAX_T
+#define INSTANTIATE_VQ_DEQUANT(P)                                                                                      \
+    template void dequantize_vq<P, half, unsigned char>(                                                               \
+        const unsigned int*, const half*, const unsigned char*, half*, int, cudaStream_t                                \
+    );                                                                                                                 \
+    template void dequantize_vq<P, __nv_bfloat16, unsigned char>(                                                      \
+        const unsigned int*, const half*, const unsigned char*, __nv_bfloat16*, int, cudaStream_t                       \
+    );                                                                                                                 \
+    template void dequantize_vq<P, half, float>(                                                                       \
+        const unsigned int*, const half*, const float*, half*, int, cudaStream_t                                        \
+    );                                                                                                                 \
+    template void dequantize_vq<P, __nv_bfloat16, float>(                                                              \
+        const unsigned int*, const half*, const float*, __nv_bfloat16*, int, cudaStream_t                               \
+    );
+INSTANTIATE_VQ_DEQUANT(2)
+INSTANTIATE_VQ_DEQUANT(4)
