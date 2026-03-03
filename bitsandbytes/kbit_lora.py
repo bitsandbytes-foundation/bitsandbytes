@@ -9,13 +9,12 @@ No PEFT dependency — manages LoRA adapters directly for efficiency.
 Supported model_types: llama, mistral, qwen2, qwen3, qwen3_moe, glm4
 """
 
+from dataclasses import dataclass, field
 import json
 import math
-import os
 import struct
-import warnings
-from dataclasses import dataclass, field
 from typing import Optional
+import warnings
 
 import torch
 import torch.nn as nn
@@ -244,9 +243,7 @@ class KbitLoraModel(nn.Module):
             self.embed_tokens = None
 
         lm_head = self.arch.get_nested_attr(model, self.arch.lm_head_path)
-        self.lm_head_tied = (
-            lm_head.weight.data_ptr() == embed.weight.data_ptr()
-        )
+        self.lm_head_tied = lm_head.weight.data_ptr() == embed.weight.data_ptr()
 
         # Quantize and create LoRA adapters
         self._quantized_weights = nn.ParameterDict()
@@ -286,7 +283,7 @@ class KbitLoraModel(nn.Module):
         ce_chunk_size: int = 8192,
         compute_dtype: torch.dtype = torch.bfloat16,
         weight_streaming: bool = True,
-        target_device: torch.device = torch.device("cuda:0"),
+        target_device: Optional[torch.device] = None,
         lora_on_experts: bool = False,
         expert_chunk_size: int = 32,
         batch_size: int = 8,
@@ -319,6 +316,9 @@ class KbitLoraModel(nn.Module):
                 streaming. Falls back to CPU path if kvikio unavailable.
             lora_checkpoint: Optional path to saved LoRA weights to load.
         """
+        if target_device is None:
+            target_device = torch.device("cuda:0")
+
         from safetensors import safe_open
 
         # 1. Open safetensors and read metadata
@@ -445,9 +445,15 @@ class KbitLoraModel(nn.Module):
                 A, B = self._create_lora(f"layers_{i}_attn_{proj}", N, K)
 
                 layer_info[proj] = {
-                    "packed": packed, "absmax": absmax, "codebook": codebook,
-                    "N_padded": N_padded, "N": N, "K": K, "k": k_val,
-                    "A": A, "B": B,
+                    "packed": packed,
+                    "absmax": absmax,
+                    "codebook": codebook,
+                    "N_padded": N_padded,
+                    "N": N,
+                    "K": K,
+                    "k": k_val,
+                    "A": A,
+                    "B": B,
                 }
 
             # MLP or MoE
@@ -459,9 +465,7 @@ class KbitLoraModel(nn.Module):
 
                 # Router weight (always on GPU, not quantized)
                 router_weight = sf.get_tensor(f"{prefix}.moe.router_weight")
-                layer_info["router_weight"] = router_weight.to(
-                    target_device, dtype=compute_dtype
-                )
+                layer_info["router_weight"] = router_weight.to(target_device, dtype=compute_dtype)
 
                 # Shared expert (if present)
                 if self.arch.has_shared_expert:
@@ -489,9 +493,15 @@ class KbitLoraModel(nn.Module):
                         A, B = self._create_lora(f"layers_{i}_moe_{proj}", N, K)
 
                         layer_info[proj] = {
-                            "packed": packed, "absmax": absmax, "codebook": codebook,
-                            "N_padded": N_padded, "N": N, "K": K, "k": k_val,
-                            "A": A, "B": B,
+                            "packed": packed,
+                            "absmax": absmax,
+                            "codebook": codebook,
+                            "N_padded": N_padded,
+                            "N": N,
+                            "K": K,
+                            "k": k_val,
+                            "A": A,
+                            "B": B,
                         }
 
                 # Expert weights (concatenated across all experts)
@@ -544,18 +554,22 @@ class KbitLoraModel(nn.Module):
                     A, B = self._create_lora(f"layers_{i}_mlp_{proj}", N, K)
 
                     layer_info[proj] = {
-                        "packed": packed, "absmax": absmax, "codebook": codebook,
-                        "N_padded": N_padded, "N": N, "K": K, "k": k_val,
-                        "A": A, "B": B,
+                        "packed": packed,
+                        "absmax": absmax,
+                        "codebook": codebook,
+                        "N_padded": N_padded,
+                        "N": N,
+                        "K": K,
+                        "k": k_val,
+                        "A": A,
+                        "B": B,
                     }
 
             # Norm weights (always on GPU)
             for nk in ["input_layernorm", "post_attention_layernorm"]:
                 tensor_name = f"{prefix}.{nk}.weight"
                 if tensor_name in sf.keys():
-                    weight = sf.get_tensor(tensor_name).to(
-                        target_device, dtype=compute_dtype
-                    )
+                    weight = sf.get_tensor(tensor_name).to(target_device, dtype=compute_dtype)
                     safe_name = f"layers_{i}_{nk}_weight"
                     self._norm_weights[safe_name] = nn.Parameter(weight)
                     layer_info[nk] = self._norm_weights[safe_name]
@@ -565,9 +579,7 @@ class KbitLoraModel(nn.Module):
                 for nk in ["q_norm", "k_norm"]:
                     tensor_name = f"{prefix}.{nk}.weight"
                     if tensor_name in sf.keys():
-                        weight = sf.get_tensor(tensor_name).to(
-                            target_device, dtype=compute_dtype
-                        )
+                        weight = sf.get_tensor(tensor_name).to(target_device, dtype=compute_dtype)
                         safe_name = f"layers_{i}_attn_{nk}_weight"
                         self._norm_weights[safe_name] = nn.Parameter(weight)
                         layer_info[nk] = self._norm_weights[safe_name]
@@ -577,9 +589,7 @@ class KbitLoraModel(nn.Module):
 
         # 8. Final norm
         if "final_norm.weight" in sf.keys():
-            weight = sf.get_tensor("final_norm.weight").to(
-                target_device, dtype=compute_dtype
-            )
+            weight = sf.get_tensor("final_norm.weight").to(target_device, dtype=compute_dtype)
             self._norm_weights["final_norm_weight"] = nn.Parameter(weight)
 
         # 9. LM head (always on GPU — small relative to layer weights)
@@ -611,6 +621,7 @@ class KbitLoraModel(nn.Module):
         # 13. Load LoRA checkpoint (optional)
         if lora_checkpoint is not None:
             from bitsandbytes.checkpoint import load_lora
+
             load_lora(self, lora_checkpoint)
 
         return self
@@ -661,9 +672,15 @@ class KbitLoraModel(nn.Module):
         packed, absmax, codebook, N_padded, N, K = self._quantize_weight(weight, name, k=k)
         A, B = self._create_lora(name, N, K)
         return {
-            "packed": packed, "absmax": absmax, "codebook": codebook,
-            "N_padded": N_padded, "N": N, "K": K,
-            "A": A, "B": B, "k": k,
+            "packed": packed,
+            "absmax": absmax,
+            "codebook": codebook,
+            "N_padded": N_padded,
+            "N": N,
+            "K": K,
+            "A": A,
+            "B": B,
+            "k": k,
         }
 
     def _quantize_attention(self, layer, layer_idx: int) -> dict:
@@ -677,9 +694,7 @@ class KbitLoraModel(nn.Module):
             ("v_proj", self.arch.v_proj),
             ("o_proj", self.arch.o_proj),
         ]:
-            info[generic] = self._quantize_proj(
-                attn, attr, f"{prefix}_attn_{generic}", self.k_attention
-            )
+            info[generic] = self._quantize_proj(attn, attr, f"{prefix}_attn_{generic}", self.k_attention)
         return info
 
     def _quantize_dense_mlp(self, layer, layer_idx: int) -> dict:
@@ -692,9 +707,7 @@ class KbitLoraModel(nn.Module):
             ("up_proj", self.arch.up_proj),
             ("down_proj", self.arch.down_proj),
         ]:
-            info[generic] = self._quantize_proj(
-                mlp, attr, f"{prefix}_mlp_{generic}", self.k_mlp
-            )
+            info[generic] = self._quantize_proj(mlp, attr, f"{prefix}_mlp_{generic}", self.k_mlp)
         return info
 
     def _quantize_moe_layer(self, layer, layer_idx: int) -> dict:
@@ -721,9 +734,7 @@ class KbitLoraModel(nn.Module):
                 ("shared_up_proj", self.arch.up_proj),
                 ("shared_down_proj", self.arch.down_proj),
             ]:
-                info[generic] = self._quantize_proj(
-                    shared, attr, f"{prefix}_moe_{generic}", self.k_shared_expert
-                )
+                info[generic] = self._quantize_proj(shared, attr, f"{prefix}_moe_{generic}", self.k_shared_expert)
 
         # Routing experts — quantize each expert and concatenate
         experts = self.arch.get_nested_attr(layer, self.arch.moe_experts_path)
@@ -862,11 +873,18 @@ class KbitLoraModel(nn.Module):
             lm_weight = lm_head.weight.data
             name = "lm_head"
             packed, absmax, codebook, N_padded, N, K = self._quantize_weight(
-                lm_weight, name, k=self.k_lm_head,
+                lm_weight,
+                name,
+                k=self.k_lm_head,
             )
             self._lm_head_info = {
-                "packed": packed, "absmax": absmax, "codebook": codebook,
-                "N_padded": N_padded, "N": N, "K": K, "k": self.k_lm_head,
+                "packed": packed,
+                "absmax": absmax,
+                "codebook": codebook,
+                "N_padded": N_padded,
+                "N": N,
+                "K": K,
+                "k": self.k_lm_head,
             }
 
         # Precompute RoPE cos/sin cache
@@ -942,7 +960,7 @@ class KbitLoraModel(nn.Module):
                         futures.append(fut)
                 else:
                     # Flat tensor: (offset, size, shape, dtype)
-                    offset, size, shape, dtype = value
+                    offset, size, _shape, _dtype = value
                     fut = f.pread(
                         buf=gpu_slot[key],
                         file_offset=offset,
@@ -1018,15 +1036,11 @@ class KbitLoraModel(nn.Module):
                     lm_head_bytes += self._lm_head_info[key].nelement() * self._lm_head_info[key].element_size()
 
         # LoRA params (A + B for each projection in each layer) + gradients
-        lora_total_bytes = sum(
-            p.nelement() * p.element_size() for p in self._lora_params.parameters()
-        )
+        lora_total_bytes = sum(p.nelement() * p.element_size() for p in self._lora_params.parameters())
         lora_grad_bytes = lora_total_bytes  # Same size for gradients
 
         # Norm weights + gradients
-        norm_bytes = sum(
-            p.nelement() * p.element_size() for p in self._norm_weights.parameters()
-        )
+        norm_bytes = sum(p.nelement() * p.element_size() for p in self._norm_weights.parameters())
         norm_grad_bytes = norm_bytes
 
         # Optimizer state (Adam: 2 states per parameter)
@@ -1036,16 +1050,13 @@ class KbitLoraModel(nn.Module):
         B = self._batch_size_hint
         S = self._seq_len_hint
         H = self.hidden_size
-        I = self.intermediate_size
+        inter = self.intermediate_size
         # Attention intermediates: hidden, Q, K, V at peak = 4 * B*S*H * 2 bytes (bf16)
-        # MLP intermediates: gate + up = 2 * B*S*I * 2 bytes
-        activation_bytes = B * S * H * 4 * 2 + B * S * I * 2 * 2
+        # MLP intermediates: gate + up = 2 * B*S*inter * 2 bytes
+        activation_bytes = B * S * H * 4 * 2 + B * S * inter * 2 * 2
 
         # Compute per-layer sizes
-        layer_sizes = [
-            self._compute_layer_weight_bytes(layer_info)
-            for layer_info in self._layer_data
-        ]
+        layer_sizes = [self._compute_layer_weight_bytes(layer_info) for layer_info in self._layer_data]
 
         # Double-buffer GPU slots (sized for largest layer)
         max_layer_bytes = max(layer_sizes) if layer_sizes else 0
@@ -1115,9 +1126,7 @@ class KbitLoraModel(nn.Module):
                     if cb is not None and cb.device != device:
                         layer_info["expert_codebook"] = cb.to(device)
 
-            resident_bytes = sum(
-                self._compute_layer_weight_bytes(li) for li in self._layer_data
-            )
+            resident_bytes = sum(self._compute_layer_weight_bytes(li) for li in self._layer_data)
             print(
                 f"Partial residency: {n} / {n} layers on GPU (100%), 0 streamed\n"
                 f"  Resident: {resident_bytes / 1e9:.1f} GB (all layers)"
@@ -1147,8 +1156,7 @@ class KbitLoraModel(nn.Module):
         # Compute non-resident layer sizes
         n_streamed = n - self._n_resident
         streamed_layer_sizes = [
-            self._compute_layer_weight_bytes(self._layer_data[i])
-            for i in range(self._n_resident, n)
+            self._compute_layer_weight_bytes(self._layer_data[i]) for i in range(self._n_resident, n)
         ]
         total_streamed_bytes = sum(streamed_layer_sizes)
 
@@ -1192,9 +1200,8 @@ class KbitLoraModel(nn.Module):
 
         if self._ram_strategy in ("hybrid", "mmap") and has_checkpoint:
             from safetensors import safe_open
-            self._safetensors_file = safe_open(
-                self._checkpoint_path, framework="pt", device="cpu"
-            )
+
+            self._safetensors_file = safe_open(self._checkpoint_path, framework="pt", device="cpu")
 
         # Parse byte offsets for GDS path
         _sf_offsets = None
@@ -1213,10 +1220,7 @@ class KbitLoraModel(nn.Module):
                 gds_layer = {}
                 for key, names in tensor_names.items():
                     if isinstance(names, dict):
-                        gds_layer[key] = {
-                            wk: _sf_offsets[tn]
-                            for wk, tn in names.items()
-                        }
+                        gds_layer[key] = {wk: _sf_offsets[tn] for wk, tn in names.items()}
                     else:
                         gds_layer[key] = _sf_offsets[names]
                 self._gds_layer_info[si] = gds_layer
@@ -1306,10 +1310,7 @@ class KbitLoraModel(nn.Module):
             ref_layer = {}
             for key, value in names.items():
                 if isinstance(value, dict):
-                    ref_layer[key] = {
-                        wk: self._safetensors_file.get_tensor(tn)
-                        for wk, tn in value.items()
-                    }
+                    ref_layer[key] = {wk: self._safetensors_file.get_tensor(tn) for wk, tn in value.items()}
                 else:
                     ref_layer[key] = self._safetensors_file.get_tensor(value)
 
@@ -1325,7 +1326,7 @@ class KbitLoraModel(nn.Module):
                         for wk, (offset, size, shape, dtype) in value.items()
                     }
                 else:
-                    offset, size, shape, dtype = value
+                    _offset, _size, shape, dtype = value
                     ref_layer[key] = torch.empty(shape, dtype=dtype, device="cpu")
 
         def _entry_bytes(v):
@@ -1343,9 +1344,7 @@ class KbitLoraModel(nn.Module):
         # For GDS, also check all GDS layers by building temp ref from offsets
         for si, gds_info in self._gds_layer_info.items():
             gds_bytes = sum(
-                sum(info[1] for info in v.values()) if isinstance(v, dict)
-                else v[1]
-                for v in gds_info.values()
+                sum(info[1] for info in v.values()) if isinstance(v, dict) else v[1] for v in gds_info.values()
             )
             if gds_bytes > _ref_bytes(largest_ref):
                 # Build a temp ref from this GDS layer's shapes
@@ -1357,7 +1356,7 @@ class KbitLoraModel(nn.Module):
                             for wk, (offset, size, shape, dtype) in value.items()
                         }
                     else:
-                        offset, size, shape, dtype = value
+                        _offset, _size, shape, dtype = value
                         largest_ref[key] = torch.empty(shape, dtype=dtype, device="cpu")
 
         self._gpu_slots = []
@@ -1378,28 +1377,19 @@ class KbitLoraModel(nn.Module):
                 for key, value in largest_ref.items():
                     if isinstance(value, dict):
                         staging[key] = {
-                            wk: torch.empty_like(t, device="cpu", pin_memory=True)
-                            for wk, t in value.items()
+                            wk: torch.empty_like(t, device="cpu", pin_memory=True) for wk, t in value.items()
                         }
                     else:
                         staging[key] = torch.empty_like(value, device="cpu", pin_memory=True)
                 self._staging_buffers.append(staging)
 
         # Print summary
-        pinned_bytes = sum(
-            sum(_entry_bytes(v) for v in cl.values())
-            for cl in self._cpu_weights if cl is not None
-        )
+        pinned_bytes = sum(sum(_entry_bytes(v) for v in cl.values()) for cl in self._cpu_weights if cl is not None)
         mmap_bytes = total_streamed_bytes - pinned_bytes
         slot_bytes = sum(_entry_bytes(v) for v in self._gpu_slots[0].values())
-        resident_bytes = sum(
-            self._compute_layer_weight_bytes(self._layer_data[i])
-            for i in range(self._n_resident)
-        )
+        resident_bytes = sum(self._compute_layer_weight_bytes(self._layer_data[i]) for i in range(self._n_resident))
         pct = 100 * self._n_resident / n if n > 0 else 0
-        resident_str = (
-            f"layers 0-{self._n_resident - 1}" if self._n_resident > 0 else "none"
-        )
+        resident_str = f"layers 0-{self._n_resident - 1}" if self._n_resident > 0 else "none"
         strategy_detail = f"RAM strategy: {self._ram_strategy}"
         if self._ram_strategy == "hybrid":
             strategy_detail += f" ({n_pinned} pinned, {n_streamed - n_pinned} mmap)"
@@ -1461,17 +1451,16 @@ class KbitLoraModel(nn.Module):
         """Load from safetensors file → staging buffer → GPU slot."""
         tensor_names = self._mmap_layer_names[cpu_idx]
         staging = self._staging_buffers[slot]
-        gpu_slot = self._gpu_slots[slot]
 
         # Step 1: Load from safetensors mmap into staging buffer (synchronous)
         for key, names in tensor_names.items():
             if isinstance(names, dict):
                 for wk, tensor_name in names.items():
                     tensor = self._safetensors_file.get_tensor(tensor_name)
-                    staging[key][wk][:tensor.numel()].view_as(tensor).copy_(tensor)
+                    staging[key][wk][: tensor.numel()].view_as(tensor).copy_(tensor)
             else:
                 tensor = self._safetensors_file.get_tensor(names)
-                staging[key][:tensor.numel()].view_as(tensor).copy_(tensor)
+                staging[key][: tensor.numel()].view_as(tensor).copy_(tensor)
 
         # Step 2: DMA from staging (pinned) to GPU slot
         self._copy_pinned_to_gpu(staging, slot, sync)
@@ -1534,10 +1523,17 @@ class KbitLoraModel(nn.Module):
         def _proj(proj_info, x):
             return LoRA_W_Kbit.apply(
                 x,
-                proj_info["packed"], proj_info["absmax"], proj_info["codebook"],
-                proj_info["A"], proj_info["B"],
-                self.lora_s, proj_info["k"], proj_info["K"],
-                proj_info["N_padded"], proj_info["N"], self.compute_dtype,
+                proj_info["packed"],
+                proj_info["absmax"],
+                proj_info["codebook"],
+                proj_info["A"],
+                proj_info["B"],
+                self.lora_s,
+                proj_info["k"],
+                proj_info["K"],
+                proj_info["N_padded"],
+                proj_info["N"],
+                self.compute_dtype,
             )
 
         Q = _proj(info["q_proj"], normed_2d)
@@ -1580,33 +1576,57 @@ class KbitLoraModel(nn.Module):
         u = info["up_proj"]
         d = info["down_proj"]
         return chunked_mlp_forward(
-            normed, self.mlp_chunk_size,
-            g["packed"], g["absmax"], g["codebook"], g["A"], g["B"], self.lora_s,
-            u["packed"], u["absmax"], u["codebook"], u["A"], u["B"], self.lora_s,
-            d["packed"], d["absmax"], d["codebook"], d["A"], d["B"], self.lora_s,
+            normed,
+            self.mlp_chunk_size,
+            g["packed"],
+            g["absmax"],
+            g["codebook"],
+            g["A"],
+            g["B"],
+            self.lora_s,
+            u["packed"],
+            u["absmax"],
+            u["codebook"],
+            u["A"],
+            u["B"],
+            self.lora_s,
+            d["packed"],
+            d["absmax"],
+            d["codebook"],
+            d["A"],
+            d["B"],
+            self.lora_s,
             g["k"],
-            self.hidden_size, self.intermediate_size,
+            self.hidden_size,
+            self.intermediate_size,
             ((self.intermediate_size + 127) // 128) * 128,
-            self.intermediate_size, self.hidden_size,
+            self.intermediate_size,
+            self.hidden_size,
             ((self.hidden_size + 127) // 128) * 128,
-            self.compute_dtype, use_checkpoint=True,
+            self.compute_dtype,
+            use_checkpoint=True,
         )
 
     def _moe_mlp_forward(self, info: dict, normed: torch.Tensor):
         """Compute MoE MLP sub-block: router dispatch + expert forward + shared expert."""
         # Router dispatch
         router_result = moe_router_dispatch(
-            normed, info["router_weight"],
+            normed,
+            info["router_weight"],
             num_experts=self.arch.num_experts,
             top_k=self.arch.num_active_experts,
         )
 
         # Expert forward (chunked)
         expert_out = moe_expert_forward(
-            normed, router_result,
-            info["expert_gate_packed"], info["expert_gate_absmax"],
-            info["expert_up_packed"], info["expert_up_absmax"],
-            info["expert_down_packed"], info["expert_down_absmax"],
+            normed,
+            router_result,
+            info["expert_gate_packed"],
+            info["expert_gate_absmax"],
+            info["expert_up_packed"],
+            info["expert_up_absmax"],
+            info["expert_down_packed"],
+            info["expert_down_absmax"],
             info["expert_codebook"],
             k=info["expert_k"],
             hidden_dim=self.hidden_size,
@@ -1622,16 +1642,35 @@ class KbitLoraModel(nn.Module):
             d = info["shared_down_proj"]
             shared_inter = g["N"]  # shared expert intermediate size
             shared_out = chunked_mlp_forward(
-                normed, self.mlp_chunk_size,
-                g["packed"], g["absmax"], g["codebook"], g["A"], g["B"], self.lora_s,
-                u["packed"], u["absmax"], u["codebook"], u["A"], u["B"], self.lora_s,
-                d["packed"], d["absmax"], d["codebook"], d["A"], d["B"], self.lora_s,
+                normed,
+                self.mlp_chunk_size,
+                g["packed"],
+                g["absmax"],
+                g["codebook"],
+                g["A"],
+                g["B"],
+                self.lora_s,
+                u["packed"],
+                u["absmax"],
+                u["codebook"],
+                u["A"],
+                u["B"],
+                self.lora_s,
+                d["packed"],
+                d["absmax"],
+                d["codebook"],
+                d["A"],
+                d["B"],
+                self.lora_s,
                 g["k"],
-                self.hidden_size, shared_inter,
+                self.hidden_size,
+                shared_inter,
                 ((shared_inter + 127) // 128) * 128,
-                shared_inter, self.hidden_size,
+                shared_inter,
+                self.hidden_size,
                 ((self.hidden_size + 127) // 128) * 128,
-                self.compute_dtype, use_checkpoint=True,
+                self.compute_dtype,
+                use_checkpoint=True,
             )
             return expert_out + shared_out
         else:
@@ -1667,7 +1706,9 @@ class KbitLoraModel(nn.Module):
         residual = hidden
         hidden_2d = hidden.reshape(-1, H)
         normed = rmsnorm(
-            hidden_2d, info["post_attention_layernorm"], eps=self.rms_norm_eps,
+            hidden_2d,
+            info["post_attention_layernorm"],
+            eps=self.rms_norm_eps,
         )
 
         if info.get("is_moe"):
@@ -1690,12 +1731,14 @@ class KbitLoraModel(nn.Module):
         def _make_layer_fn(layer_idx, pos_ids):
             def _fn(h):
                 return self._layer_forward(layer_idx, h, pos_ids)
+
             return _fn
 
         # Phase 1: Resident layers (no streaming, weights on GPU)
         for i in range(nr):
             hidden = checkpoint_cpu_offload(
-                _make_layer_fn(i, position_ids), hidden,
+                _make_layer_fn(i, position_ids),
+                hidden,
             )
 
         # Phase 2: Streamed layers (double-buffered from CPU)
@@ -1710,7 +1753,8 @@ class KbitLoraModel(nn.Module):
                     self._stream_load_layer(i + 1, slot=next_slot, sync=False)
 
                 hidden = checkpoint_cpu_offload(
-                    _make_layer_fn(i, position_ids), hidden,
+                    _make_layer_fn(i, position_ids),
+                    hidden,
                 )
 
                 if i + 1 < n:
@@ -1801,7 +1845,8 @@ class KbitLoraModel(nn.Module):
 
         hidden_2d = hidden_final.reshape(-1, self.hidden_size)
         hidden_2d = rmsnorm(
-            hidden_2d, self._norm_weights["final_norm_weight"],
+            hidden_2d,
+            self._norm_weights["final_norm_weight"],
             eps=self.rms_norm_eps,
         )
 
@@ -1811,16 +1856,23 @@ class KbitLoraModel(nn.Module):
         lm = self._lm_head_info
         loss = chunked_cross_entropy(
             shift_hidden,
-            lm["packed"], lm["absmax"], lm["codebook"],
+            lm["packed"],
+            lm["absmax"],
+            lm["codebook"],
             shift_labels,
-            lm["k"], lm["K"], lm["N_padded"], lm["N"],
-            self.compute_dtype, self.ce_chunk_size,
+            lm["k"],
+            lm["K"],
+            lm["N_padded"],
+            lm["N"],
+            self.compute_dtype,
+            self.ce_chunk_size,
         )
 
         # Compute grad w.r.t. hidden_final and final norm
         norm_params = [self._norm_weights["final_norm_weight"]]
         all_grads = torch.autograd.grad(
-            loss, [hidden_final] + norm_params,
+            loss,
+            [hidden_final, *norm_params],
             retain_graph=False,
         )
         grad_from_loss = all_grads[0]
@@ -1883,9 +1935,10 @@ class KbitLoraModel(nn.Module):
                 if nk in info:
                     layer_norm_params.append(info[nk])
 
-            all_params = [input_act] + lora_params + layer_norm_params
+            all_params = [input_act, *lora_params, *layer_norm_params]
             grads = torch.autograd.grad(
-                output, all_params,
+                output,
+                all_params,
                 grad_outputs=grad,
                 retain_graph=False,
             )
@@ -1893,14 +1946,14 @@ class KbitLoraModel(nn.Module):
             grad = grads[0]  # gradient w.r.t. input → pass to previous layer
 
             # Accumulate LoRA gradients
-            for param, g in zip(lora_params, grads[1:1 + len(lora_params)]):
+            for param, g in zip(lora_params, grads[1 : 1 + len(lora_params)]):
                 if param.grad is None:
                     param.grad = g.detach()
                 else:
                     param.grad.add_(g.detach())
 
             # Accumulate norm gradients
-            for param, g in zip(layer_norm_params, grads[1 + len(lora_params):]):
+            for param, g in zip(layer_norm_params, grads[1 + len(lora_params) :]):
                 if param.grad is None:
                     param.grad = g.detach()
                 else:
@@ -1939,10 +1992,13 @@ class KbitLoraModel(nn.Module):
         else:
             for i in range(self._num_loaded_layers):
                 if self.cpu_offload and self.training:
+
                     def _make_layer_fn(layer_idx, pos_ids):
                         def _fn(h):
                             return self._layer_forward(layer_idx, h, pos_ids)
+
                         return _fn
+
                     hidden = checkpoint_cpu_offload(_make_layer_fn(i, position_ids), hidden)
                 else:
                     hidden = self._layer_forward(i, hidden, position_ids)
@@ -1952,7 +2008,8 @@ class KbitLoraModel(nn.Module):
 
         hidden_2d = hidden.reshape(-1, self.hidden_size)
         hidden_2d = rmsnorm(
-            hidden_2d, self._norm_weights["final_norm_weight"],
+            hidden_2d,
+            self._norm_weights["final_norm_weight"],
             eps=self.rms_norm_eps,
         )
 
@@ -1964,18 +2021,28 @@ class KbitLoraModel(nn.Module):
             lm = self._lm_head_info
             loss = chunked_cross_entropy(
                 shift_hidden,
-                lm["packed"], lm["absmax"], lm["codebook"],
+                lm["packed"],
+                lm["absmax"],
+                lm["codebook"],
                 shift_labels,
-                lm["k"], lm["K"], lm["N_padded"], lm["N"],
-                self.compute_dtype, self.ce_chunk_size,
+                lm["k"],
+                lm["K"],
+                lm["N_padded"],
+                lm["N"],
+                self.compute_dtype,
+                self.ce_chunk_size,
             )
             result["loss"] = loss
         else:
             last_hidden = hidden_2d[-B:]
             lm = self._lm_head_info
             W_deq = F.dequantize_kbit(
-                lm["packed"], lm["absmax"], lm["codebook"],
-                lm["k"], lm["N_padded"] * lm["K"], self.compute_dtype,
+                lm["packed"],
+                lm["absmax"],
+                lm["codebook"],
+                lm["k"],
+                lm["N_padded"] * lm["K"],
+                self.compute_dtype,
             )
             W = W_deq[: lm["N_padded"] * lm["K"]].reshape(lm["N_padded"], lm["K"])[: lm["N"], :]
             logits = last_hidden @ W.t()

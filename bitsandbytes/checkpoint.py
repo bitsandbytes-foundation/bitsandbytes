@@ -5,17 +5,16 @@ NVMe streaming. Saves/loads LoRA adapters separately. Includes a streaming
 quantizer that converts HF checkpoints layer-by-layer with minimal memory.
 """
 
+from collections import OrderedDict
 import json
 import os
 import shutil
 import struct
-from collections import OrderedDict
 from typing import Optional
 
-import torch
-
-from safetensors.torch import save_file
 from safetensors import safe_open
+from safetensors.torch import save_file
+import torch
 
 from bitsandbytes.arch_config import ArchConfig, detect_arch_config
 
@@ -119,9 +118,7 @@ def save_quantized(model, path: str):
 
     # Dense layer indices (comma-separated, empty if None or all MoE)
     if model.arch.dense_layer_indices is not None:
-        metadata["dense_layer_indices"] = ",".join(
-            str(i) for i in model.arch.dense_layer_indices
-        )
+        metadata["dense_layer_indices"] = ",".join(str(i) for i in model.arch.dense_layer_indices)
     else:
         metadata["dense_layer_indices"] = ""
 
@@ -245,7 +242,7 @@ def streaming_quantize(
     k: int = 4,
     k_config: Optional[dict[str, int]] = None,
     arch_config: Optional[ArchConfig] = None,
-    device: torch.device = torch.device("cuda:0"),
+    device: Optional[torch.device] = None,
 ):
     """Quantize a HuggingFace model layer-by-layer and write to safetensors.
 
@@ -267,6 +264,9 @@ def streaming_quantize(
         arch_config: Optional ArchConfig override.
         device: GPU device for quantization kernels.
     """
+    if device is None:
+        device = torch.device("cuda:0")
+
     from transformers import AutoConfig
 
     import bitsandbytes.functional as F
@@ -297,6 +297,7 @@ def streaming_quantize(
         model_dir = model_name_or_path
     else:
         from huggingface_hub import snapshot_download
+
         model_dir = snapshot_download(model_name_or_path)
 
     # ─── Build weight map: tensor_name → shard_filename ───
@@ -409,15 +410,19 @@ def streaming_quantize(
 
     # --- Per-layer tensor specs ---
     _attn_projs = [
-        ("q_proj", arch.q_proj), ("k_proj", arch.k_proj),
-        ("v_proj", arch.v_proj), ("o_proj", arch.o_proj),
+        ("q_proj", arch.q_proj),
+        ("k_proj", arch.k_proj),
+        ("v_proj", arch.v_proj),
+        ("o_proj", arch.o_proj),
     ]
     _mlp_projs = [
-        ("gate_proj", arch.gate_proj), ("up_proj", arch.up_proj),
+        ("gate_proj", arch.gate_proj),
+        ("up_proj", arch.up_proj),
         ("down_proj", arch.down_proj),
     ]
     _expert_projs = [
-        ("gate", arch.expert_gate_proj), ("up", arch.expert_up_proj),
+        ("gate", arch.expert_gate_proj),
+        ("up", arch.expert_up_proj),
         ("down", arch.expert_down_proj),
     ]
 
@@ -441,15 +446,20 @@ def streaming_quantize(
                     ("shared_down_proj", arch.down_proj),
                 ]:
                     _add_quantized(
-                        f"{pfx}.moe.{name}", _hf_shared_expert(i, attr),
-                        k_shared_expert, f"{pfx}.moe.{name}",
+                        f"{pfx}.moe.{name}",
+                        _hf_shared_expert(i, attr),
+                        k_shared_expert,
+                        f"{pfx}.moe.{name}",
                     )
 
             # Experts (concatenated)
             for name, attr in _expert_projs:
                 _add_expert_concat(
-                    f"{pfx}.moe.experts.{name}", i, attr,
-                    k_experts, f"{pfx}.moe.experts",
+                    f"{pfx}.moe.experts.{name}",
+                    i,
+                    attr,
+                    k_experts,
+                    f"{pfx}.moe.experts",
                 )
 
             # Expert codebook (shared across projection types)
@@ -480,35 +490,35 @@ def streaming_quantize(
     _add_copy("embed_tokens.weight", f"{arch.embed_path}.weight")
 
     # --- Global metadata ---
-    metadata.update({
-        "model_type": config.model_type,
-        "hidden_size": str(hidden_size),
-        "num_layers": str(num_layers),
-        "num_loaded_layers": str(num_layers),
-        "layer_start": "0",
-        "layer_end": str(num_layers),
-        "num_attention_heads": str(num_heads),
-        "num_key_value_heads": str(num_kv_heads),
-        "head_dim": str(head_dim),
-        "intermediate_size": str(intermediate_size),
-        "vocab_size": str(vocab_size),
-        "rms_norm_eps": str(rms_norm_eps),
-        "rope_theta": str(rope_theta),
-        "k_attention": str(k_attn),
-        "k_mlp": str(k_mlp),
-        "k_lm_head": str(k_lm_head),
-        "k_experts": str(k_experts),
-        "k_shared_expert": str(k_shared_expert),
-        "is_moe": str(arch.is_moe),
-        "num_experts": str(arch.num_experts),
-        "num_active_experts": str(arch.num_active_experts),
-        "expert_intermediate_size": str(arch.expert_intermediate_size),
-        "has_shared_expert": str(arch.has_shared_expert),
-        "has_qk_norm": str(arch.has_qk_norm),
-        "dense_layer_indices": ",".join(
-            str(x) for x in (arch.dense_layer_indices or [])
-        ),
-    })
+    metadata.update(
+        {
+            "model_type": config.model_type,
+            "hidden_size": str(hidden_size),
+            "num_layers": str(num_layers),
+            "num_loaded_layers": str(num_layers),
+            "layer_start": "0",
+            "layer_end": str(num_layers),
+            "num_attention_heads": str(num_heads),
+            "num_key_value_heads": str(num_kv_heads),
+            "head_dim": str(head_dim),
+            "intermediate_size": str(intermediate_size),
+            "vocab_size": str(vocab_size),
+            "rms_norm_eps": str(rms_norm_eps),
+            "rope_theta": str(rope_theta),
+            "k_attention": str(k_attn),
+            "k_mlp": str(k_mlp),
+            "k_lm_head": str(k_lm_head),
+            "k_experts": str(k_experts),
+            "k_shared_expert": str(k_shared_expert),
+            "is_moe": str(arch.is_moe),
+            "num_experts": str(arch.num_experts),
+            "num_active_experts": str(arch.num_active_experts),
+            "expert_intermediate_size": str(arch.expert_intermediate_size),
+            "has_shared_expert": str(arch.has_shared_expert),
+            "has_qk_norm": str(arch.has_qk_norm),
+            "dense_layer_indices": ",".join(str(x) for x in (arch.dense_layer_indices or [])),
+        }
+    )
 
     # ─── Write safetensors header + pre-allocate file ───
 
@@ -549,9 +559,7 @@ def streaming_quantize(
     def _load_hf(hf_name):
         shard = _get_shard(hf_name)
         if shard not in _shard_handles:
-            _shard_handles[shard] = safe_open(
-                os.path.join(model_dir, shard), framework="pt", device="cpu"
-            )
+            _shard_handles[shard] = safe_open(os.path.join(model_dir, shard), framework="pt", device="cpu")
         return _shard_handles[shard].get_tensor(hf_name)
 
     _TORCH_DTYPE = {"F16": torch.float16, "BF16": torch.bfloat16, "F32": torch.float32}
@@ -572,7 +580,7 @@ def streaming_quantize(
         def _quantize_and_write(out_prefix, hf_name, k_val):
             """Load, pad, quantize one projection, write packed/absmax/codebook."""
             weight = _load_hf(hf_name).to(device)
-            N, K_dim = weight.shape
+            N, _K_dim = weight.shape
             N_padded = ((N + 127) // 128) * 128
             if N_padded != N:
                 w = torch.nn.functional.pad(weight.float(), (0, 0, 0, N_padded - N))
@@ -580,9 +588,7 @@ def streaming_quantize(
                 w = weight.float()
             del weight
 
-            packed, absmax, codebook = F.quantize_kbit(
-                w.reshape(-1), k=k_val, absmax_format="fp32"
-            )
+            packed, absmax, codebook = F.quantize_kbit(w.reshape(-1), k=k_val, absmax_format="fp32")
             del w
 
             _write(f"{out_prefix}.packed", packed)
@@ -622,7 +628,8 @@ def streaming_quantize(
                         ("shared_down_proj", arch.down_proj),
                     ]:
                         _quantize_and_write(
-                            f"{pfx}.moe.{name}", _hf_shared_expert(i, attr),
+                            f"{pfx}.moe.{name}",
+                            _hf_shared_expert(i, attr),
                             k_shared_expert,
                         )
 
@@ -634,16 +641,14 @@ def streaming_quantize(
 
                     for e in range(arch.num_experts):
                         w = _load_hf(_hf_expert(i, e, attr)).to(device)
-                        N, K_dim = w.shape
+                        N, _K_dim = w.shape
                         N_padded = ((N + 127) // 128) * 128
                         if N_padded != N:
                             w = torch.nn.functional.pad(w.float(), (0, 0, 0, N_padded - N))
                         else:
                             w = w.float()
 
-                        packed, absmax, codebook = F.quantize_kbit(
-                            w.reshape(-1), k=k_experts, absmax_format="fp32"
-                        )
+                        packed, absmax, codebook = F.quantize_kbit(w.reshape(-1), k=k_experts, absmax_format="fp32")
                         del w
 
                         all_packed.append(packed.cpu())
@@ -669,9 +674,7 @@ def streaming_quantize(
 
             # Norms
             _copy_and_write(f"{pfx}.input_layernorm.weight", _hf_norm(i, arch.input_norm))
-            _copy_and_write(
-                f"{pfx}.post_attention_layernorm.weight", _hf_norm(i, arch.post_attn_norm)
-            )
+            _copy_and_write(f"{pfx}.post_attention_layernorm.weight", _hf_norm(i, arch.post_attn_norm))
 
             if arch.has_qk_norm:
                 _copy_and_write(f"{pfx}.q_norm.weight", _hf_qk_norm(i, arch.q_norm))

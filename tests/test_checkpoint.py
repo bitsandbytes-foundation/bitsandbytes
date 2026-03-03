@@ -6,7 +6,7 @@ import tempfile
 import pytest
 import torch
 
-from bitsandbytes.checkpoint import save_quantized, save_lora, load_lora
+from bitsandbytes.checkpoint import load_lora, save_lora, save_quantized
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 
@@ -35,14 +35,18 @@ def kbit_model():
 
     model = _make_tiny_dense_model()
     return KbitLoraModel(
-        model, lora_r=4, lora_alpha=8.0, k=4,
-        attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+        model,
+        lora_r=4,
+        lora_alpha=8.0,
+        k=4,
+        attn_chunk_size=64,
+        mlp_chunk_size=64,
+        ce_chunk_size=256,
         compute_dtype=torch.bfloat16,
     )
 
 
 class TestSaveQuantized:
-
     def test_save_creates_file(self, kbit_model):
         with tempfile.NamedTemporaryFile(suffix=".safetensors", delete=False) as f:
             path = f.name
@@ -67,8 +71,9 @@ class TestSaveQuantized:
             # All layer.0.* should come before layer.1.*
             layer_0_last = max(i for i, k in enumerate(keys) if k.startswith("layer.0."))
             layer_1_first = min(i for i, k in enumerate(keys) if k.startswith("layer.1."))
-            assert layer_0_last < layer_1_first, \
+            assert layer_0_last < layer_1_first, (
                 f"Layer 0 tensors should precede layer 1: last L0={layer_0_last}, first L1={layer_1_first}"
+            )
         finally:
             os.unlink(path)
 
@@ -150,8 +155,12 @@ class TestFromQuantized:
         try:
             save_quantized(kbit_model, path)
             loaded = KbitLoraModel.from_quantized(
-                path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
                 compute_dtype=torch.bfloat16,
                 weight_streaming=False,
                 target_device=torch.device("cuda:0"),
@@ -162,14 +171,13 @@ class TestFromQuantized:
                 orig = kbit_model._layer_data[i]
                 load = loaded._layer_data[i]
 
-                for proj in ["q_proj", "k_proj", "v_proj", "o_proj",
-                             "gate_proj", "up_proj", "down_proj"]:
+                for proj in ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]:
                     if proj not in orig:
                         continue
                     for wk in ["packed", "absmax", "codebook"]:
-                        assert torch.equal(
-                            orig[proj][wk].cpu(), load[proj][wk].cpu()
-                        ), f"Layer {i} {proj}.{wk} mismatch"
+                        assert torch.equal(orig[proj][wk].cpu(), load[proj][wk].cpu()), (
+                            f"Layer {i} {proj}.{wk} mismatch"
+                        )
                     assert orig[proj]["N"] == load[proj]["N"]
                     assert orig[proj]["K"] == load[proj]["K"]
                     assert orig[proj]["N_padded"] == load[proj]["N_padded"]
@@ -205,8 +213,12 @@ class TestFromQuantized:
             save_lora(kbit_model, lora_path)
 
             loaded = KbitLoraModel.from_quantized(
-                path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
                 compute_dtype=torch.bfloat16,
                 weight_streaming=False,
                 target_device=torch.device("cuda:0"),
@@ -224,9 +236,9 @@ class TestFromQuantized:
                 orig_result = kbit_model(input_ids, labels=labels)
                 load_result = loaded(input_ids, labels=labels)
 
-            assert torch.allclose(
-                orig_result["loss"], load_result["loss"], atol=1e-5
-            ), f"Loss mismatch: {orig_result['loss'].item()} vs {load_result['loss'].item()}"
+            assert torch.allclose(orig_result["loss"], load_result["loss"], atol=1e-5), (
+                f"Loss mismatch: {orig_result['loss'].item()} vs {load_result['loss'].item()}"
+            )
         finally:
             os.unlink(path)
             os.unlink(lora_path)
@@ -240,8 +252,12 @@ class TestFromQuantized:
         try:
             save_quantized(kbit_model, path)
             loaded = KbitLoraModel.from_quantized(
-                path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
                 compute_dtype=torch.bfloat16,
                 weight_streaming=True,
                 target_device=torch.device("cuda:0"),
@@ -290,7 +306,9 @@ class TestFromQuantized:
         try:
             save_quantized(kbit_model, path)
             loaded = KbitLoraModel.from_quantized(
-                path, lora_r=4, lora_alpha=8.0,
+                path,
+                lora_r=4,
+                lora_alpha=8.0,
                 weight_streaming=False,
             )
 
@@ -339,10 +357,16 @@ class TestFromQuantizedMoE:
         model = model.to(torch.float16).cuda()
 
         return KbitLoraModel(
-            model, lora_r=4, lora_alpha=8.0, k=4,
+            model,
+            lora_r=4,
+            lora_alpha=8.0,
+            k=4,
             k_config={"attention": 4, "experts": 2},
-            attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-            compute_dtype=torch.bfloat16, expert_chunk_size=2,
+            attn_chunk_size=64,
+            mlp_chunk_size=64,
+            ce_chunk_size=256,
+            compute_dtype=torch.bfloat16,
+            expert_chunk_size=2,
         )
 
     def test_round_trip_moe_data_match(self, moe_model):
@@ -354,8 +378,12 @@ class TestFromQuantizedMoE:
         try:
             save_quantized(moe_model, path)
             loaded = KbitLoraModel.from_quantized(
-                path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
                 compute_dtype=torch.bfloat16,
                 weight_streaming=False,
             )
@@ -367,26 +395,20 @@ class TestFromQuantizedMoE:
                 # Attention projections
                 for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
                     for wk in ["packed", "absmax", "codebook"]:
-                        assert torch.equal(
-                            orig[proj][wk].cpu(), load[proj][wk].cpu()
-                        ), f"Layer {i} {proj}.{wk} mismatch"
+                        assert torch.equal(orig[proj][wk].cpu(), load[proj][wk].cpu()), (
+                            f"Layer {i} {proj}.{wk} mismatch"
+                        )
 
                 # MoE fields
                 assert load.get("is_moe") is True
-                assert torch.equal(
-                    orig["router_weight"].cpu(), load["router_weight"].cpu()
-                )
+                assert torch.equal(orig["router_weight"].cpu(), load["router_weight"].cpu())
 
                 # Expert concatenated weights
                 for expert_proj in ["gate", "up", "down"]:
                     for suffix in ["packed", "absmax"]:
                         key = f"expert_{expert_proj}_{suffix}"
-                        assert torch.equal(
-                            orig[key].cpu(), load[key].cpu()
-                        ), f"Layer {i} {key} mismatch"
-                assert torch.equal(
-                    orig["expert_codebook"].cpu(), load["expert_codebook"].cpu()
-                )
+                        assert torch.equal(orig[key].cpu(), load[key].cpu()), f"Layer {i} {key} mismatch"
+                assert torch.equal(orig["expert_codebook"].cpu(), load["expert_codebook"].cpu())
                 assert orig["expert_k"] == load["expert_k"]
                 assert orig["expert_N"] == load["expert_N"]
                 assert orig["expert_K"] == load["expert_K"]
@@ -403,8 +425,12 @@ class TestFromQuantizedMoE:
         try:
             save_quantized(moe_model, path)
             loaded = KbitLoraModel.from_quantized(
-                path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
                 compute_dtype=torch.bfloat16,
                 weight_streaming=True,
             )
@@ -450,9 +476,15 @@ class TestPartialResidency:
         from bitsandbytes.kbit_lora import KbitLoraModel
 
         loaded = KbitLoraModel.from_quantized(
-            quantized_path, lora_r=4, lora_alpha=8.0,
-            attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-            weight_streaming=True, batch_size=1, seq_len=32,
+            quantized_path,
+            lora_r=4,
+            lora_alpha=8.0,
+            attn_chunk_size=64,
+            mlp_chunk_size=64,
+            ce_chunk_size=256,
+            weight_streaming=True,
+            batch_size=1,
+            seq_len=32,
         )
 
         # Tiny model fits entirely on GPU
@@ -467,20 +499,27 @@ class TestPartialResidency:
 
     def test_forced_partial_residency(self, quantized_path):
         """Monkey-patch _compute_residency to force partial split."""
-        from bitsandbytes.kbit_lora import KbitLoraModel
         from unittest.mock import patch
+
+        from bitsandbytes.kbit_lora import KbitLoraModel
 
         # Force only 1 of 2 layers to be resident
         with patch.object(KbitLoraModel, "_compute_residency", return_value=1):
             loaded = KbitLoraModel.from_quantized(
-                quantized_path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                weight_streaming=True, batch_size=1, seq_len=32,
+                quantized_path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
+                weight_streaming=True,
+                batch_size=1,
+                seq_len=32,
             )
 
         assert loaded._n_resident == 1
         assert len(loaded._cpu_weights) == 1  # 1 layer streamed
-        assert len(loaded._gpu_slots) == 2    # double buffer allocated
+        assert len(loaded._gpu_slots) == 2  # double buffer allocated
 
         # Layer 0: resident, weights on GPU
         for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
@@ -495,15 +534,22 @@ class TestPartialResidency:
 
     def test_forced_partial_forward_backward(self, quantized_path):
         """Partial residency should produce correct forward/backward results."""
-        from bitsandbytes.kbit_lora import KbitLoraModel
         from unittest.mock import patch
+
+        from bitsandbytes.kbit_lora import KbitLoraModel
 
         # Force 1 resident + 1 streamed
         with patch.object(KbitLoraModel, "_compute_residency", return_value=1):
             model = KbitLoraModel.from_quantized(
-                quantized_path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                weight_streaming=True, batch_size=1, seq_len=32,
+                quantized_path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
+                weight_streaming=True,
+                batch_size=1,
+                seq_len=32,
             )
 
         model.train()
@@ -524,14 +570,21 @@ class TestPartialResidency:
 
     def test_zero_resident_streaming(self, quantized_path):
         """Force 0 resident layers — everything streamed."""
-        from bitsandbytes.kbit_lora import KbitLoraModel
         from unittest.mock import patch
+
+        from bitsandbytes.kbit_lora import KbitLoraModel
 
         with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
             model = KbitLoraModel.from_quantized(
-                quantized_path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                weight_streaming=True, batch_size=1, seq_len=32,
+                quantized_path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
+                weight_streaming=True,
+                batch_size=1,
+                seq_len=32,
             )
 
         assert model._n_resident == 0
@@ -551,17 +604,24 @@ class TestPartialResidency:
 
     def test_partial_vs_full_resident_gradient_match(self, quantized_path):
         """Partial residency must give same gradients as fully resident."""
-        from bitsandbytes.kbit_lora import KbitLoraModel
         from unittest.mock import patch
+
+        from bitsandbytes.kbit_lora import KbitLoraModel
 
         def _run_fwd_bwd(n_resident):
             # Same seed for LoRA initialization
             torch.manual_seed(123)
             with patch.object(KbitLoraModel, "_compute_residency", return_value=n_resident):
                 m = KbitLoraModel.from_quantized(
-                    quantized_path, lora_r=4, lora_alpha=8.0,
-                    attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                    weight_streaming=True, batch_size=1, seq_len=32,
+                    quantized_path,
+                    lora_r=4,
+                    lora_alpha=8.0,
+                    attn_chunk_size=64,
+                    mlp_chunk_size=64,
+                    ce_chunk_size=256,
+                    weight_streaming=True,
+                    batch_size=1,
+                    seq_len=32,
                 )
             m.train()
             torch.manual_seed(42)
@@ -583,9 +643,7 @@ class TestPartialResidency:
         )
 
         for name in grads_full:
-            assert torch.allclose(grads_full[name], grads_part[name], atol=1e-4), (
-                f"Gradient mismatch for {name}"
-            )
+            assert torch.allclose(grads_full[name], grads_part[name], atol=1e-4), f"Gradient mismatch for {name}"
 
 
 class TestRAMStrategy:
@@ -602,15 +660,22 @@ class TestRAMStrategy:
 
     def test_default_pinned_with_enough_ram(self, quantized_path):
         """With plenty of RAM, strategy should be 'pinned'."""
-        from bitsandbytes.kbit_lora import KbitLoraModel
         from unittest.mock import patch
+
+        from bitsandbytes.kbit_lora import KbitLoraModel
 
         # Force 0 resident to exercise streaming, with plenty of RAM
         with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
             m = KbitLoraModel.from_quantized(
-                quantized_path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                weight_streaming=True, batch_size=1, seq_len=32,
+                quantized_path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
+                weight_streaming=True,
+                batch_size=1,
+                seq_len=32,
             )
 
         assert m._ram_strategy == "pinned"
@@ -622,16 +687,25 @@ class TestRAMStrategy:
 
     def test_mmap_with_low_ram(self, quantized_path):
         """With very low RAM, strategy should be 'mmap'."""
-        from bitsandbytes.kbit_lora import KbitLoraModel, get_available_ram_bytes
         from unittest.mock import patch
 
+        from bitsandbytes.kbit_lora import KbitLoraModel
+
         # Force 0 resident and very low available RAM (1 byte)
-        with patch.object(KbitLoraModel, "_compute_residency", return_value=0), \
-             patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=1):
+        with (
+            patch.object(KbitLoraModel, "_compute_residency", return_value=0),
+            patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=1),
+        ):
             m = KbitLoraModel.from_quantized(
-                quantized_path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                weight_streaming=True, batch_size=1, seq_len=32,
+                quantized_path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
+                weight_streaming=True,
+                batch_size=1,
+                seq_len=32,
             )
 
         assert m._ram_strategy == "mmap"
@@ -643,15 +717,22 @@ class TestRAMStrategy:
 
     def test_hybrid_with_limited_ram(self, quantized_path):
         """With limited RAM, strategy should be 'hybrid'."""
-        from bitsandbytes.kbit_lora import KbitLoraModel
-
         # First determine layer sizes to craft the right RAM value
         from unittest.mock import patch
+
+        from bitsandbytes.kbit_lora import KbitLoraModel
+
         with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
             m_probe = KbitLoraModel.from_quantized(
-                quantized_path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                weight_streaming=True, batch_size=1, seq_len=32,
+                quantized_path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
+                weight_streaming=True,
+                batch_size=1,
+                seq_len=32,
             )
 
         # Get size of 1 layer (all layers same size for this model)
@@ -664,12 +745,20 @@ class TestRAMStrategy:
         # Set RAM to 4GB headroom + 1.5 layers worth (enough for 1 layer but not 2)
         fake_ram = 4 * 1024**3 + int(layer_bytes * 1.5)
 
-        with patch.object(KbitLoraModel, "_compute_residency", return_value=0), \
-             patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=fake_ram):
+        with (
+            patch.object(KbitLoraModel, "_compute_residency", return_value=0),
+            patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=fake_ram),
+        ):
             m = KbitLoraModel.from_quantized(
-                quantized_path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                weight_streaming=True, batch_size=1, seq_len=32,
+                quantized_path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
+                weight_streaming=True,
+                batch_size=1,
+                seq_len=32,
             )
 
         assert m._ram_strategy == "hybrid"
@@ -677,21 +766,30 @@ class TestRAMStrategy:
         assert len(m._staging_buffers) == 2
         # First layer pinned, second mmap
         assert m._cpu_weights[0] is not None  # pinned
-        assert m._cpu_weights[1] is None      # mmap
+        assert m._cpu_weights[1] is None  # mmap
 
     def test_mmap_forward_backward(self, quantized_path):
         """Mmap strategy should produce correct forward/backward."""
-        from bitsandbytes.kbit_lora import KbitLoraModel
         from unittest.mock import patch
+
+        from bitsandbytes.kbit_lora import KbitLoraModel
 
         # Force mmap for all layers
         torch.manual_seed(123)
-        with patch.object(KbitLoraModel, "_compute_residency", return_value=0), \
-             patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=1):
+        with (
+            patch.object(KbitLoraModel, "_compute_residency", return_value=0),
+            patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=1),
+        ):
             m = KbitLoraModel.from_quantized(
-                quantized_path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                weight_streaming=True, batch_size=1, seq_len=32,
+                quantized_path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
+                weight_streaming=True,
+                batch_size=1,
+                seq_len=32,
             )
 
         m.train()
@@ -707,15 +805,22 @@ class TestRAMStrategy:
 
     def test_hybrid_forward_backward(self, quantized_path):
         """Hybrid strategy should produce correct forward/backward."""
-        from bitsandbytes.kbit_lora import KbitLoraModel
         from unittest.mock import patch
+
+        from bitsandbytes.kbit_lora import KbitLoraModel
 
         # First get layer size
         with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
             m_probe = KbitLoraModel.from_quantized(
-                quantized_path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                weight_streaming=True, batch_size=1, seq_len=32,
+                quantized_path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
+                weight_streaming=True,
+                batch_size=1,
+                seq_len=32,
             )
         layer_bytes = sum(
             (sum(t.nbytes for t in v.values()) if isinstance(v, dict) else v.nbytes)
@@ -724,12 +829,20 @@ class TestRAMStrategy:
         fake_ram = 4 * 1024**3 + int(layer_bytes * 1.5)
 
         torch.manual_seed(123)
-        with patch.object(KbitLoraModel, "_compute_residency", return_value=0), \
-             patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=fake_ram):
+        with (
+            patch.object(KbitLoraModel, "_compute_residency", return_value=0),
+            patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=fake_ram),
+        ):
             m = KbitLoraModel.from_quantized(
-                quantized_path, lora_r=4, lora_alpha=8.0,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                weight_streaming=True, batch_size=1, seq_len=32,
+                quantized_path,
+                lora_r=4,
+                lora_alpha=8.0,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
+                weight_streaming=True,
+                batch_size=1,
+                seq_len=32,
             )
 
         assert m._ram_strategy == "hybrid"
@@ -746,24 +859,29 @@ class TestRAMStrategy:
 
     def test_mmap_matches_pinned_gradients(self, quantized_path):
         """Mmap strategy should produce same gradients as pinned."""
-        from bitsandbytes.kbit_lora import KbitLoraModel
         from unittest.mock import patch
+
+        from bitsandbytes.kbit_lora import KbitLoraModel
 
         def _run(strategy_ram):
             torch.manual_seed(123)
             patches = [patch.object(KbitLoraModel, "_compute_residency", return_value=0)]
             if strategy_ram is not None:
-                patches.append(
-                    patch("bitsandbytes.kbit_lora.get_available_ram_bytes",
-                          return_value=strategy_ram)
-                )
-            with patches[0] if len(patches) == 1 else patches[0], \
-                 (patches[1] if len(patches) > 1 else patch.object(
-                     KbitLoraModel, "_compute_residency", return_value=0)):
+                patches.append(patch("bitsandbytes.kbit_lora.get_available_ram_bytes", return_value=strategy_ram))
+            with (
+                patches[0] if len(patches) == 1 else patches[0],
+                patches[1] if len(patches) > 1 else patch.object(KbitLoraModel, "_compute_residency", return_value=0),
+            ):
                 m = KbitLoraModel.from_quantized(
-                    quantized_path, lora_r=4, lora_alpha=8.0,
-                    attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
-                    weight_streaming=True, batch_size=1, seq_len=32,
+                    quantized_path,
+                    lora_r=4,
+                    lora_alpha=8.0,
+                    attn_chunk_size=64,
+                    mlp_chunk_size=64,
+                    ce_chunk_size=256,
+                    weight_streaming=True,
+                    batch_size=1,
+                    seq_len=32,
                 )
             m.train()
             torch.manual_seed(42)
@@ -782,9 +900,7 @@ class TestRAMStrategy:
 
         assert torch.allclose(loss_pinned, loss_mmap, atol=1e-5)
         for name in grads_pinned:
-            assert torch.allclose(grads_pinned[name], grads_mmap[name], atol=1e-4), (
-                f"Gradient mismatch for {name}"
-            )
+            assert torch.allclose(grads_pinned[name], grads_mmap[name], atol=1e-4), f"Gradient mismatch for {name}"
 
 
 class TestGDS:
@@ -806,12 +922,15 @@ class TestGDS:
     def test_gds_fallback_on_geforce(self, quantized_path):
         """On GeForce GPUs, use_gds=True should warn and fall back to CPU path."""
         import warnings
+
         from bitsandbytes.kbit_lora import KbitLoraModel
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             model = KbitLoraModel.from_quantized(
-                quantized_path, weight_streaming=True, use_gds=True,
+                quantized_path,
+                weight_streaming=True,
+                use_gds=True,
             )
         # Should warn about GDS fallback (GeForce detected)
         gds_warnings = [x for x in w if "GDS requested but not available" in str(x.message)]
@@ -825,12 +944,17 @@ class TestGDS:
     def test_gds_strategy_with_mock(self, quantized_path):
         """With mocked GDS support, strategy should be 'gds'."""
         from unittest.mock import patch
+
         from bitsandbytes.kbit_lora import KbitLoraModel
 
-        with patch.object(KbitLoraModel, "_detect_gds_support", return_value=True), \
-             patch.object(KbitLoraModel, "_compute_residency", return_value=0):
+        with (
+            patch.object(KbitLoraModel, "_detect_gds_support", return_value=True),
+            patch.object(KbitLoraModel, "_compute_residency", return_value=0),
+        ):
             model = KbitLoraModel.from_quantized(
-                quantized_path, weight_streaming=True, use_gds=True,
+                quantized_path,
+                weight_streaming=True,
+                use_gds=True,
             )
         assert model._use_gds
         assert model._ram_strategy == "gds"
@@ -844,12 +968,12 @@ class TestGDS:
                     # Nested projection: {packed: (off, size, shape, dtype), ...}
                     for wk, info in value.items():
                         assert len(info) == 4  # (offset, size, shape, dtype)
-                        offset, size, shape, dtype = info
+                        offset, size, _shape, _dtype = info
                         assert offset > 0
                         assert size > 0
                 else:
                     # Flat tensor: (offset, size, shape, dtype)
-                    offset, size, shape, dtype = value
+                    offset, size, _shape, _dtype = value
                     assert offset > 0
                     assert size > 0
         # GPU slots should be allocated
@@ -858,12 +982,17 @@ class TestGDS:
     def test_gds_forward_backward_compat_mode(self, quantized_path):
         """Test full GDS path using kvikio in compat mode (works on GeForce)."""
         from unittest.mock import patch
+
         from bitsandbytes.kbit_lora import KbitLoraModel
 
-        with patch.object(KbitLoraModel, "_detect_gds_support", return_value=True), \
-             patch.object(KbitLoraModel, "_compute_residency", return_value=0):
+        with (
+            patch.object(KbitLoraModel, "_detect_gds_support", return_value=True),
+            patch.object(KbitLoraModel, "_compute_residency", return_value=0),
+        ):
             model = KbitLoraModel.from_quantized(
-                quantized_path, weight_streaming=True, use_gds=True,
+                quantized_path,
+                weight_streaming=True,
+                use_gds=True,
             )
         assert model._ram_strategy == "gds"
 
@@ -885,20 +1014,27 @@ class TestGDS:
     def test_gds_matches_pinned_gradients(self, quantized_path):
         """GDS path should produce identical gradients as pinned path."""
         from unittest.mock import patch
+
         from bitsandbytes.kbit_lora import KbitLoraModel
 
         # Load with pinned (zero-resident to force streaming)
         torch.manual_seed(42)
         with patch.object(KbitLoraModel, "_compute_residency", return_value=0):
             model_pinned = KbitLoraModel.from_quantized(
-                quantized_path, weight_streaming=True, use_gds=False,
+                quantized_path,
+                weight_streaming=True,
+                use_gds=False,
             )
         # Load with GDS
         torch.manual_seed(42)
-        with patch.object(KbitLoraModel, "_detect_gds_support", return_value=True), \
-             patch.object(KbitLoraModel, "_compute_residency", return_value=0):
+        with (
+            patch.object(KbitLoraModel, "_detect_gds_support", return_value=True),
+            patch.object(KbitLoraModel, "_compute_residency", return_value=0),
+        ):
             model_gds = KbitLoraModel.from_quantized(
-                quantized_path, weight_streaming=True, use_gds=True,
+                quantized_path,
+                weight_streaming=True,
+                use_gds=True,
             )
 
         # Same forward + backward
@@ -913,9 +1049,9 @@ class TestGDS:
         model_gds.backward_streaming(ctx_g)
 
         # Loss should match
-        assert torch.allclose(
-            torch.tensor(loss_p.item()), torch.tensor(loss_g.item()), atol=1e-4
-        ), f"Loss mismatch: pinned={loss_p.item()}, gds={loss_g.item()}"
+        assert torch.allclose(torch.tensor(loss_p.item()), torch.tensor(loss_g.item()), atol=1e-4), (
+            f"Loss mismatch: pinned={loss_p.item()}, gds={loss_g.item()}"
+        )
 
         # Gradients should match
         grads_pinned = {
@@ -929,14 +1065,13 @@ class TestGDS:
             if param.grad is not None
         }
         for name in grads_pinned:
-            assert torch.allclose(grads_pinned[name], grads_gds[name], atol=1e-4), (
-                f"Gradient mismatch for {name}"
-            )
+            assert torch.allclose(grads_pinned[name], grads_gds[name], atol=1e-4), f"Gradient mismatch for {name}"
 
     def test_parse_safetensors_offsets(self, quantized_path):
         """Test that parse_safetensors_offsets correctly reads tensor metadata."""
-        from bitsandbytes.kbit_lora import parse_safetensors_offsets
         from safetensors import safe_open
+
+        from bitsandbytes.kbit_lora import parse_safetensors_offsets
 
         offsets = parse_safetensors_offsets(quantized_path)
         # Should have entries for all tensors
@@ -945,7 +1080,7 @@ class TestGDS:
         # Verify a few entries against safetensors API
         sf = safe_open(quantized_path, framework="pt", device="cpu")
         for name in list(offsets.keys())[:5]:
-            offset, size, shape, dtype = offsets[name]
+            _offset, size, shape, _dtype = offsets[name]
             tensor = sf.get_tensor(name)
             assert list(shape) == list(tensor.shape), f"Shape mismatch for {name}"
             assert size == tensor.nbytes, f"Size mismatch for {name}: {size} vs {tensor.nbytes}"
@@ -963,6 +1098,7 @@ class TestGDS:
             # if kvikio is installed
             try:
                 import kvikio  # noqa: F401
+
                 assert result is True, f"GDS should be supported on {gpu_name}"
             except ImportError:
                 assert result is False
@@ -973,9 +1109,10 @@ class TestStreamingQuantize:
 
     def test_dense_matches_in_memory(self):
         """Streaming quantize of dense model must match in-memory quantize."""
+        from safetensors import safe_open
+
         from bitsandbytes.checkpoint import streaming_quantize
         from bitsandbytes.kbit_lora import KbitLoraModel
-        from safetensors import safe_open
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create and save tiny model to disk
@@ -984,8 +1121,13 @@ class TestStreamingQuantize:
 
             # Path A: In-memory quantize → save_quantized
             kbit = KbitLoraModel(
-                model, lora_r=4, lora_alpha=8.0, k=4,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                model,
+                lora_r=4,
+                lora_alpha=8.0,
+                k=4,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
                 compute_dtype=torch.bfloat16,
             )
             path_a = os.path.join(tmpdir, "inmemory.safetensors")
@@ -995,7 +1137,9 @@ class TestStreamingQuantize:
             # Path B: Streaming quantize from saved model
             path_b = os.path.join(tmpdir, "streamed.safetensors")
             streaming_quantize(
-                os.path.join(tmpdir, "hf_model"), path_b, k=4,
+                os.path.join(tmpdir, "hf_model"),
+                path_b,
+                k=4,
             )
 
             # Compare all tensors
@@ -1015,17 +1159,23 @@ class TestStreamingQuantize:
 
     def test_dense_metadata_matches(self):
         """Streaming quantize metadata must match in-memory metadata."""
+        from safetensors import safe_open
+
         from bitsandbytes.checkpoint import streaming_quantize
         from bitsandbytes.kbit_lora import KbitLoraModel
-        from safetensors import safe_open
 
         with tempfile.TemporaryDirectory() as tmpdir:
             model = _make_tiny_dense_model()
             model.save_pretrained(os.path.join(tmpdir, "hf_model"))
 
             kbit = KbitLoraModel(
-                model, lora_r=4, lora_alpha=8.0, k=4,
-                attn_chunk_size=64, mlp_chunk_size=64, ce_chunk_size=256,
+                model,
+                lora_r=4,
+                lora_alpha=8.0,
+                k=4,
+                attn_chunk_size=64,
+                mlp_chunk_size=64,
+                ce_chunk_size=256,
                 compute_dtype=torch.bfloat16,
             )
             path_a = os.path.join(tmpdir, "inmemory.safetensors")
@@ -1041,21 +1191,29 @@ class TestStreamingQuantize:
             meta_b = sf_b.metadata()
 
             # Check key metadata fields match
-            for field in ["model_type", "hidden_size", "num_layers",
-                         "num_attention_heads", "num_key_value_heads", "head_dim",
-                         "intermediate_size", "vocab_size",
-                         "k_attention", "k_mlp", "k_lm_head",
-                         "is_moe", "has_qk_norm"]:
-                assert meta_a[field] == meta_b[field], \
-                    f"Metadata {field}: {meta_a[field]} vs {meta_b[field]}"
+            for field in [
+                "model_type",
+                "hidden_size",
+                "num_layers",
+                "num_attention_heads",
+                "num_key_value_heads",
+                "head_dim",
+                "intermediate_size",
+                "vocab_size",
+                "k_attention",
+                "k_mlp",
+                "k_lm_head",
+                "is_moe",
+                "has_qk_norm",
+            ]:
+                assert meta_a[field] == meta_b[field], f"Metadata {field}: {meta_a[field]} vs {meta_b[field]}"
 
             # Per-projection dims
             for i in range(2):
                 for proj in ["q_proj", "k_proj", "v_proj", "o_proj"]:
                     for dim in ["N", "K", "N_padded", "k"]:
                         key = f"layer.{i}.attn.{proj}.{dim}"
-                        assert meta_a[key] == meta_b[key], \
-                            f"Metadata {key}: {meta_a[key]} vs {meta_b[key]}"
+                        assert meta_a[key] == meta_b[key], f"Metadata {key}: {meta_a[key]} vs {meta_b[key]}"
 
     def test_streamed_loadable_by_from_quantized(self):
         """Output of streaming_quantize should be loadable by from_quantized."""
@@ -1071,7 +1229,9 @@ class TestStreamingQuantize:
             streaming_quantize(os.path.join(tmpdir, "hf_model"), path, k=4)
 
             loaded = KbitLoraModel.from_quantized(
-                path, lora_r=4, lora_alpha=8.0,
+                path,
+                lora_r=4,
+                lora_alpha=8.0,
                 weight_streaming=False,
             )
 
@@ -1101,7 +1261,6 @@ class TestStreamingQuantize:
 
 
 class TestSaveLoadLora:
-
     def test_lora_round_trip(self, kbit_model):
         """Save LoRA, modify params, load LoRA, verify restoration."""
         with tempfile.NamedTemporaryFile(suffix=".safetensors", delete=False) as f:
@@ -1124,7 +1283,8 @@ class TestSaveLoadLora:
 
             # Verify restoration
             for name, param in kbit_model._lora_params.items():
-                assert torch.allclose(param.data, original_values[name].to(param.device)), \
+                assert torch.allclose(param.data, original_values[name].to(param.device)), (
                     f"LoRA param {name} not restored correctly"
+                )
         finally:
             os.unlink(path)
