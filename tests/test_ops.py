@@ -174,6 +174,32 @@ class Test4bitBlockwiseQuantOps:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [64, 128, 256])
+    def test_quantize_4bit_not_divisible_by_blocksize(self, device, dtype, quant_type, blocksize):
+        """Test quantize/dequantize roundtrip when n_elements is not divisible by blocksize."""
+        # Shape chosen so numel is NOT divisible by blocksize
+        shape = (7, blocksize - 1)
+        A = torch.randn(shape, dtype=dtype, device=device)
+        storage_dtype = torch.uint8
+
+        # Should not raise
+        packed, absmax = torch.ops.bitsandbytes.quantize_4bit(A, blocksize, quant_type, storage_dtype)
+
+        assert packed.device == A.device
+        assert absmax.device == A.device
+
+        # Dequantize back and verify shape is preserved
+        out = torch.ops.bitsandbytes.dequantize_4bit(packed, absmax, blocksize, quant_type, shape, dtype)
+
+        assert out.shape == shape
+        assert out.dtype == dtype
+
+        # Verify output is finite (no NaN/Inf)
+        assert torch.isfinite(out).all(), "Dequantized output contains NaN or Inf"
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512] if not ROCM_WARP_SIZE_64 else [64, 128, 256, 512])
