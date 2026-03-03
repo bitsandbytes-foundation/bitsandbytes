@@ -659,10 +659,6 @@ def quantize_blockwise(
     # TODO(matthewdouglas): Deprecate out kwarg
     out = out.copy_(_out) if out is not None else _out
 
-    # TODO(matthewdouglas): Deprecate absmax kwarg
-    if absmax is not None:
-        quant_state.absmax = absmax.copy_(quant_state.absmax)
-
     return out, quant_state
 
 
@@ -928,10 +924,6 @@ def quantize_4bit(
 
     # TODO(matthewdouglas): Deprecate out kwarg
     out = out.copy_(_out) if out is not None else _out
-
-    # TODO(matthewdouglas): Deprecate absmax kwarg
-    if absmax is not None:
-        state.absmax = absmax.copy_(state.absmax)
 
     return out, state
 
