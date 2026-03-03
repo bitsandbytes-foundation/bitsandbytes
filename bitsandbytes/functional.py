@@ -1052,6 +1052,55 @@ def create_normal_float_codebook(k: int, device=None) -> torch.Tensor:
     return values
 
 
+# Precomputed VQ codebooks (k-means on N(0,1)^p, 256 entries, normalized to [-1,1]).
+# Generated with: scipy.cluster.vq.kmeans2(samples, 256, iter=100, minit='++', seed=42)
+# Stored as base64-encoded fp16 bytes for instant loading.
+_VQ_CODEBOOK_P2_B64 = "NzXnM96yD7GjrTkzIysVsGq5WDaytGgygzKjL0sw87MrNnC55LD2OIevyLNcuECt5TCaMDI0FjP8M0IxCyRaI4komrW8Mean/bRuq2wtuKo1KdAvA6cXtXC4/jTULWu3uzSqNjs2mKmKrbyiCCN9NC4tbC1zNPGkR7RrNB+txLg6MgM1uak0sK8oDzOPsEQwAzi+L5a27DFqtHex4LXaLJCxTilSNnm0fSybMXktbjabtNEqITC3NOWzRbdyNOc0prAbtYWxK7QZM5Yh8LYdNmAwtC3PsSU4OjcisBKoJrTRsQMuBbevsGCy76D+skAz/yOqNd21crgdtrS2czJDsCg1qKtOqJq3LaTcKV01iyLSN+4yWjRfseCqiaotNM60UzD/OTY1ZjF6NiIxxLTqOAO2j62GpNUyxTf4KAw0dbP8rqo077OfNW8uTjCBray2OTGYJLsw+7E5pSq2XLLJMEC5szH5r3otqbM5LlE1PrVSrzmyATnLtHs1vC2wtpOz5CgfrZOwU5/CpIOtiTORqlI3GDXhOPQxCbi+MXG5DLLrrDOuXSYtNwM6PzSbKJmxiC10svgwxDMWuA24EzMvuda0QS+gMCW14alkNrI4CigFMak4RbhQOD215iHHsMAzzDfrtC+vDqtvK9cofbS7tGUwsDVMr4IouCkJpj+3UbVRq0w49y3ptYkvTzIetwas47HhNJCxirIkLQk0srijtQiyCjsXpQIulK36sJQ6S7UYMAWl2rLftSKtkLV1KOa2cjPpN52xVjYrt2c0ByzSs78pXzhitTg1TKxrLP6lorG5MA+wxDBttr0mXriatdEzYSEaszkyZrdnOP22T7Ftq142cyZGtNGjBzIAMroywrWGM38ssrT3tcMvtze7pk45yzVHNdQ3kTjKtZ+x1TIONKo2/C3VJZW0Cy5krtE0xDjgqTg0Hy8AvEg3u7IhteOv5jmAlHs08C7FMT8sACRvMXSw2bcmt+YtBDYSr2svVinjMsSxJrjSsso1GbhNOBCt2SauLGWvuDVAGqypJjQcuAe0LjFxOFWya7P6KNmwVLZcNqQzNrbuGGQz+TUNMlqzey0Hl0ezN6szsRkyaTG/NgKqNjVtuIkskC28tAsyQK0ftLWumTZPtlMwdrjksNWwOLmDnsWr5LIfNImuyqt0JVY386gfNYizTDCMrDMynbQjsr+u07UCOKe1zjAgKbK55K6QMYMu57Bxsz6zfDjXNYmkYDCzszk3+rRos8003TpXHR+wiDQdKf+0oDblrKYv2qqUMaO3diCYNFu2hywiNXI2OzcdsN6uHjnTrrOm76BEs3C4VK46N4uzjLkTNSGwe62JtPeyurTdNfKxx7XWtA=="
+_VQ_CODEBOOK_P4_B64 = "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"
+
+# Cache for precomputed VQ codebooks (p -> Tensor on each device)
+_vq_codebook_cache: dict[tuple[int, torch.device], torch.Tensor] = {}
+
+
+def create_vq_codebook(p: int, device=None) -> torch.Tensor:
+    """Create a 256-entry VQ codebook for p-dimensional standard Gaussian vectors.
+
+    Returns a precomputed codebook trained via k-means on N(0,1)^p samples.
+    Each entry is a p-dimensional vector normalized so that the maximum absolute
+    component across all entries is 1.0.
+
+    Args:
+        p: VQ dimension (2 or 4). Each 8-bit index maps to p weight values.
+        device: Target device. Defaults to "cuda".
+
+    Returns:
+        Float16 tensor of shape (256, p) with values in [-1, 1].
+    """
+    import base64
+
+    if device is None:
+        device = torch.device("cuda")
+    device = torch.device(device)
+
+    cache_key = (p, device)
+    if cache_key in _vq_codebook_cache:
+        return _vq_codebook_cache[cache_key]
+
+    if p == 2:
+        b64_data = _VQ_CODEBOOK_P2_B64
+    elif p == 4:
+        b64_data = _VQ_CODEBOOK_P4_B64
+    else:
+        raise ValueError(f"VQ codebook only supports p=2 or p=4, got p={p}")
+
+    raw = base64.b64decode(b64_data)
+    codebook = torch.frombuffer(bytearray(raw), dtype=torch.float16).reshape(256, p).clone()
+    codebook = codebook.to(device)
+
+    _vq_codebook_cache[cache_key] = codebook
+    return codebook
+
+
 def encode_absmax_e4m4(absmax: Tensor, bias: int = 11) -> Tensor:
     """Encode fp32 absmax values to uint8 using E4M4 micro-float format.
 
