@@ -338,3 +338,71 @@ def test_linear8bitlt_device_movement(device):
 
     # Accelerator outputs should match both times.
     torch.testing.assert_close(out_accelerator_2, out_accelerator, rtol=1e-8, atol=1e-8)
+
+
+class TiedWeightModel(torch.nn.Module):
+    """A minimal model with tied weights between an embedding and lm_head, mimicking
+    architectures like OPT where lm_head.weight is shared with the embedding layer."""
+
+    def __init__(self, vocab_size, hidden_dim):
+        super().__init__()
+        self.embed_tokens = torch.nn.Embedding(vocab_size, hidden_dim)
+        self.q_proj = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.v_proj = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.out_proj = torch.nn.Linear(hidden_dim, hidden_dim)
+        self.lm_head = torch.nn.Linear(hidden_dim, vocab_size, bias=False)
+        # Tie weights
+        self.lm_head.weight = self.embed_tokens.weight
+
+    def forward(self, x):
+        h = self.embed_tokens(x)
+        h = self.out_proj(self.q_proj(h) + self.v_proj(h))
+        return self.lm_head(h)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+def test_linear8bitlt_tied_weights_no_crash(device):
+    """Test that Linear8bitLt gracefully handles tied weights (issue #1634).
+
+    When lm_head is replaced with Linear8bitLt but its weight is tied to
+    an embedding layer, the weight becomes a regular Parameter instead of
+    Int8Params. The forward pass should still work via F.linear fallback.
+    """
+    vocab_size, hidden_dim = 32, 64
+    model = TiedWeightModel(vocab_size, hidden_dim)
+
+    skip_modules = ["q_proj", "v_proj"]
+
+    # Replace non-skipped linear layers with Linear8bitLt (simulating what
+    # HuggingFace transformers does with llm_int8_skip_modules)
+    from bitsandbytes.utils import replace_linear
+
+    model = replace_linear(
+        model,
+        lambda inf, outf, bias: Linear8bitLt(inf, outf, bias=bias, has_fp16_weights=False),
+        skip_modules=skip_modules,
+        copy_weights=True,
+    )
+
+    # Re-tie weights (as transformers does after module replacement)
+    model.lm_head.weight = model.embed_tokens.weight
+
+    model = model.to(device)
+
+    # Verify: skipped modules remain nn.Linear
+    assert type(model.q_proj) is torch.nn.Linear, "q_proj should remain nn.Linear"
+    assert type(model.v_proj) is torch.nn.Linear, "v_proj should remain nn.Linear"
+
+    # Verify: non-skipped, non-tied modules are Linear8bitLt
+    assert isinstance(model.out_proj, Linear8bitLt), "out_proj should be Linear8bitLt"
+
+    # Verify: lm_head is Linear8bitLt but with a regular Parameter (from tying)
+    assert isinstance(model.lm_head, Linear8bitLt), "lm_head should be Linear8bitLt"
+    assert not isinstance(model.lm_head.weight, bnb.nn.Int8Params), (
+        "lm_head.weight should be a regular Parameter due to tying"
+    )
+
+    # Forward pass should NOT crash (this was the bug in issue #1634)
+    x = torch.randint(0, vocab_size, (2, 8), device=device)
+    output = model(x)
+    assert output.shape == (2, 8, vocab_size)
