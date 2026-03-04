@@ -654,3 +654,279 @@ extern "C" void cgemm_nvfp4_bf16_splitk(
 
     launch_gemm_nvfp4<__nv_bfloat16>(A, B, SFA, SFB, D, workspace, M, N, K, split_k, stream);
 }
+
+// ============================================================================
+// Grouped NVFP4 GEMM for MoE inference
+//
+// Fuses all expert GEMMs into a single kernel launch. Each threadblock
+// handles one (m_tile, n_tile) for one expert, determined by linear
+// blockIdx.x decomposition over a precomputed cumulative m-tile table.
+//
+// A_concat:     [total_tokens, K/2]    -- all expert activations concatenated
+// B_all:        [num_experts * N, K/2] -- per-expert weights stacked
+// SFA_concat:   [total_tokens, K/16]   -- per-token activation scales
+// SFB_all:      [num_experts * N, K/16]-- per-expert weight scales stacked
+// D_concat:     [total_tokens, N]      -- output (pre-allocated)
+// expert_offsets:[num_experts+1]        -- cumulative token offsets (int32)
+// cumul_m_tiles:[num_experts+1]         -- cumulative m-tile counts (int32)
+//
+// No split-K: expert parallelism provides sufficient tile count.
+// CUDA-graph-safe: no dynamic allocations or cudaMemset.
+// ============================================================================
+
+template <typename OutT>
+__global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGroupedGemmNVFP4_smem(
+    const unsigned char* __restrict__ A_concat,
+    const unsigned char* __restrict__ B_all,
+    const unsigned char* __restrict__ SFA_concat,
+    const unsigned char* __restrict__ SFB_all,
+    OutT* __restrict__ D_concat,
+    const int* __restrict__ expert_offsets,
+    const int* __restrict__ cumul_m_tiles,
+    int N, int K, int num_experts
+) {
+    int tile_idx = blockIdx.x;
+    int num_n_tiles = (N + BLOCK_N_DIM - 1) / BLOCK_N_DIM;
+    int m_tile_global = tile_idx / num_n_tiles;
+    int n_tile = tile_idx % num_n_tiles;
+
+    // Binary search for expert owning this m_tile_global
+    int lo = 0, hi = num_experts;
+    while (lo < hi) {
+        int mid = (lo + hi) / 2;
+        if (cumul_m_tiles[mid + 1] <= m_tile_global)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    int expert = lo;
+    if (expert >= num_experts) return;
+
+    int local_m_tile = m_tile_global - cumul_m_tiles[expert];
+    int expert_M = expert_offsets[expert + 1] - expert_offsets[expert];
+    if (expert_M <= 0) return;
+
+    int row_offset = expert_offsets[expert];
+    int half_K = K / 2;
+    int scale_K = K / 16;
+
+    // Point to this expert's data
+    const unsigned char* A   = A_concat   + (size_t)row_offset * half_K;
+    const unsigned char* SFA = SFA_concat + (size_t)row_offset * scale_K;
+    const unsigned char* B   = B_all      + (size_t)expert * N * half_K;
+    const unsigned char* SFB = SFB_all    + (size_t)expert * N * scale_K;
+    OutT*                D   = D_concat   + (size_t)row_offset * N;
+    int M = expert_M;
+
+    // --- Standard tile GEMM (same logic as kGemmNVFP4_smem, no split-K) ---
+    __shared__ __align__(16) unsigned char smem[SMEM_TOTAL];
+    unsigned char* smem_A   = smem;
+    unsigned char* smem_B   = smem + SMEM_A_BYTES;
+    unsigned char* smem_SFA = smem + SMEM_A_BYTES + SMEM_B_BYTES;
+    unsigned char* smem_SFB = smem + SMEM_A_BYTES + SMEM_B_BYTES + SMEM_SFA_BYTES;
+
+    const int tid = threadIdx.x;
+    const int warp_in_block = tid / 32;
+    const int lane_id = tid % 32;
+    const int m_warp = warp_in_block / N_WARPS;
+    const int n_warp = warp_in_block % N_WARPS;
+
+    const int block_m = local_m_tile * BLOCK_M_DIM;
+    const int block_n = n_tile * BLOCK_N_DIM;
+    const int tile_m = block_m + m_warp * 16;
+    const int warp_n_base = block_n + n_warp * N_TILES_PER_WARP * 8;
+
+    const int t0 = lane_id % 4;
+    const int t1 = lane_id / 4;
+
+    float acc[N_TILES_PER_WARP][4];
+    #pragma unroll
+    for (int nt = 0; nt < N_TILES_PER_WARP; nt++) {
+        acc[nt][0] = acc[nt][1] = acc[nt][2] = acc[nt][3] = 0.0f;
+    }
+
+    const int a_local_row0 = m_warp * 16 + 2 * t1;
+    const int a_local_row1 = a_local_row0 + 1;
+    const int sf_tidx = (lane_id % 2) * 8 + (lane_id / 4);
+    const int cute_sf_m0 = sf_tidx % 16;
+    const int sfa_local_row = m_warp * 16 + (cute_sf_m0 % 8) * 2 + cute_sf_m0 / 8;
+
+    const int a_off = tid * 4;
+    const int a_load_row = a_off >> 5;
+    const int a_load_col = a_off & 31;
+    const int a_gm = block_m + a_load_row;
+
+    const int b_off = tid * 16;
+    const int b_load_row = b_off >> 5;
+    const int b_load_col = b_off & 31;
+    const int b_gn = block_n + b_load_row;
+
+    const bool a_gm_ok = (a_gm < M);
+    const bool b_gn_ok = (b_gn < N);
+    const int a_row_base = a_gm * half_K;
+    const int b_row_base = b_gn * half_K;
+
+    // Pipeline registers
+    uint32_t pipe_a = 0;
+    uint4 pipe_b = make_uint4(0, 0, 0, 0);
+    uint32_t pipe_sfa = 0, pipe_sfb = 0;
+
+    // --- Pipelined K-loop with inlined load/store/compute ---
+
+    // Load helper
+    auto do_load = [&](int k_byte, int k_scale) {
+        pipe_a = 0;
+        if (a_gm_ok) {
+            int ga = a_row_base + k_byte + a_load_col;
+            if (k_byte + a_load_col + 3 < half_K)
+                pipe_a = *(const uint32_t*)(A + ga);
+            else
+                for (int i = 0; i < 4; i++)
+                    if (k_byte + a_load_col + i < half_K)
+                        pipe_a |= ((uint32_t)A[ga + i]) << (i * 8);
+        }
+        if (b_gn_ok) {
+            int gb = b_row_base + k_byte + b_load_col;
+            if (k_byte + b_load_col + 15 < half_K) {
+                uint4 bv = *(const uint4*)(B + gb);
+                pipe_b.x = bv.x; pipe_b.y = bv.y; pipe_b.z = bv.z; pipe_b.w = bv.w;
+            } else {
+                unsigned char buf[16] = {};
+                for (int i = 0; i < 16; i++)
+                    if (k_byte + b_load_col + i < half_K) buf[i] = B[gb + i];
+                pipe_b = *(uint4*)buf;
+            }
+        } else { pipe_b = make_uint4(0, 0, 0, 0); }
+
+        pipe_sfa = 0;
+        if (tid < BLOCK_M_DIM) {
+            int gm = block_m + tid;
+            if (gm < M) {
+                int bs = gm * scale_K + k_scale;
+                if (k_scale + 3 < scale_K)
+                    pipe_sfa = *(const uint32_t*)(SFA + bs);
+                else
+                    for (int i = 0; i < 4; i++)
+                        if (k_scale + i < scale_K)
+                            pipe_sfa |= ((uint32_t)SFA[bs + i]) << (i * 8);
+            }
+        }
+        pipe_sfb = 0;
+        if (tid < BLOCK_N_DIM) {
+            int gn = block_n + tid;
+            if (gn < N) {
+                int bs = gn * scale_K + k_scale;
+                if (k_scale + 3 < scale_K)
+                    pipe_sfb = *(const uint32_t*)(SFB + bs);
+                else
+                    for (int i = 0; i < 4; i++)
+                        if (k_scale + i < scale_K)
+                            pipe_sfb |= ((uint32_t)SFB[bs + i]) << (i * 8);
+            }
+        }
+    };
+
+    auto do_store = [&]() {
+        *(uint32_t*)(smem_A + a_off) = pipe_a;
+        *(uint4*)(smem_B + b_off) = pipe_b;
+        if (tid < BLOCK_M_DIM) *(uint32_t*)(smem_SFA + tid * 4) = pipe_sfa;
+        if (tid < BLOCK_N_DIM) *(uint32_t*)(smem_SFB + tid * 4) = pipe_sfb;
+    };
+
+    auto do_compute = [&]() {
+        uint32_t ar[4];
+        ar[0] = *(const uint32_t*)(smem_A + a_local_row0 * 32 + t0 * 4);
+        ar[1] = *(const uint32_t*)(smem_A + a_local_row1 * 32 + t0 * 4);
+        ar[2] = *(const uint32_t*)(smem_A + a_local_row0 * 32 + t0 * 4 + 16);
+        ar[3] = *(const uint32_t*)(smem_A + a_local_row1 * 32 + t0 * 4 + 16);
+        uint32_t sf = *(const uint32_t*)(smem_SFA + sfa_local_row * 4);
+        #pragma unroll
+        for (int nt = 0; nt < N_TILES_PER_WARP; nt++) {
+            int ln = n_warp * N_TILES_PER_WARP * 8 + nt * 8;
+            int br = ln + t1;
+            uint32_t b0 = *(const uint32_t*)(smem_B + br * 32 + t0 * 4);
+            uint32_t b1 = *(const uint32_t*)(smem_B + br * 32 + t0 * 4 + 16);
+            uint32_t sb = *(const uint32_t*)(smem_SFB + (ln + t1) * 4);
+            mma_nvfp4_m16n8k64(
+                acc[nt][0], acc[nt][1], acc[nt][2], acc[nt][3],
+                ar[0], ar[1], ar[2], ar[3], b0, b1,
+                acc[nt][0], acc[nt][1], acc[nt][2], acc[nt][3], sf, sb
+            );
+        }
+    };
+
+    // Load first K-step
+    do_load(0, 0);
+    do_store();
+    __syncthreads();
+
+    for (int k_start = 0; k_start < K; k_start += 64) {
+        bool has_next = (k_start + 64 < K);
+        if (has_next) do_load((k_start + 64) / 2, (k_start + 64) / 16);
+        do_compute();
+        __syncthreads();
+        if (has_next) { do_store(); __syncthreads(); }
+    }
+
+    // Write output (no split-K, direct store)
+    int octet = lane_id / 4;
+    int quad = lane_id % 4;
+    int out_row0 = tile_m + octet * 2;
+    int out_row1 = out_row0 + 1;
+    int out_col_base = quad * 2;
+
+    #pragma unroll
+    for (int nt = 0; nt < N_TILES_PER_WARP; nt++) {
+        int this_tile_n = warp_n_base + nt * 8;
+        int c0 = this_tile_n + out_col_base;
+        int c1 = c0 + 1;
+        if (out_row0 < M && c0 < N) D[out_row0 * N + c0] = float_to_out<OutT>(acc[nt][0]);
+        if (out_row0 < M && c1 < N) D[out_row0 * N + c1] = float_to_out<OutT>(acc[nt][1]);
+        if (out_row1 < M && c0 < N) D[out_row1 * N + c0] = float_to_out<OutT>(acc[nt][2]);
+        if (out_row1 < M && c1 < N) D[out_row1 * N + c1] = float_to_out<OutT>(acc[nt][3]);
+    }
+}
+
+// ============================================================================
+// Grouped GEMM launchers
+// ============================================================================
+
+template <typename OutT>
+static void launch_grouped_gemm_nvfp4(
+    const unsigned char* A_concat, const unsigned char* B_all,
+    const unsigned char* SFA_concat, const unsigned char* SFB_all,
+    OutT* D_concat, const int* expert_offsets, const int* cumul_m_tiles,
+    int N, int K, int num_experts, int total_tiles,
+    cudaStream_t stream
+) {
+    int threads_per_block = WARPS_PER_BLOCK * 32;
+    dim3 grid(total_tiles, 1, 1);
+    kGroupedGemmNVFP4_smem<OutT><<<grid, threads_per_block, 0, stream>>>(
+        A_concat, B_all, SFA_concat, SFB_all, D_concat,
+        expert_offsets, cumul_m_tiles, N, K, num_experts
+    );
+}
+
+extern "C" void cgemm_nvfp4_grouped(
+    const unsigned char* A_concat, const unsigned char* B_all,
+    const unsigned char* SFA_concat, const unsigned char* SFB_all,
+    float* D_concat, const int* expert_offsets, const int* cumul_m_tiles,
+    int N, int K, int num_experts, int total_tiles, cudaStream_t stream
+) {
+    launch_grouped_gemm_nvfp4<float>(
+        A_concat, B_all, SFA_concat, SFB_all, D_concat,
+        expert_offsets, cumul_m_tiles, N, K, num_experts, total_tiles, stream
+    );
+}
+
+extern "C" void cgemm_nvfp4_grouped_bf16(
+    const unsigned char* A_concat, const unsigned char* B_all,
+    const unsigned char* SFA_concat, const unsigned char* SFB_all,
+    __nv_bfloat16* D_concat, const int* expert_offsets, const int* cumul_m_tiles,
+    int N, int K, int num_experts, int total_tiles, cudaStream_t stream
+) {
+    launch_grouped_gemm_nvfp4<__nv_bfloat16>(
+        A_concat, B_all, SFA_concat, SFB_all, D_concat,
+        expert_offsets, cumul_m_tiles, N, K, num_experts, total_tiles, stream
+    );
+}
