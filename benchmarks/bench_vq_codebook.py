@@ -1,12 +1,17 @@
-"""Benchmark: VQ codebook production kernels.
+"""Benchmark: VQ codebook production kernels (all 5 configs).
 
-Compares production VQ kernels against kbit baseline and cuBLAS:
-1. vq_scalar_gemv_tiled (M=1-4, p=2 and p=4)
-2. vq_gemm_prod MMA kernel (M=5-16, p=2 and p=4)
-3. dequant+cuBLAS fallback (M=32, p=2 and p=4)
-4. kbit_scalar_gemv_tiled (M=1-4, k=4 bit-plane baseline)
+Compares all (p, index_bits) VQ configs against kbit baseline and cuBLAS:
+1. vq_scalar_gemv_tiled (M=1, all 5 configs)
+2. vq_gemm_prod MMA kernel (M=5, 8, 16, all 5 configs)
+3. dequant+cuBLAS fallback (M=32, all 5 configs)
+4. kbit_scalar_gemv_tiled (M=1, k=4 bit-plane baseline)
 5. kbit_gemm_prod MMA (M=5-16, k=4)
 6. cuBLAS fp16 (dense baseline)
+
+VQ configs (ordered by bits/weight):
+  (4,8)  = 2.0 bits/wt     (3,8)  = 2.67 bits/wt
+  (3,10) = 3.33 bits/wt    (2,8)  = 4.0 bits/wt
+  (2,10) = 5.0 bits/wt
 
 Timing: CUDA graph capture + batched replay.
 Output: JSON results + human-readable tables.
@@ -19,6 +24,7 @@ Usage:
 
 import argparse
 import json
+import math
 import os
 import sys
 
@@ -35,7 +41,28 @@ from bitsandbytes.functional import (
 )
 
 
-# ---- Timing utility (CUDA graph replay, same as bench_hadamard.py) ----
+# ---- VQ config definitions ----
+
+VQ_CONFIGS = [
+    # (p, index_bits, bits_per_weight, label)
+    (4, 8,  2.00, "p4b8"),
+    (3, 8,  2.67, "p3b8"),
+    (3, 10, 3.33, "p3b10"),
+    (2, 8,  4.00, "p2b8"),
+    (2, 10, 5.00, "p2b10"),
+]
+
+
+def pad_k_for_config(K_dim, p, index_bits):
+    """Pad K_dim to multiple of BS for given VQ config."""
+    if p == 3:
+        BS = 48
+    else:
+        BS = 32
+    return math.ceil(K_dim / BS) * BS
+
+
+# ---- Timing utility (CUDA graph replay) ----
 
 def bench(fn, inner: int, outer: int) -> float:
     """Batched CUDA graph replay timing. Returns median us per iteration."""
@@ -75,13 +102,15 @@ def bench(fn, inner: int, outer: int) -> float:
 
 # ---- Weight preparation ----
 
-def prepare_vq_weights(K_dim, N, p, dtype=torch.float16):
+def prepare_vq_weights(K_dim, N, p, index_bits=8, dtype=torch.float16):
     """Quantize and repack random weights using production VQ kernels."""
     dev = torch.device("cuda")
-    codebook = create_vq_codebook(p, device=dev)
+    codebook = create_vq_codebook(p, device=dev, index_bits=index_bits)
     W = torch.randn(N, K_dim, dtype=dtype, device=dev)
-    packed_flat, absmax_flat, codebook = quantize_vq(W, p=p, codebook=codebook)
-    packed_tiled, absmax_tiled = repack_vq(packed_flat, absmax_flat, K_dim, N, p)
+    packed_flat, absmax_flat, codebook = quantize_vq(
+        W, p=p, codebook=codebook, index_bits=index_bits)
+    packed_tiled, absmax_tiled = repack_vq(
+        packed_flat, absmax_flat, K_dim, N, p, index_bits=index_bits)
     return packed_tiled, absmax_tiled, codebook, packed_flat, absmax_flat
 
 
@@ -110,58 +139,60 @@ QWEN3_SHAPES = [
 # ---- Benchmark functions ----
 
 def bench_scalar_gemv(inner, outer):
-    """Benchmark scalar GEMV at M=1 for p=2, p=4, kbit k=4, and cuBLAS."""
+    """Benchmark scalar GEMV at M=1 for all 5 VQ configs, kbit k=4, and cuBLAS."""
     results = []
 
-    print("=" * 80)
+    print("=" * 90)
     print("SCALAR GEMV (M=1)")
-    print("=" * 80)
-    print(f"{'Method':>18} {'K':>5} {'N':>5} {'Time(us)':>9} {'TFLOPS':>7}  Label")
-    print("-" * 65)
+    print("=" * 90)
+    print(f"{'Method':>18} {'bits':>5} {'K':>5} {'N':>5} {'Time(us)':>9} {'TFLOPS':>7}  Label")
+    print("-" * 75)
 
-    for K_dim, N, label in QWEN3_SHAPES:
+    for K_dim_orig, N, label in QWEN3_SHAPES:
         M = 1
-        A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
-        flops = 2 * M * K_dim * N
+        flops_orig = 2 * M * K_dim_orig * N
 
-        # VQ p=2 (4 bits/wt) scalar GEMV
-        pt2, at2, cb2, _, _ = prepare_vq_weights(K_dim, N, p=2)
-        out2 = torch.zeros(M, N, dtype=torch.float16, device="cuda")
-        t = bench(lambda: torch.ops.bitsandbytes.vq_scalar_gemv_tiled_(
-            A, pt2, at2, cb2, K_dim, N, 2, out2), inner, outer)
-        tflops = flops / (t / 1e6) / 1e12
-        print(f"{'vq_p2':>18} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
-        results.append(dict(method="vq_p2", kernel="scalar", M=M, K=K_dim,
-                            N=N, time_us=round(t, 3), tflops=round(tflops, 4), label=label))
-
-        # VQ p=4 (2 bits/wt) scalar GEMV
-        pt4, at4, cb4, _, _ = prepare_vq_weights(K_dim, N, p=4)
-        out4 = torch.zeros(M, N, dtype=torch.float16, device="cuda")
-        t = bench(lambda: torch.ops.bitsandbytes.vq_scalar_gemv_tiled_(
-            A, pt4, at4, cb4, K_dim, N, 4, out4), inner, outer)
-        tflops = flops / (t / 1e6) / 1e12
-        print(f"{'vq_p4':>18} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
-        results.append(dict(method="vq_p4", kernel="scalar", M=M, K=K_dim,
-                            N=N, time_us=round(t, 3), tflops=round(tflops, 4), label=label))
+        # All 5 VQ configs
+        for p, ib, bpw, cfg_name in VQ_CONFIGS:
+            K_dim = pad_k_for_config(K_dim_orig, p, ib)
+            A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
+            pt, at, cb, _, _ = prepare_vq_weights(K_dim, N, p=p, index_bits=ib)
+            out = torch.zeros(M, N, dtype=torch.float16, device="cuda")
+            t = bench(lambda: torch.ops.bitsandbytes.vq_scalar_gemv_tiled_(
+                A, pt, at, cb, K_dim, N, p, out, ib), inner, outer)
+            # Report TFLOPS based on original (unpadded) K for fair comparison
+            tflops = flops_orig / (t / 1e6) / 1e12
+            method = f"vq_{cfg_name}"
+            print(f"{method:>18} {bpw:>5.2f} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
+            results.append(dict(method=method, kernel="scalar", M=M,
+                                K=K_dim, K_orig=K_dim_orig, N=N,
+                                time_us=round(t, 3), tflops=round(tflops, 4),
+                                bits_per_wt=bpw, label=label))
 
         # Kbit k=4 scalar GEMV baseline
+        K_dim = K_dim_orig
+        A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
         pt_k, at_k, cb_k = prepare_kbit_weights(K_dim, N, k=4)
         out_k = torch.zeros(M, N, dtype=torch.float16, device="cuda")
         t = bench(lambda: torch.ops.bitsandbytes.kbit_scalar_gemv_tiled_(
             A, pt_k, at_k, cb_k, K_dim, N, 4, out_k), inner, outer)
-        tflops = flops / (t / 1e6) / 1e12
-        print(f"{'kbit_k4':>18} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
-        results.append(dict(method="kbit_k4", kernel="scalar", M=M, K=K_dim,
-                            N=N, time_us=round(t, 3), tflops=round(tflops, 4), label=label))
+        tflops = flops_orig / (t / 1e6) / 1e12
+        print(f"{'kbit_k4':>18} {'4.00':>5} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
+        results.append(dict(method="kbit_k4", kernel="scalar", M=M,
+                            K=K_dim, K_orig=K_dim_orig, N=N,
+                            time_us=round(t, 3), tflops=round(tflops, 4),
+                            bits_per_wt=4.0, label=label))
 
         # cuBLAS fp16 baseline
         W = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
         out_c = torch.empty(M, N, dtype=torch.float16, device="cuda")
         t = bench(lambda: torch.mm(A, W.t(), out=out_c), inner, outer)
-        tflops = flops / (t / 1e6) / 1e12
-        print(f"{'cublas_fp16':>18} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
-        results.append(dict(method="cublas_fp16", kernel="dense", M=M, K=K_dim,
-                            N=N, time_us=round(t, 3), tflops=round(tflops, 4), label=label))
+        tflops = flops_orig / (t / 1e6) / 1e12
+        print(f"{'cublas_fp16':>18} {'16.0':>5} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
+        results.append(dict(method="cublas_fp16", kernel="dense", M=M,
+                            K=K_dim, K_orig=K_dim_orig, N=N,
+                            time_us=round(t, 3), tflops=round(tflops, 4),
+                            bits_per_wt=16.0, label=label))
 
         print()
 
@@ -169,65 +200,70 @@ def bench_scalar_gemv(inner, outer):
 
 
 def bench_mma(inner, outer):
-    """Benchmark MMA kernels at M=5, 8, 16 for VQ (p=2, p=4), kbit k=4, and cuBLAS."""
+    """Benchmark MMA kernels at M=5, 8, 16 for all VQ configs, kbit k=4, cuBLAS."""
     results = []
 
     m_vals = [5, 8, 16]
-    # Use a subset of shapes for MMA
     mma_shapes = [
         (2048, 5120, "gate/up"),
         (5120, 2048, "down"),
         (2048, 4096, "Q proj"),
     ]
 
-    print("=" * 80)
+    print("=" * 90)
     print("MMA KERNEL (M=5,8,16)")
-    print("=" * 80)
-    print(f"{'Method':>18} {'M':>3} {'K':>5} {'N':>5} {'Time(us)':>9} {'TFLOPS':>7}  Label")
-    print("-" * 68)
+    print("=" * 90)
+    print(f"{'Method':>18} {'bits':>5} {'M':>3} {'K':>5} {'N':>5} {'Time(us)':>9} {'TFLOPS':>7}  Label")
+    print("-" * 80)
 
-    for K_dim, N, label in mma_shapes:
-        # Pre-quantize weights once
-        pt2, at2, cb2, _, _ = prepare_vq_weights(K_dim, N, p=2)
-        pt4, at4, cb4, _, _ = prepare_vq_weights(K_dim, N, p=4)
-        pt_k, at_k, cb_k = prepare_kbit_weights(K_dim, N, k=4)
-        W_dense = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
+    for K_dim_orig, N, label in mma_shapes:
+        # Pre-quantize all configs
+        vq_data = {}
+        for p, ib, bpw, cfg_name in VQ_CONFIGS:
+            K_dim = pad_k_for_config(K_dim_orig, p, ib)
+            pt, at, cb, _, _ = prepare_vq_weights(K_dim, N, p=p, index_bits=ib)
+            vq_data[(p, ib)] = (K_dim, pt, at, cb, bpw, cfg_name)
+
+        pt_k, at_k, cb_k = prepare_kbit_weights(K_dim_orig, N, k=4)
+        W_dense = torch.randn(N, K_dim_orig, dtype=torch.float16, device="cuda")
 
         for M in m_vals:
-            A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
-            flops = 2 * M * K_dim * N
+            flops_orig = 2 * M * K_dim_orig * N
 
-            # VQ p=2 MMA
-            t = bench(lambda: torch.ops.bitsandbytes.vq_gemm_prod(
-                A, pt2, at2, cb2, K_dim, N, 2, 1), inner, outer)
-            tflops = flops / (t / 1e6) / 1e12
-            print(f"{'vq_mma_p2':>18} {M:>3} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
-            results.append(dict(method="vq_mma_p2", kernel="mma", M=M, K=K_dim,
-                                N=N, time_us=round(t, 3), tflops=round(tflops, 4), label=label))
-
-            # VQ p=4 MMA
-            t = bench(lambda: torch.ops.bitsandbytes.vq_gemm_prod(
-                A, pt4, at4, cb4, K_dim, N, 4, 1), inner, outer)
-            tflops = flops / (t / 1e6) / 1e12
-            print(f"{'vq_mma_p4':>18} {M:>3} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
-            results.append(dict(method="vq_mma_p4", kernel="mma", M=M, K=K_dim,
-                                N=N, time_us=round(t, 3), tflops=round(tflops, 4), label=label))
+            for p, ib, bpw, cfg_name in VQ_CONFIGS:
+                K_dim, pt, at, cb, _, _ = vq_data[(p, ib)]
+                A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
+                t = bench(lambda: torch.ops.bitsandbytes.vq_gemm_prod(
+                    A, pt, at, cb, K_dim, N, p, 1, ib), inner, outer)
+                tflops = flops_orig / (t / 1e6) / 1e12
+                method = f"vq_mma_{cfg_name}"
+                print(f"{method:>18} {bpw:>5.2f} {M:>3} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
+                results.append(dict(method=method, kernel="mma", M=M,
+                                    K=K_dim, K_orig=K_dim_orig, N=N,
+                                    time_us=round(t, 3), tflops=round(tflops, 4),
+                                    bits_per_wt=bpw, label=label))
 
             # Kbit k=4 MMA
+            K_dim = K_dim_orig
+            A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
             t = bench(lambda: torch.ops.bitsandbytes.kbit_gemm_prod(
                 A, pt_k, at_k, cb_k, K_dim, N, 4, 1), inner, outer)
-            tflops = flops / (t / 1e6) / 1e12
-            print(f"{'kbit_mma_k4':>18} {M:>3} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
-            results.append(dict(method="kbit_mma_k4", kernel="mma", M=M, K=K_dim,
-                                N=N, time_us=round(t, 3), tflops=round(tflops, 4), label=label))
+            tflops = flops_orig / (t / 1e6) / 1e12
+            print(f"{'kbit_mma_k4':>18} {'4.00':>5} {M:>3} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
+            results.append(dict(method="kbit_mma_k4", kernel="mma", M=M,
+                                K=K_dim, K_orig=K_dim_orig, N=N,
+                                time_us=round(t, 3), tflops=round(tflops, 4),
+                                bits_per_wt=4.0, label=label))
 
             # cuBLAS fp16
             out_c = torch.empty(M, N, dtype=torch.float16, device="cuda")
             t = bench(lambda: torch.mm(A, W_dense.t(), out=out_c), inner, outer)
-            tflops = flops / (t / 1e6) / 1e12
-            print(f"{'cublas_fp16':>18} {M:>3} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
-            results.append(dict(method="cublas_fp16", kernel="dense", M=M, K=K_dim,
-                                N=N, time_us=round(t, 3), tflops=round(tflops, 4), label=label))
+            tflops = flops_orig / (t / 1e6) / 1e12
+            print(f"{'cublas_fp16':>18} {'16.0':>5} {M:>3} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
+            results.append(dict(method="cublas_fp16", kernel="dense", M=M,
+                                K=K_dim, K_orig=K_dim_orig, N=N,
+                                time_us=round(t, 3), tflops=round(tflops, 4),
+                                bits_per_wt=16.0, label=label))
 
             print()
 
@@ -235,7 +271,7 @@ def bench_mma(inner, outer):
 
 
 def bench_dequant_cublas(inner, outer):
-    """Benchmark dequant+cuBLAS fallback at M=32 for VQ p=2 and p=4."""
+    """Benchmark dequant+cuBLAS fallback at M=32 for all VQ configs."""
     results = []
     M = 32
 
@@ -244,36 +280,46 @@ def bench_dequant_cublas(inner, outer):
         (5120, 2048, "down"),
     ]
 
-    print("=" * 80)
+    print("=" * 90)
     print(f"DEQUANT + cuBLAS (M={M})")
-    print("=" * 80)
-    print(f"{'Method':>18} {'K':>5} {'N':>5} {'Time(us)':>9} {'TFLOPS':>7}  Label")
-    print("-" * 65)
+    print("=" * 90)
+    print(f"{'Method':>18} {'bits':>5} {'K':>5} {'N':>5} {'Time(us)':>9} {'TFLOPS':>7}  Label")
+    print("-" * 75)
 
-    for K_dim, N, label in dequant_shapes:
-        A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
-        flops = 2 * M * K_dim * N
+    for K_dim_orig, N, label in dequant_shapes:
+        flops_orig = 2 * M * K_dim_orig * N
 
-        for p, method_name in [(2, "vq_dequant_p2"), (4, "vq_dequant_p4")]:
-            pt, at, cb, _, _ = prepare_vq_weights(K_dim, N, p=p)
-            # Full vq_linear dispatch with workspace (M=32 goes through dequant+cuBLAS)
+        for p, ib, bpw, cfg_name in VQ_CONFIGS:
+            K_dim = pad_k_for_config(K_dim_orig, p, ib)
+            pt, at, cb, _, _ = prepare_vq_weights(K_dim, N, p=p, index_bits=ib)
             from bitsandbytes.functional import vq_linear, vq_linear_workspace
             out_vq = torch.empty(M, N, dtype=torch.float16, device="cuda")
-            ws = vq_linear_workspace(M, K_dim, N, p, torch.float16, torch.device("cuda"))
-            t = bench(lambda: vq_linear(A, pt, at, cb, p, K_dim, N, out=out_vq, workspace=ws), inner, outer)
-            tflops = flops / (t / 1e6) / 1e12
-            print(f"{method_name:>18} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
-            results.append(dict(method=method_name, kernel="dequant+cublas", M=M,
-                                K=K_dim, N=N, time_us=round(t, 3), tflops=round(tflops, 4), label=label))
+            ws = vq_linear_workspace(M, K_dim, N, p, torch.float16,
+                                     torch.device("cuda"))
+            A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
+            t = bench(lambda: vq_linear(A, pt, at, cb, p, K_dim, N,
+                                         out=out_vq, workspace=ws, index_bits=ib),
+                      inner, outer)
+            tflops = flops_orig / (t / 1e6) / 1e12
+            method = f"vq_dequant_{cfg_name}"
+            print(f"{method:>18} {bpw:>5.2f} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
+            results.append(dict(method=method, kernel="dequant+cublas", M=M,
+                                K=K_dim, K_orig=K_dim_orig, N=N,
+                                time_us=round(t, 3), tflops=round(tflops, 4),
+                                bits_per_wt=bpw, label=label))
 
         # cuBLAS fp16 baseline
+        K_dim = K_dim_orig
+        A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
         W = torch.randn(N, K_dim, dtype=torch.float16, device="cuda")
         out_c = torch.empty(M, N, dtype=torch.float16, device="cuda")
         t = bench(lambda: torch.mm(A, W.t(), out=out_c), inner, outer)
-        tflops = flops / (t / 1e6) / 1e12
-        print(f"{'cublas_fp16':>18} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
-        results.append(dict(method="cublas_fp16", kernel="dense", M=M, K=K_dim,
-                            N=N, time_us=round(t, 3), tflops=round(tflops, 4), label=label))
+        tflops = flops_orig / (t / 1e6) / 1e12
+        print(f"{'cublas_fp16':>18} {'16.0':>5} {K_dim:>5} {N:>5} {t:>9.3f} {tflops:>7.3f}  {label}")
+        results.append(dict(method="cublas_fp16", kernel="dense", M=M,
+                            K=K_dim, K_orig=K_dim_orig, N=N,
+                            time_us=round(t, 3), tflops=round(tflops, 4),
+                            bits_per_wt=16.0, label=label))
 
         print()
 
@@ -282,26 +328,25 @@ def bench_dequant_cublas(inner, outer):
 
 def print_speedup_summary(results):
     """Print speedup tables: VQ vs kbit and vs cuBLAS."""
-    print("=" * 80)
+    print("=" * 90)
     print("SPEEDUP SUMMARY")
-    print("=" * 80)
+    print("=" * 90)
 
-    # Group by (M, K, N) so quantized and cuBLAS are in the same group
     from collections import defaultdict
+    # Group by (M, K_orig, N) so configs at different padded K share a group
     groups = defaultdict(dict)
     for r in results:
-        key = (r["M"], r["K"], r["N"])
+        key = (r["M"], r.get("K_orig", r["K"]), r["N"])
         groups[key][r["method"]] = r
 
-    print(f"{'M':>3} {'Shape':>10} {'Method':>18} {'us':>8} {'vs cuBLAS':>10} {'vs kbit':>10}")
-    print("-" * 65)
+    print(f"{'M':>3} {'Shape':>10} {'Method':>22} {'bits':>5} {'us':>8} {'vs cuBLAS':>10} {'vs kbit':>10}")
+    print("-" * 80)
 
     for key in sorted(groups.keys()):
         M, K, N = key
         methods = groups[key]
         t_cublas = methods.get("cublas_fp16", {}).get("time_us", 1)
 
-        # Find kbit baseline
         kbit_key = None
         for mk in methods:
             if "kbit" in mk:
@@ -312,6 +357,7 @@ def print_speedup_summary(results):
         for method_name in sorted(methods.keys()):
             r = methods[method_name]
             vs_cublas = t_cublas / r["time_us"] if r["time_us"] > 0 else 0
+            bpw = r.get("bits_per_wt", 0)
             vs_kbit_str = ""
             if t_kbit is not None and r["time_us"] > 0:
                 vs_kbit = t_kbit / r["time_us"]
@@ -320,14 +366,14 @@ def print_speedup_summary(results):
                 vs_kbit_str = f"{'---':>10}"
 
             shape_str = f"{K}x{N}"
-            print(f"{M:>3} {shape_str:>10} {method_name:>18} {r['time_us']:>8.3f}"
+            print(f"{M:>3} {shape_str:>10} {method_name:>22} {bpw:>5.2f} {r['time_us']:>8.3f}"
                   f" {vs_cublas:>9.2f}x {vs_kbit_str}")
         print()
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="VQ production kernel benchmark")
+        description="VQ production kernel benchmark (all 5 configs)")
     parser.add_argument("--inner", type=int, default=500,
                         help="Graph replays per measurement (default: 500)")
     parser.add_argument("--outer", type=int, default=15,
@@ -343,6 +389,7 @@ def main():
     print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"CUDA: {torch.version.cuda}")
     print(f"Timing: {args.inner} replays/measurement, median of {args.outer}")
+    print(f"VQ configs: " + ", ".join(f"{c[3]}({c[2]:.2f}b/w)" for c in VQ_CONFIGS))
     print()
 
     all_results = []
@@ -362,6 +409,8 @@ def main():
         "cuda": torch.version.cuda,
         "inner": args.inner,
         "outer": args.outer,
+        "vq_configs": [{"p": c[0], "index_bits": c[1], "bits_per_wt": c[2],
+                         "label": c[3]} for c in VQ_CONFIGS],
         "results": all_results,
     }
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
