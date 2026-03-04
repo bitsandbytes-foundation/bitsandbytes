@@ -3616,6 +3616,292 @@ void vqGroupedGemmProd(
     }
 }
 
+// ===========================================================================
+// VQ Codebook Grouped Scalar GEMV: vq_grouped_scalar_gemv
+// Fuses all MoE expert scalar GEMV calls into a single kernel launch.
+// Uses the same tiled B layout as vq_grouped_gemm_prod / vq_scalar_gemv.
+// Optimized for M=1-4 (typical MoE decode batch per expert).
+// Grid = num_experts * N, one block per (expert, output column) pair.
+// ===========================================================================
+
+template <int P_VAL, int M_VAL, typename scalar_t = half, typename ABSMAX_T = unsigned char>
+__global__ void __launch_bounds__(64, M_VAL <= 2 ? 24 : 16) vq_grouped_scalar_gemv(
+    const scalar_t* __restrict__ A_concat,
+    const unsigned int* __restrict__ B_packed_all,
+    const ABSMAX_T* __restrict__ B_absmax_all,
+    const half* __restrict__ codebook,
+    scalar_t* __restrict__ C_concat,
+    const int* __restrict__ expert_offsets,
+    const int K_dim, const int N, const int num_experts
+) {
+    constexpr int BS = 32;
+    constexpr int BLOCK_SIZE = 64;
+    constexpr int NUM_WARPS = 2;
+    constexpr int M_MAX = 4;
+    constexpr int WORDS_PER_BLOCK = BS / (P_VAL * 4); // p=2: 4, p=4: 2
+    constexpr int BYTES_PER_BLOCK = BS / P_VAL;        // p=2: 16, p=4: 8
+
+    // Tiled layout constants
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = 128;
+    constexpr int KB_PER_TILE = TILE_K / BS; // 2
+    constexpr int WORDS_PER_TILE = TILE_N * KB_PER_TILE * WORDS_PER_BLOCK;
+    constexpr int ABS_PER_TILE = TILE_N * KB_PER_TILE;
+
+    // Block → (expert, column) mapping
+    const int expert_id = blockIdx.x / N;
+    const int col = blockIdx.x % N;
+    if (expert_id >= num_experts) return;
+
+    // Expert boundaries from offset array
+    const int a_row_offset = expert_offsets[expert_id];
+    const int M_e = expert_offsets[expert_id + 1] - expert_offsets[expert_id];
+    if (M_e == 0) return;
+
+    // Per-expert pointers
+    const scalar_t* A = A_concat + a_row_offset * K_dim;
+    scalar_t* C = C_concat + a_row_offset * N;
+
+    const int num_k_blocks = K_dim / BS;
+    const int n_tiles = N / TILE_N;
+    const int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
+
+    // Per-expert B data sizes (same for all experts since K_dim, N are shared)
+    const int b_packed_per_expert = k_tiles * n_tiles * WORDS_PER_TILE;
+    const int b_absmax_per_expert = k_tiles * n_tiles * ABS_PER_TILE;
+    const unsigned int* B_packed = B_packed_all + expert_id * b_packed_per_expert;
+    const ABSMAX_T* B_absmax = B_absmax_all + expert_id * b_absmax_per_expert;
+
+    // Tiled layout addressing for this column
+    const int n_tile = col / TILE_N;
+    const int col_in_tile = col % TILE_N;
+
+    const int warp_id = threadIdx.x / 32;
+    const int lane_id = threadIdx.x % 32;
+
+    // Shared memory: codebook + partial reduction
+    constexpr int CB_ENTRIES = 256;
+    constexpr int CB_SHMEM_BYTES = (P_VAL == 2) ? (CB_ENTRIES * sizeof(half2))
+                                                 : (2 * CB_ENTRIES * sizeof(half2));
+    extern __shared__ char smem_raw[];
+    half2* s_cb = reinterpret_cast<half2*>(smem_raw);
+    float* s_partial = reinterpret_cast<float*>(smem_raw + CB_SHMEM_BYTES);
+
+    // Load codebook into shared memory
+    const half2* cb_src = reinterpret_cast<const half2*>(codebook);
+    if constexpr (P_VAL == 2) {
+        for (int i = threadIdx.x; i < CB_ENTRIES; i += BLOCK_SIZE)
+            s_cb[i] = cb_src[i];
+    } else {
+        for (int i = threadIdx.x; i < CB_ENTRIES; i += BLOCK_SIZE) {
+            s_cb[i] = cb_src[i * 2];
+            s_cb[CB_ENTRIES + i] = cb_src[i * 2 + 1];
+        }
+    }
+    __syncthreads();
+
+    // Accumulators
+    float acc[M_VAL];
+#pragma unroll
+    for (int m = 0; m < M_VAL; m++)
+        acc[m] = 0.0f;
+
+    // 64 threads stride through K blocks
+    const int max_iters = (num_k_blocks + BLOCK_SIZE - 1) / BLOCK_SIZE;
+
+    for (int iter = 0; iter < max_iters; iter++) {
+        const int block_idx = threadIdx.x + iter * BLOCK_SIZE;
+        const bool valid = (block_idx < num_k_blocks);
+
+        // Tiled B addressing
+        const int k_tile = block_idx / KB_PER_TILE;
+        const int kb = block_idx % KB_PER_TILE;
+        const int tile_base = k_tile * n_tiles + n_tile;
+        const int word_base = tile_base * WORDS_PER_TILE + (col_in_tile * KB_PER_TILE + kb) * WORDS_PER_BLOCK;
+        const int abs_idx = tile_base * ABS_PER_TILE + col_in_tile * KB_PER_TILE + kb;
+
+        // L2 prefetch for next iteration
+        {
+            const int next_block_idx = block_idx + BLOCK_SIZE;
+            if (next_block_idx < num_k_blocks) {
+                const int nk_tile = next_block_idx / KB_PER_TILE;
+                const int nkb = next_block_idx % KB_PER_TILE;
+                const int ntb = nk_tile * n_tiles + n_tile;
+                prefetch_l2(&B_packed[ntb * WORDS_PER_TILE + (col_in_tile * KB_PER_TILE + nkb) * WORDS_PER_BLOCK]);
+            }
+        }
+
+        // Load packed byte words (vector load)
+        unsigned int words[WORDS_PER_BLOCK];
+        if constexpr (WORDS_PER_BLOCK == 4) {
+            int4 pv;
+            if (valid)
+                pv = *reinterpret_cast<const int4*>(&B_packed[word_base]);
+            else {
+                pv.x = 0; pv.y = 0; pv.z = 0; pv.w = 0;
+            }
+            words[0] = (unsigned int)pv.x;
+            words[1] = (unsigned int)pv.y;
+            words[2] = (unsigned int)pv.z;
+            words[3] = (unsigned int)pv.w;
+        } else {
+            uint2 pv = valid ? *reinterpret_cast<const uint2*>(&B_packed[word_base]) : make_uint2(0u, 0u);
+            words[0] = pv.x;
+            words[1] = pv.y;
+        }
+
+        // Load absmax
+        float amax = valid ? load_absmax(B_absmax, abs_idx) : 0.0f;
+
+        const int k_base = block_idx * BS;
+
+        // Dequant + FMA across M rows
+#pragma unroll
+        for (int w = 0; w < WORDS_PER_BLOCK; w++) {
+            if constexpr (P_VAL == 4) {
+                int4 av0[M_VAL];
+                int4 av1_arr[M_VAL];
+#pragma unroll
+                for (int m = 0; m < M_VAL; m++) {
+                    if (valid) {
+                        av0[m] = *reinterpret_cast<const int4*>(&A[m * K_dim + k_base + w * 16]);
+                        av1_arr[m] = *reinterpret_cast<const int4*>(&A[m * K_dim + k_base + w * 16 + 8]);
+                    }
+                }
+
+#pragma unroll
+                for (int b = 0; b < 4; b++) {
+                    int idx = (words[w] >> (b * 8)) & 0xFF;
+                    half2 lo = s_cb[idx];
+                    half2 hi = s_cb[CB_ENTRIES + idx];
+                    float w0 = __half2float(lo.x) * amax;
+                    float w1 = __half2float(lo.y) * amax;
+                    float w2 = __half2float(hi.x) * amax;
+                    float w3 = __half2float(hi.y) * amax;
+
+                    int elem_in_word = b * 4;
+#pragma unroll
+                    for (int m = 0; m < M_VAL; m++) {
+                        const scalar_t* ap;
+                        int off;
+                        if (elem_in_word < 8) {
+                            ap = reinterpret_cast<const scalar_t*>(&av0[m]);
+                            off = elem_in_word;
+                        } else {
+                            ap = reinterpret_cast<const scalar_t*>(&av1_arr[m]);
+                            off = elem_in_word - 8;
+                        }
+                        if (valid) {
+                            acc[m] += w0 * ScalarOps<scalar_t>::to_float(ap[off])
+                                    + w1 * ScalarOps<scalar_t>::to_float(ap[off + 1])
+                                    + w2 * ScalarOps<scalar_t>::to_float(ap[off + 2])
+                                    + w3 * ScalarOps<scalar_t>::to_float(ap[off + 3]);
+                        }
+                    }
+                }
+            } else {
+                // P_VAL == 2: 8 elements per word
+                int4 av0[M_VAL];
+#pragma unroll
+                for (int m = 0; m < M_VAL; m++) {
+                    if (valid)
+                        av0[m] = *reinterpret_cast<const int4*>(&A[m * K_dim + k_base + w * 8]);
+                }
+
+#pragma unroll
+                for (int b = 0; b < 4; b++) {
+                    int idx = (words[w] >> (b * 8)) & 0xFF;
+                    half2 wt = s_cb[idx];
+                    float w0 = __half2float(wt.x) * amax;
+                    float w1 = __half2float(wt.y) * amax;
+
+#pragma unroll
+                    for (int m = 0; m < M_VAL; m++) {
+                        const scalar_t* ap = reinterpret_cast<const scalar_t*>(&av0[m]);
+                        if (valid) {
+                            acc[m] += w0 * ScalarOps<scalar_t>::to_float(ap[b * 2])
+                                    + w1 * ScalarOps<scalar_t>::to_float(ap[b * 2 + 1]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Phase 1: Intra-warp reduction via shuffle
+#pragma unroll
+    for (int m = 0; m < M_VAL; m++) {
+#pragma unroll
+        for (int offset = 16; offset >= 1; offset /= 2)
+            acc[m] += __shfl_down_sync(0xFFFFFFFF, acc[m], offset);
+    }
+
+    // Phase 2: Inter-warp reduction via shared memory
+    if (lane_id == 0) {
+#pragma unroll
+        for (int m = 0; m < M_VAL; m++)
+            s_partial[warp_id * M_MAX + m] = acc[m];
+    }
+    __syncthreads();
+
+    if (threadIdx.x == 0) {
+#pragma unroll
+        for (int m = 0; m < M_VAL; m++) {
+            if (m < M_e) {
+                float sum = 0.0f;
+#pragma unroll
+                for (int ww = 0; ww < NUM_WARPS; ww++)
+                    sum += s_partial[ww * M_MAX + m];
+                C[m * N + col] = ScalarOps<scalar_t>::from_float(sum);
+            }
+        }
+    }
+}
+
+// ---- VQ Grouped Scalar GEMV launcher ----
+template <int P, int MV, typename scalar_t, typename ABSMAX_T>
+static void vqGroupedScalarGemvLaunch(
+    const scalar_t* A_concat, const unsigned int* B_packed_all, const ABSMAX_T* B_absmax_all,
+    const half* codebook, scalar_t* C_concat, const int* expert_offsets,
+    int K_dim, int N, int num_experts, cudaStream_t stream
+) {
+    constexpr int BLOCK_SIZE = 64;
+    constexpr int CB_ENTRIES = 256;
+    constexpr int CB_SHMEM = (P == 2) ? (CB_ENTRIES * sizeof(half2))
+                                       : (2 * CB_ENTRIES * sizeof(half2));
+    constexpr int M_MAX = 4;
+    int smem_size = CB_SHMEM + 2 * M_MAX * sizeof(float);
+
+    int grid_size = num_experts * N;
+
+    vq_grouped_scalar_gemv<P, MV, scalar_t, ABSMAX_T>
+        <<<grid_size, BLOCK_SIZE, smem_size, stream>>>(
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat,
+            expert_offsets, K_dim, N, num_experts);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// Public entry point: dispatches on max_M (1-4)
+template <int P, typename scalar_t, typename ABSMAX_T = unsigned char>
+void vqGroupedScalarGemv(
+    const scalar_t* A_concat, const unsigned int* B_packed_all, const ABSMAX_T* B_absmax_all,
+    const half* codebook, scalar_t* C_concat, const int* expert_offsets,
+    int K_dim, int N, int num_experts, int max_M, cudaStream_t stream
+) {
+    if (max_M == 0 || N == 0 || num_experts == 0)
+        return;
+
+#define LAUNCH_VQ_GROUPED_GEMV(MV) \
+    vqGroupedScalarGemvLaunch<P, MV, scalar_t, ABSMAX_T>( \
+        A_concat, B_packed_all, B_absmax_all, codebook, C_concat, \
+        expert_offsets, K_dim, N, num_experts, stream)
+    if (max_M <= 1)      { LAUNCH_VQ_GROUPED_GEMV(1); }
+    else if (max_M <= 2) { LAUNCH_VQ_GROUPED_GEMV(2); }
+    else if (max_M <= 3) { LAUNCH_VQ_GROUPED_GEMV(3); }
+    else                 { LAUNCH_VQ_GROUPED_GEMV(4); }
+#undef LAUNCH_VQ_GROUPED_GEMV
+}
+
 // ===================================================================
 // Scalar GEMV kernel: C[M,N] = A[M,K_dim] * W_kbit^T  (M=1..4)
 // ===================================================================
@@ -4865,3 +5151,16 @@ INSTANTIATE_VQ_SCALAR_GEMV_U8(4)
     );
 INSTANTIATE_VQ_SCALAR_GEMV_F32(2)
 INSTANTIATE_VQ_SCALAR_GEMV_F32(4)
+
+// vq_grouped_scalar_gemv: P_VAL × scalar_t × ABSMAX_T
+#define INSTANTIATE_VQ_GROUPED_SCALAR_GEMV(P)                                                                          \
+    template void vqGroupedScalarGemv<P, half, unsigned char>(                                                         \
+        const half*, const unsigned int*, const unsigned char*, const half*, half*, const int*, int, int, int, int,     \
+        cudaStream_t                                                                                                   \
+    );                                                                                                                 \
+    template void vqGroupedScalarGemv<P, __nv_bfloat16, unsigned char>(                                                \
+        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const half*, __nv_bfloat16*, const int*, int,  \
+        int, int, int, cudaStream_t                                                                                    \
+    );
+INSTANTIATE_VQ_GROUPED_SCALAR_GEMV(2)
+INSTANTIATE_VQ_GROUPED_SCALAR_GEMV(4)

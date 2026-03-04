@@ -789,6 +789,39 @@ void vqGroupedGemmProd(
 
 MAKE_VQ_GROUPED_GEMM_PROD(2)
 
+// Forward declaration of VQ grouped scalar GEMV launcher
+template <int P, typename scalar_t, typename ABSMAX_T>
+void vqGroupedScalarGemv(
+    const scalar_t*, const unsigned int*, const ABSMAX_T*, const half*, scalar_t*, const int*, int, int,
+    int, int, cudaStream_t
+);
+
+// VQ Grouped Scalar GEMV wrappers — uint8 E4M4 absmax
+#define MAKE_VQ_GROUPED_SCALAR_GEMV(P)                                                                                 \
+    void vq_grouped_scalar_gemv_fp16_p##P(                                                                             \
+        const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                     \
+        const half* codebook, half* C_concat, const int* expert_offsets,                                               \
+        int K_dim, int N, int num_experts, int max_M, cudaStream_t stream                                              \
+    ) {                                                                                                                \
+        vqGroupedScalarGemv<P, half, unsigned char>(                                                                   \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, expert_offsets,                                  \
+            K_dim, N, num_experts, max_M, stream                                                                       \
+        );                                                                                                             \
+    }                                                                                                                  \
+    void vq_grouped_scalar_gemv_bf16_p##P(                                                                             \
+        const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,            \
+        const half* codebook, __nv_bfloat16* C_concat, const int* expert_offsets,                                      \
+        int K_dim, int N, int num_experts, int max_M, cudaStream_t stream                                              \
+    ) {                                                                                                                \
+        vqGroupedScalarGemv<P, __nv_bfloat16, unsigned char>(                                                          \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, expert_offsets,                                  \
+            K_dim, N, num_experts, max_M, stream                                                                       \
+        );                                                                                                             \
+    }
+
+MAKE_VQ_GROUPED_SCALAR_GEMV(2)
+MAKE_VQ_GROUPED_SCALAR_GEMV(4)
+
 // Forward declaration of scalar GEMV launchers (flat layout, templated on absmax type)
 template <int K, typename scalar_t, typename ABSMAX_T>
 void kbitScalarGemv(
@@ -1939,6 +1972,32 @@ MAKE_CKBIT_GROUPED_GEMM_PROD_FP16ABS(5)
     }
 
 MAKE_CVQ_GROUPED_GEMM_PROD(2)
+
+// VQ Grouped Scalar GEMV extern C wrappers — uint8 E4M4 absmax
+#define MAKE_CVQ_GROUPED_SCALAR_GEMV(P)                                                                                \
+    void cvq_grouped_scalar_gemv_fp16_p##P(                                                                            \
+        const half* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,                     \
+        const half* codebook, half* C_concat, const int* expert_offsets,                                               \
+        int K_dim, int N, int num_experts, int max_M, cudaStream_t stream                                              \
+    ) {                                                                                                                \
+        vq_grouped_scalar_gemv_fp16_p##P(                                                                              \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, expert_offsets,                                  \
+            K_dim, N, num_experts, max_M, stream                                                                       \
+        );                                                                                                             \
+    }                                                                                                                  \
+    void cvq_grouped_scalar_gemv_bf16_p##P(                                                                            \
+        const __nv_bfloat16* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,            \
+        const half* codebook, __nv_bfloat16* C_concat, const int* expert_offsets,                                      \
+        int K_dim, int N, int num_experts, int max_M, cudaStream_t stream                                              \
+    ) {                                                                                                                \
+        vq_grouped_scalar_gemv_bf16_p##P(                                                                              \
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, expert_offsets,                                  \
+            K_dim, N, num_experts, max_M, stream                                                                       \
+        );                                                                                                             \
+    }
+
+MAKE_CVQ_GROUPED_SCALAR_GEMV(2)
+MAKE_CVQ_GROUPED_SCALAR_GEMV(4)
 
 // Scalar GEMV extern C wrappers (fp16 and bf16) — C=1, uint8 E4M4 absmax
 #define MAKE_CKBIT_SCALAR_GEMV(K)                                                                                      \
