@@ -512,67 +512,137 @@ MAKE_KBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 4)
 MAKE_KBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 5)
 
 // Forward declarations of VQ template functions
-template <int P_VAL, typename T>
+template <int P_VAL, int INDEX_BITS, typename T>
 void quantize_vq(const half*, const T*, unsigned char*, unsigned int*, int, cudaStream_t);
-template <int P_VAL, typename T, typename ABSMAX_T>
+template <int P_VAL, int INDEX_BITS, typename T, typename ABSMAX_T>
 void dequantize_vq(const unsigned int*, const half*, const ABSMAX_T*, T*, int, cudaStream_t);
 
-// Unmangled VQ quantize wrappers
-#define MAKE_VQ_QUANT(tname, T, P)                                                                                     \
-    void quantize_vq_##tname##_p##P(                                                                                   \
+// Unmangled VQ quantize wrappers — new (P, IB) naming
+#define MAKE_VQ_QUANT(tname, T, P, IB)                                                                                 \
+    void quantize_vq_##tname##_p##P##b##IB(                                                                            \
         const half* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n, cudaStream_t stream   \
     ) {                                                                                                                \
-        quantize_vq<P, T>(codebook, A, absmax, packed_out, n, stream);                                                 \
+        quantize_vq<P, IB, T>(codebook, A, absmax, packed_out, n, stream);                                             \
     }
 
-MAKE_VQ_QUANT(fp16, half, 2)
-MAKE_VQ_QUANT(fp16, half, 4)
-MAKE_VQ_QUANT(bf16, __nv_bfloat16, 2)
-MAKE_VQ_QUANT(bf16, __nv_bfloat16, 4)
-MAKE_VQ_QUANT(fp32, float, 2)
-MAKE_VQ_QUANT(fp32, float, 4)
+// All 5 configs × 3 types
+MAKE_VQ_QUANT(fp16, half, 4, 8)
+MAKE_VQ_QUANT(fp16, half, 3, 8)
+MAKE_VQ_QUANT(fp16, half, 3, 10)
+MAKE_VQ_QUANT(fp16, half, 2, 8)
+MAKE_VQ_QUANT(fp16, half, 2, 10)
+MAKE_VQ_QUANT(bf16, __nv_bfloat16, 4, 8)
+MAKE_VQ_QUANT(bf16, __nv_bfloat16, 3, 8)
+MAKE_VQ_QUANT(bf16, __nv_bfloat16, 3, 10)
+MAKE_VQ_QUANT(bf16, __nv_bfloat16, 2, 8)
+MAKE_VQ_QUANT(bf16, __nv_bfloat16, 2, 10)
+MAKE_VQ_QUANT(fp32, float, 4, 8)
+MAKE_VQ_QUANT(fp32, float, 3, 8)
+MAKE_VQ_QUANT(fp32, float, 3, 10)
+MAKE_VQ_QUANT(fp32, float, 2, 8)
+MAKE_VQ_QUANT(fp32, float, 2, 10)
 
-// Unmangled VQ dequant wrappers: output type × absmax type × P
-#define MAKE_VQ_DEQUANT(tname, T, aname, ABSMAX_T, P)                                                                  \
-    void dequantize_vq_##tname##_##aname##_p##P(                                                                       \
+// Backward-compat aliases for existing callers
+void quantize_vq_fp16_p2(const half* cb, const half* A, unsigned char* am, unsigned int* po, int n, cudaStream_t s) { quantize_vq_fp16_p2b8(cb, A, am, po, n, s); }
+void quantize_vq_fp16_p4(const half* cb, const half* A, unsigned char* am, unsigned int* po, int n, cudaStream_t s) { quantize_vq_fp16_p4b8(cb, A, am, po, n, s); }
+void quantize_vq_bf16_p2(const half* cb, const __nv_bfloat16* A, unsigned char* am, unsigned int* po, int n, cudaStream_t s) { quantize_vq_bf16_p2b8(cb, A, am, po, n, s); }
+void quantize_vq_bf16_p4(const half* cb, const __nv_bfloat16* A, unsigned char* am, unsigned int* po, int n, cudaStream_t s) { quantize_vq_bf16_p4b8(cb, A, am, po, n, s); }
+void quantize_vq_fp32_p2(const half* cb, const float* A, unsigned char* am, unsigned int* po, int n, cudaStream_t s) { quantize_vq_fp32_p2b8(cb, A, am, po, n, s); }
+void quantize_vq_fp32_p4(const half* cb, const float* A, unsigned char* am, unsigned int* po, int n, cudaStream_t s) { quantize_vq_fp32_p4b8(cb, A, am, po, n, s); }
+
+// Unmangled VQ dequant wrappers — new (P, IB) naming
+#define MAKE_VQ_DEQUANT(tname, T, aname, ABSMAX_T, P, IB)                                                              \
+    void dequantize_vq_##tname##_##aname##_p##P##b##IB(                                                                \
         const unsigned int* packed_in, const half* codebook, const ABSMAX_T* absmax, T* out, int n,                    \
         cudaStream_t stream                                                                                            \
     ) {                                                                                                                \
-        dequantize_vq<P, T, ABSMAX_T>(packed_in, codebook, absmax, out, n, stream);                                    \
+        dequantize_vq<P, IB, T, ABSMAX_T>(packed_in, codebook, absmax, out, n, stream);                                \
     }
 
-// uint8 E4M4 absmax
-MAKE_VQ_DEQUANT(fp16, half, u8abs, unsigned char, 2)
-MAKE_VQ_DEQUANT(fp16, half, u8abs, unsigned char, 4)
-MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
-MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
-// float32 absmax
-MAKE_VQ_DEQUANT(fp16, half, fp32abs, float, 2)
-MAKE_VQ_DEQUANT(fp16, half, fp32abs, float, 4)
-MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2)
-MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 4)
+// uint8 E4M4 absmax — all 5 configs
+MAKE_VQ_DEQUANT(fp16, half, u8abs, unsigned char, 4, 8)
+MAKE_VQ_DEQUANT(fp16, half, u8abs, unsigned char, 3, 8)
+MAKE_VQ_DEQUANT(fp16, half, u8abs, unsigned char, 3, 10)
+MAKE_VQ_DEQUANT(fp16, half, u8abs, unsigned char, 2, 8)
+MAKE_VQ_DEQUANT(fp16, half, u8abs, unsigned char, 2, 10)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 4, 8)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 3, 8)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 3, 10)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 2, 8)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 2, 10)
+// float32 absmax — all 5 configs
+MAKE_VQ_DEQUANT(fp16, half, fp32abs, float, 4, 8)
+MAKE_VQ_DEQUANT(fp16, half, fp32abs, float, 3, 8)
+MAKE_VQ_DEQUANT(fp16, half, fp32abs, float, 3, 10)
+MAKE_VQ_DEQUANT(fp16, half, fp32abs, float, 2, 8)
+MAKE_VQ_DEQUANT(fp16, half, fp32abs, float, 2, 10)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 4, 8)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 3, 8)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 3, 10)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2, 8)
+MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2, 10)
+
+// Backward-compat aliases for existing callers (p2/p4 → p2b8/p4b8)
+#define VQ_DEQUANT_ALIAS(tname, T, aname, ABSMAX_T, P) \
+void dequantize_vq_##tname##_##aname##_p##P( \
+    const unsigned int* pi, const half* cb, const ABSMAX_T* am, T* o, int n, cudaStream_t s \
+) { dequantize_vq_##tname##_##aname##_p##P##b8(pi, cb, am, o, n, s); }
+VQ_DEQUANT_ALIAS(fp16, half, u8abs, unsigned char, 2)
+VQ_DEQUANT_ALIAS(fp16, half, u8abs, unsigned char, 4)
+VQ_DEQUANT_ALIAS(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+VQ_DEQUANT_ALIAS(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+VQ_DEQUANT_ALIAS(fp16, half, fp32abs, float, 2)
+VQ_DEQUANT_ALIAS(fp16, half, fp32abs, float, 4)
+VQ_DEQUANT_ALIAS(bf16, __nv_bfloat16, fp32abs, float, 2)
+VQ_DEQUANT_ALIAS(bf16, __nv_bfloat16, fp32abs, float, 4)
 
 // Forward declaration of VQ tiled dequant launcher
-template <int P_VAL, typename T, typename ABSMAX_T>
+template <int P_VAL, int INDEX_BITS, typename T, typename ABSMAX_T>
 void dequantize_vq_tiled(const unsigned int*, const half*, const ABSMAX_T*, T*, int, int, cudaStream_t);
 
-// Unmangled VQ tiled dequant wrappers
-#define MAKE_VQ_DEQUANT_TILED(tname, T, aname, ABSMAX_T, P)                                                           \
-    void dequantize_vq_tiled_##tname##_##aname##_p##P(                                                                 \
+// Unmangled VQ tiled dequant wrappers — new (P, IB) naming
+#define MAKE_VQ_DEQUANT_TILED(tname, T, aname, ABSMAX_T, P, IB)                                                       \
+    void dequantize_vq_tiled_##tname##_##aname##_p##P##b##IB(                                                          \
         const unsigned int* packed_tiled, const half* codebook, const ABSMAX_T* absmax_tiled, T* out, int K_dim,       \
         int N, cudaStream_t stream                                                                                     \
     ) {                                                                                                                \
-        dequantize_vq_tiled<P, T, ABSMAX_T>(packed_tiled, codebook, absmax_tiled, out, K_dim, N, stream);              \
+        dequantize_vq_tiled<P, IB, T, ABSMAX_T>(packed_tiled, codebook, absmax_tiled, out, K_dim, N, stream);          \
     }
 
-MAKE_VQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 2)
-MAKE_VQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 4)
-MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
-MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
-MAKE_VQ_DEQUANT_TILED(fp16, half, fp32abs, float, 2)
-MAKE_VQ_DEQUANT_TILED(fp16, half, fp32abs, float, 4)
-MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 2)
-MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 4)
+MAKE_VQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 4, 8)
+MAKE_VQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 3, 8)
+MAKE_VQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 3, 10)
+MAKE_VQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 2, 8)
+MAKE_VQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 2, 10)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 4, 8)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 3, 8)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 3, 10)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 2, 8)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 2, 10)
+MAKE_VQ_DEQUANT_TILED(fp16, half, fp32abs, float, 4, 8)
+MAKE_VQ_DEQUANT_TILED(fp16, half, fp32abs, float, 3, 8)
+MAKE_VQ_DEQUANT_TILED(fp16, half, fp32abs, float, 3, 10)
+MAKE_VQ_DEQUANT_TILED(fp16, half, fp32abs, float, 2, 8)
+MAKE_VQ_DEQUANT_TILED(fp16, half, fp32abs, float, 2, 10)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 4, 8)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 3, 8)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 3, 10)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 2, 8)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 2, 10)
+
+// Backward-compat aliases for tiled dequant
+#define VQ_DEQUANT_TILED_ALIAS(tname, T, aname, ABSMAX_T, P) \
+void dequantize_vq_tiled_##tname##_##aname##_p##P( \
+    const unsigned int* pt, const half* cb, const ABSMAX_T* am, T* o, int K, int N, cudaStream_t s \
+) { dequantize_vq_tiled_##tname##_##aname##_p##P##b8(pt, cb, am, o, K, N, s); }
+VQ_DEQUANT_TILED_ALIAS(fp16, half, u8abs, unsigned char, 2)
+VQ_DEQUANT_TILED_ALIAS(fp16, half, u8abs, unsigned char, 4)
+VQ_DEQUANT_TILED_ALIAS(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+VQ_DEQUANT_TILED_ALIAS(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+VQ_DEQUANT_TILED_ALIAS(fp16, half, fp32abs, float, 2)
+VQ_DEQUANT_TILED_ALIAS(fp16, half, fp32abs, float, 4)
+VQ_DEQUANT_TILED_ALIAS(bf16, __nv_bfloat16, fp32abs, float, 2)
+VQ_DEQUANT_TILED_ALIAS(bf16, __nv_bfloat16, fp32abs, float, 4)
 
 // Forward declaration of repack launcher
 template <int K>
@@ -593,19 +663,26 @@ MAKE_KBIT_REPACK(4)
 MAKE_KBIT_REPACK(5)
 
 // Forward declaration of VQ repack launcher
-template <int P>
+template <int P, int IB>
 void repackVQ(const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int, cudaStream_t);
 
-#define MAKE_VQ_REPACK(P)                                                                                              \
-    void repack_vq_p##P(                                                                                               \
+#define MAKE_VQ_REPACK(P, IB)                                                                                          \
+    void repack_vq_p##P##b##IB(                                                                                        \
         const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                  \
         unsigned char* absmax_tiled, int K_dim, int N, cudaStream_t stream                                              \
     ) {                                                                                                                \
-        repackVQ<P>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N, stream);                            \
+        repackVQ<P, IB>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N, stream);                        \
     }
 
-MAKE_VQ_REPACK(2)
-MAKE_VQ_REPACK(4)
+MAKE_VQ_REPACK(4, 8)
+MAKE_VQ_REPACK(3, 8)
+MAKE_VQ_REPACK(3, 10)
+MAKE_VQ_REPACK(2, 8)
+MAKE_VQ_REPACK(2, 10)
+
+// Backward-compat aliases
+void repack_vq_p2(const unsigned int* pf, const unsigned char* af, unsigned int* pt, unsigned char* at, int K, int N, cudaStream_t s) { repack_vq_p2b8(pf, af, pt, at, K, N, s); }
+void repack_vq_p4(const unsigned int* pf, const unsigned char* af, unsigned int* pt, unsigned char* at, int K, int N, cudaStream_t s) { repack_vq_p4b8(pf, af, pt, at, K, N, s); }
 
 // Forward declarations of GEMM launchers
 template <int K, typename scalar_t, typename ABSMAX_T>
