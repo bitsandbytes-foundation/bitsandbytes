@@ -1662,6 +1662,202 @@ def vq_linear_workspace(M: int, K_dim: int, N: int, p: int, dtype: torch.dtype, 
     }
 
 
+def vq_expert_linear(
+    A_concat: Tensor,
+    B_packed_all: Tensor,
+    B_absmax_all: Tensor,
+    codebook: Tensor,
+    expert_offsets: Tensor,
+    p: int,
+    K_dim: int,
+    N: int,
+    num_experts: int,
+    max_M: int,
+    out: Optional[Tensor] = None,
+    workspace: Optional[dict] = None,
+) -> Tensor:
+    """Unified dispatch for VQ codebook quantized MoE expert linear.
+
+    Routes to the optimal kernel based on max_M (max tokens per expert):
+      - max_M <= 16: grouped VQ MMA (single fused launch for all experts)
+      - max_M > 16:  per-expert dequantize + matmul
+
+    All paths read tiled B layout (from repack_vq output).
+
+    Args:
+        A_concat: Concatenated activations [total_M, K_dim], fp16 or bf16.
+        B_packed_all: Tiled VQ packed weights for all experts, concatenated.
+        B_absmax_all: Tiled absmax for all experts, concatenated (uint8 E4M4).
+        codebook: fp16 codebook tensor [256, p].
+        expert_offsets: int32 tensor [num_experts+1] with cumulative token offsets.
+        p: VQ dimension (2 only for grouped kernel).
+        K_dim: Reduction dimension.
+        N: Output dimension per expert.
+        num_experts: Number of experts.
+        max_M: Maximum tokens routed to any single expert.
+        out: Optional pre-allocated output [total_M, N].
+        workspace: Optional dict with pre-allocated buffers.
+
+    Returns:
+        Output tensor [total_M, N] with same dtype as A_concat.
+    """
+    total_M = A_concat.shape[0]
+    dtype = A_concat.dtype
+
+    if max_M <= 16:
+        # Grouped VQ MMA: single fused kernel launch
+        if out is not None and workspace is not None:
+            C_workspace = workspace["C_workspace"]
+            tile_counters = workspace["tile_counters"]
+            return torch.ops.bitsandbytes.vq_grouped_gemm_(
+                A_concat,
+                B_packed_all,
+                B_absmax_all,
+                codebook,
+                expert_offsets,
+                K_dim,
+                N,
+                p,
+                num_experts,
+                max_M,
+                out,
+                C_workspace,
+                tile_counters,
+            )
+        return torch.ops.bitsandbytes.vq_grouped_gemm(
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            p,
+            num_experts,
+            max_M,
+        )
+
+    # max_M > 16: per-expert dequant + matmul
+    if out is None:
+        out = torch.empty(total_M, N, device=A_concat.device, dtype=dtype)
+
+    # Per-expert weight size in the packed/absmax tensors
+    TILE_K, TILE_N, BS = 64, 128, 32
+    WORDS_PER_BLOCK = 32 // (p * 4)
+    k_blocks_per_tile = TILE_K // BS
+    k_tiles = K_dim // TILE_K
+    n_tiles = N // TILE_N
+    words_per_expert = k_tiles * n_tiles * TILE_N * k_blocks_per_tile * WORDS_PER_BLOCK
+    absmax_per_expert = k_tiles * n_tiles * TILE_N * k_blocks_per_tile
+
+    offsets_cpu = expert_offsets.cpu()
+    for e in range(num_experts):
+        start = offsets_cpu[e].item()
+        end = offsets_cpu[e + 1].item()
+        expert_M = end - start
+        if expert_M == 0:
+            continue
+
+        A_expert = A_concat[start:end]  # [expert_M, K_dim]
+        B_packed_e = B_packed_all[e * words_per_expert : (e + 1) * words_per_expert]
+        B_absmax_e = B_absmax_all[e * absmax_per_expert : (e + 1) * absmax_per_expert]
+
+        W_flat = torch.ops.bitsandbytes.dequantize_vq_tiled(
+            B_packed_e, codebook, B_absmax_e, p, K_dim, N, dtype
+        )
+        W = W_flat[: N * K_dim].view(N, K_dim)
+        torch.mm(A_expert, W.t(), out=out[start:end])
+
+    return out
+
+
+def vq_expert_linear_workspace(
+    max_M: int,
+    K_dim: int,
+    N: int,
+    p: int,
+    num_experts: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> dict:
+    """Pre-allocate workspace buffers for vq_expert_linear (CUDA graph compat).
+
+    Args:
+        max_M: Maximum tokens per expert.
+        K_dim: Reduction dimension.
+        N: Output dimension per expert.
+        p: VQ dimension.
+        num_experts: Number of experts.
+        dtype: Activation dtype (fp16 or bf16).
+        device: CUDA device.
+
+    Returns:
+        Dict with 'C_workspace', 'tile_counters', 'dequant_buf' tensors.
+    """
+    # Calculate total_M upper bound (all experts at max_M)
+    total_M = num_experts * max_M
+
+    m_blocks = 1
+    if max_M > 48:
+        m_blocks = 4
+    elif max_M > 32:
+        m_blocks = 3
+    elif max_M > 16:
+        m_blocks = 2
+    TILE_M = m_blocks * 16
+    tile_n = 64 if (m_blocks == 1 and N % 64 == 0) else 128
+    n_tiles = N // tile_n
+    m_tiles = (max_M + TILE_M - 1) // TILE_M
+    mn_tiles = num_experts * m_tiles * n_tiles
+
+    n_total = N * K_dim
+    num_blocks = -(n_total // -32)
+
+    return {
+        "C_workspace": torch.zeros(total_M, N, device=device, dtype=torch.float32),
+        "tile_counters": torch.zeros(mn_tiles, device=device, dtype=torch.int32),
+        "dequant_buf": torch.empty(num_blocks * 32, device=device, dtype=dtype),
+    }
+
+
+def vq_moe_fixed_pad(
+    tokens: Tensor,
+    expert_indices: Tensor,
+    pad_M: int,
+    K_dim: int,
+    num_experts: int,
+) -> tuple[Tensor, Tensor]:
+    """Scatter tokens into a fixed-padded buffer for CUDA graph compatibility.
+
+    Args:
+        tokens: Input tokens [total_batch, K_dim].
+        expert_indices: 1D int64 tensor with expert assignment per token.
+        pad_M: Fixed per-expert token capacity (must be >= max tokens per expert).
+        K_dim: Feature dimension.
+        num_experts: Number of experts.
+
+    Returns:
+        (A_concat_padded, expert_offsets_fixed):
+            A_concat_padded: [num_experts * pad_M, K_dim] zero-padded buffer.
+            expert_offsets_fixed: int32 [num_experts + 1] constant offsets [0, pad_M, 2*pad_M, ...].
+    """
+    device = tokens.device
+    dtype = tokens.dtype
+
+    A_concat = torch.zeros(num_experts * pad_M, K_dim, device=device, dtype=dtype)
+    expert_offsets = torch.arange(num_experts + 1, device=device, dtype=torch.int32) * pad_M
+
+    # Scatter tokens to their expert slots
+    for e in range(num_experts):
+        mask = expert_indices == e
+        expert_tokens = tokens[mask]
+        n = expert_tokens.shape[0]
+        if n > 0:
+            A_concat[e * pad_M : e * pad_M + n] = expert_tokens
+
+    return A_concat, expert_offsets
+
+
 def kbit_expert_linear(
     A_concat: Tensor,
     B_packed_all: Tensor,
