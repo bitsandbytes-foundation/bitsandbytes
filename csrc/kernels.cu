@@ -1775,7 +1775,6 @@ MAKE_kQuantizeBlockwise(bnb_bfloat16, 64, 2, 0, NF4)
         const int rand_offset, const int n                                                                             \
     );
 
-// clang-format off
 // QBLOCK_SIZE=32 instantiations
 MAKE_kQuantizeBlockwiseSmall(half, 32, FP4)
 MAKE_kQuantizeBlockwiseSmall(float, 32, FP4)
@@ -1791,7 +1790,6 @@ MAKE_kQuantizeBlockwiseSmall(bnb_bfloat16, 64, FP4)
 MAKE_kQuantizeBlockwiseSmall(half, 64, NF4)
 MAKE_kQuantizeBlockwiseSmall(float, 64, NF4)
 MAKE_kQuantizeBlockwiseSmall(bnb_bfloat16, 64, NF4)
-    // clang-format on
 
     template __global__ void kDequantizeBlockwise<half, 512, 64, 8, FP4>(
         float* code, unsigned char* A, float* absmax, half* out, const int blocksize, const int n
