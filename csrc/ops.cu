@@ -17,7 +17,8 @@ static int bnb_host_warp_size() {
     static int cache[MAX_DEVICES] = {};
     int dev;
     (void)hipGetDevice(&dev);
-    if (dev < 0 || dev >= MAX_DEVICES) return 64;
+    if (dev < 0 || dev >= MAX_DEVICES)
+        return 64;
     if (cache[dev] == 0)
         (void)hipDeviceGetAttribute(&cache[dev], hipDeviceAttributeWarpSize, dev);
     return cache[dev];
