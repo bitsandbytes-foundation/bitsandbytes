@@ -10,6 +10,23 @@
 
 #define ERR_NOT_IMPLEMENTED 100
 
+#if BNB_HIP
+#include <hip/hip_runtime.h>
+static int bnb_host_warp_size() {
+    constexpr int MAX_DEVICES = 32;
+    static int cache[MAX_DEVICES] = {};
+    int dev;
+    (void)hipGetDevice(&dev);
+    if (dev < 0 || dev >= MAX_DEVICES) return 64;
+    if (cache[dev] == 0)
+        (void)hipDeviceGetAttribute(&cache[dev], hipDeviceAttributeWarpSize, dev);
+    return cache[dev];
+}
+#else
+static constexpr int bnb_host_warp_size() { return 32; }
+#endif
+
+
 using std::cout;
 using std::endl;
 
@@ -407,8 +424,7 @@ void gemm_4bit_inference_naive(
 
     int num_blocks = (m + 3) / 4;
 #if BNB_HIP
-    // On 64-wide warp architectures, each warp processes 2 rows instead of 4
-    if (BNB_WARP_SIZE == 64) {
+    if (bnb_host_warp_size() == 64) {
         num_blocks = (m + 1) / 2;
     }
 #endif
