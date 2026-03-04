@@ -2307,26 +2307,31 @@ void kbitGemmProd(
 }
 
 // ===========================================================================
-// VQ Codebook MMA kernel: vq_gemm_prod
-// Modeled on kbit_gemm_prod but replaces bit-plane extraction with
-// byte-indexed shared memory codebook lookup.
+// VQ Codebook MMA kernel: vq_gemm_prod (Generalized Template)
+// Parameterized on (P_VAL, INDEX_BITS) via VQTraits for all 5 target configs.
+// Uses tensor core m16n8k16 MMA instructions.
 // ===========================================================================
 
-template <int P_VAL, int M_BLOCKS, int TILE_N_VAL = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
+template <int P_VAL, int INDEX_BITS, int M_BLOCKS, int TILE_N_VAL = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
 __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64 ? 12 : 1) vq_gemm_prod(
     const scalar_t* __restrict__ A, const unsigned int* __restrict__ B_packed, const ABSMAX_T* __restrict__ B_absmax,
     const half* __restrict__ codebook, scalar_t* __restrict__ C, float* __restrict__ C_workspace,
     int* __restrict__ tile_counters, const int M, const int K_dim, const int N, const int k_splits, const int total_work
 ) {
     using Ops = ScalarOps<scalar_t>;
+    using Traits = VQTraits<P_VAL, INDEX_BITS>;
     constexpr int TILE_M = M_BLOCKS * 16;
-    constexpr int TILE_K = 64;
+    constexpr int TILE_K = Traits::TILE_K;
     constexpr int TILE_N = TILE_N_VAL;
-    constexpr int BS = 32;
-    constexpr int KB_PER_TILE = TILE_K / BS; // 2
-    constexpr int WORDS_PER_BLOCK = 32 / (P_VAL * 4); // p=2: 4, p=4: 2
-    constexpr int B_COL_WORDS = KB_PER_TILE * WORDS_PER_BLOCK; // p=2: 8, p=4: 4
+    constexpr int BS = Traits::BS;
+    constexpr int KB_PER_TILE = Traits::KB_PER_TILE;
+    constexpr int WORDS = Traits::WORDS;
+    constexpr int GROUPS = Traits::GROUPS;
+    constexpr int CB_ENTRIES = Traits::CB_ENTRIES;
+    constexpr int B_COL_WORDS = KB_PER_TILE * WORDS;
     constexpr int N_BLOCKS = 2;
+    constexpr int K_STEPS_PER_BLOCK = BS / 16;
+    constexpr int TOTAL_K_STEPS = KB_PER_TILE * K_STEPS_PER_BLOCK;
 
     constexpr int A_STAGE_ELEMS = TILE_M * TILE_K;
     constexpr int B_STAGE_WORDS = TILE_N * B_COL_WORDS;
@@ -2339,8 +2344,7 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
     constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES_VAL + ABS_STAGE_ALIGNED;
 
     // Codebook in shared memory (persistent, not part of pipeline)
-    // p=2: half2[256] = 1024 bytes; p=4: half2[256]*2 = 2048 bytes
-    constexpr int CB_BYTES = (P_VAL == 2) ? 1024 : 2048;
+    constexpr int CB_BYTES = Traits::CB_SHMEM_BYTES;
     constexpr int CB_ALIGNED = (CB_BYTES + 15) & ~15;
 
 #if BNB_DATACENTER_GPU
@@ -2376,23 +2380,7 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
 
     // Load codebook into shared memory (once, persistent)
     half2* cb_shmem = reinterpret_cast<half2*>(smem);
-    if constexpr (P_VAL == 2) {
-        // [256] half2 entries — each entry is 2 fp16 values
-        const half2* cb_src = reinterpret_cast<const half2*>(codebook);
-        for (int i = threadIdx.x; i < 256; i += blockDim.x)
-            cb_shmem[i] = cb_src[i];
-    } else {
-        // p=4: split into cb_lo[256] and cb_hi[256]
-        // codebook is [256, 4] fp16 = [256] groups of 4 half values
-        // cb_lo[i] = codebook[i][0:2], cb_hi[i] = codebook[i][2:4]
-        half2* cb_lo = cb_shmem;
-        half2* cb_hi = cb_shmem + 256;
-        const half2* cb_src = reinterpret_cast<const half2*>(codebook);
-        for (int i = threadIdx.x; i < 256; i += blockDim.x) {
-            cb_lo[i] = cb_src[i * 2];     // first 2 of 4 values
-            cb_hi[i] = cb_src[i * 2 + 1]; // last 2 of 4 values
-        }
-    }
+    vq_load_codebook<P_VAL, CB_ENTRIES, TILE_N_VAL <= 64 ? 128 : 256>(cb_shmem, codebook);
     __syncthreads();
 
     float frag_c[M_BLOCKS][N_BLOCKS][4];
@@ -2471,16 +2459,17 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
             }
         };
 
-        // Compute tile: VQ dequant via byte extraction + shmem codebook lookup
+        // Compute tile: VQ dequant via generalized index extraction + codebook lookup
+        // Supports all 5 (P_VAL, INDEX_BITS) configs through VQTraits helpers.
         auto compute_tile = [&](int stage) {
             scalar_t* a_ptr = sh_a(stage);
             unsigned int* b_ptr = sh_b(stage);
             ABSMAX_T* abs_ptr = sh_abs(stage);
 
 #pragma unroll
-            for (int ks = 0; ks < 4; ks++) {
-                const int k_block = ks / 2;
-                const int half_idx = ks % 2;
+            for (int ks = 0; ks < TOTAL_K_STEPS; ks++) {
+                const int k_block = ks / K_STEPS_PER_BLOCK;
+                const int sub_step = ks % K_STEPS_PER_BLOCK;
 
                 uint32_t frag_a[M_BLOCKS][4];
 #pragma unroll
@@ -2507,64 +2496,30 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
                     int col = warp_n_base + nb * 8 + gid;
 
                     scalar_t scale = Ops::from_float(load_absmax<ABSMAX_T>(abs_ptr, col * KB_PER_TILE + k_block));
+                    float scale_f = Ops::to_float(scale);
 
+                    // Load all packed words for this column's quantization block
+                    int word_base_addr = col * B_COL_WORDS + k_block * WORDS;
+                    unsigned int words_local[5]; // max WORDS is 5
+#pragma unroll
+                    for (int w = 0; w < WORDS; w++)
+                        words_local[w] = b_ptr[word_base_addr + w];
+
+                    // Decode 4 weight values for this thread's MMA positions.
+                    // Thread tid (0-3) owns k-positions {2*tid, 2*tid+1, 2*tid+8, 2*tid+9}
+                    // within the 16-element MMA step.
                     scalar_t vals[4];
+#pragma unroll
+                    for (int v = 0; v < 4; v++) {
+                        const int pos_off = (v < 2) ? v : (v + 6); // {0, 1, 8, 9}
+                        int k_in_block = sub_step * 16 + 2 * tid + pos_off;
+                        int gi = k_in_block / P_VAL;
+                        int di = k_in_block % P_VAL;
 
-                    if constexpr (P_VAL == 2) {
-                        // p=2: 2 words cover 16 elements (8 bytes, each byte → 2 weights)
-                        // word_base = col * B_COL_WORDS + k_block * WORDS_PER_BLOCK + half_idx * 2
-                        int word_base = col * B_COL_WORDS + k_block * WORDS_PER_BLOCK + half_idx * 2;
-                        unsigned int w0 = b_ptr[word_base];
-                        unsigned int w1 = b_ptr[word_base + 1];
-
-                        // tid owns rows {2*tid, 2*tid+1, 2*tid+8, 2*tid+9}
-                        // rows[0,1] → byte tid in w0 → codebook entry has 2 values
-                        // rows[2,3] → byte tid in w1 → codebook entry has 2 values
-                        unsigned int idx0 = (w0 >> (tid * 8)) & 0xFF;
-                        unsigned int idx1 = (w1 >> (tid * 8)) & 0xFF;
-
-                        half2 cb0 = cb_shmem[idx0];
-                        half2 cb1 = cb_shmem[idx1];
-
-                        vals[0] = Ops::mul(Ops::from_float(__low2float(cb0)), scale);
-                        vals[1] = Ops::mul(Ops::from_float(__high2float(cb0)), scale);
-                        vals[2] = Ops::mul(Ops::from_float(__low2float(cb1)), scale);
-                        vals[3] = Ops::mul(Ops::from_float(__high2float(cb1)), scale);
-                    } else {
-                        // p=4: 1 word covers 16 elements (4 bytes, each byte → 4 weights)
-                        int word_addr = col * B_COL_WORDS + k_block * WORDS_PER_BLOCK + half_idx;
-                        unsigned int w = b_ptr[word_addr];
-
-                        // tid owns rows {2*tid, 2*tid+1, 2*tid+8, 2*tid+9}
-                        // rows[0,1] → byte (tid/2), values at positions 2*(tid%2), 2*(tid%2)+1
-                        // rows[2,3] → byte (tid/2+2), values at same positions
-                        int byte_a = tid / 2;
-                        int byte_b = tid / 2 + 2;
-                        int pos_base = 2 * (tid % 2); // 0 or 2
-
-                        unsigned int idx_a = (w >> (byte_a * 8)) & 0xFF;
-                        unsigned int idx_b = (w >> (byte_b * 8)) & 0xFF;
-
-                        half2* cb_lo = cb_shmem;
-                        half2* cb_hi = cb_shmem + 256;
-
-                        half2 lo_a = cb_lo[idx_a];
-                        half2 hi_a = cb_hi[idx_a];
-                        half2 lo_b = cb_lo[idx_b];
-                        half2 hi_b = cb_hi[idx_b];
-
-                        // Reconstruct 4 values from the codebook entry
-                        // Entry = [lo.x, lo.y, hi.x, hi.y] = positions [0, 1, 2, 3]
-                        float v_a[4] = {__low2float(lo_a), __high2float(lo_a),
-                                        __low2float(hi_a), __high2float(hi_a)};
-                        float v_b[4] = {__low2float(lo_b), __high2float(lo_b),
-                                        __low2float(hi_b), __high2float(hi_b)};
-
-                        float scale_f = Ops::to_float(scale);
-                        vals[0] = Ops::from_float(v_a[pos_base] * scale_f);
-                        vals[1] = Ops::from_float(v_a[pos_base + 1] * scale_f);
-                        vals[2] = Ops::from_float(v_b[pos_base] * scale_f);
-                        vals[3] = Ops::from_float(v_b[pos_base + 1] * scale_f);
+                        int idx = vq_extract_index<INDEX_BITS>(words_local, gi);
+                        float cb_vals[4]; // max P_VAL is 4
+                        vq_cb_lookup<P_VAL, CB_ENTRIES>(cb_shmem, idx, cb_vals);
+                        vals[v] = Ops::from_float(cb_vals[di] * scale_f);
                     }
 
                     uint32_t frag_b[2];
@@ -2670,18 +2625,19 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
 }
 
 // VQ GEMM launcher
-template <int P, int MB, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
+template <int P, int IB, int MB, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
 static void vqGemmProdLaunch(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const half* codebook, scalar_t* C,
     float* C_workspace, int* tile_counters, int M, int K_dim, int N, int num_sms, cudaStream_t stream
 ) {
+    using Traits = VQTraits<P, IB>;
     constexpr int TILE_M = MB * 16;
-    constexpr int TILE_K = 64;
+    constexpr int TILE_K = Traits::TILE_K;
     constexpr int TILE_N = TN;
-    constexpr int BS = 32;
-    constexpr int KB_PER_TILE = TILE_K / BS;
-    constexpr int WORDS_PER_BLOCK = 32 / (P * 4);
-    constexpr int B_COL_WORDS = KB_PER_TILE * WORDS_PER_BLOCK;
+    constexpr int BS = Traits::BS;
+    constexpr int KB_PER_TILE = Traits::KB_PER_TILE;
+    constexpr int WORDS = Traits::WORDS;
+    constexpr int B_COL_WORDS = KB_PER_TILE * WORDS;
     constexpr int N_BLOCKS = 2;
     constexpr int NUM_WARPS = TILE_N / (N_BLOCKS * 8);
     constexpr int BLOCK_DIM = NUM_WARPS * 32;
@@ -2692,7 +2648,7 @@ static void vqGemmProdLaunch(
     constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
     constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES + ABS_STAGE_ALIGNED;
 
-    constexpr int CB_BYTES = (P == 2) ? 1024 : 2048;
+    constexpr int CB_BYTES = Traits::CB_SHMEM_BYTES;
     constexpr int CB_ALIGNED = (CB_BYTES + 15) & ~15;
 
     int m_tiles = (M + TILE_M - 1) / TILE_M;
@@ -2721,17 +2677,17 @@ static void vqGemmProdLaunch(
 
     if (smem_size > 48 * 1024) {
         cudaFuncSetAttribute(
-            vq_gemm_prod<P, MB, TN, scalar_t, ABSMAX_T>, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
+            vq_gemm_prod<P, IB, MB, TN, scalar_t, ABSMAX_T>, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
         );
     }
 
-    vq_gemm_prod<P, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size, stream>>>(
+    vq_gemm_prod<P, IB, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size, stream>>>(
         A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_splits, total_work
     );
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
-template <int P, typename scalar_t, typename ABSMAX_T = unsigned char>
+template <int P, int IB, typename scalar_t, typename ABSMAX_T = unsigned char>
 void vqGemmProd(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const half* codebook, scalar_t* C,
     float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream
@@ -2749,28 +2705,28 @@ void vqGemmProd(
     const bool use_tn64 = (m_blocks == 1) && (N % 64 == 0);
 
     if (use_tn64) {
-        vqGemmProdLaunch<P, 1, 64, scalar_t, ABSMAX_T>(
+        vqGemmProdLaunch<P, IB, 1, 64, scalar_t, ABSMAX_T>(
             A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
         );
     } else {
         switch (m_blocks) {
         case 4:
-            vqGemmProdLaunch<P, 4, 128, scalar_t, ABSMAX_T>(
+            vqGemmProdLaunch<P, IB, 4, 128, scalar_t, ABSMAX_T>(
                 A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
             );
             break;
         case 3:
-            vqGemmProdLaunch<P, 3, 128, scalar_t, ABSMAX_T>(
+            vqGemmProdLaunch<P, IB, 3, 128, scalar_t, ABSMAX_T>(
                 A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
             );
             break;
         case 2:
-            vqGemmProdLaunch<P, 2, 128, scalar_t, ABSMAX_T>(
+            vqGemmProdLaunch<P, IB, 2, 128, scalar_t, ABSMAX_T>(
                 A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
             );
             break;
         default:
-            vqGemmProdLaunch<P, 1, 128, scalar_t, ABSMAX_T>(
+            vqGemmProdLaunch<P, IB, 1, 128, scalar_t, ABSMAX_T>(
                 A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
             );
             break;
@@ -4742,17 +4698,20 @@ INSTANTIATE_KBIT_GEMM_PROD_FP16(4)
 INSTANTIATE_KBIT_GEMM_PROD_FP16(5)
 
 // VQ GEMM prod instantiations — uint8 E4M4 absmax
-#define INSTANTIATE_VQ_GEMM_PROD_U8(P)                                                                                 \
-    template void vqGemmProd<P, half, unsigned char>(                                                                  \
+#define INSTANTIATE_VQ_GEMM_PROD_U8(P, IB)                                                                             \
+    template void vqGemmProd<P, IB, half, unsigned char>(                                                              \
         const half*, const unsigned int*, const unsigned char*, const half*, half*, float*, int*, int, int, int, int,  \
         cudaStream_t                                                                                                   \
     );                                                                                                                 \
-    template void vqGemmProd<P, __nv_bfloat16, unsigned char>(                                                        \
+    template void vqGemmProd<P, IB, __nv_bfloat16, unsigned char>(                                                    \
         const __nv_bfloat16*, const unsigned int*, const unsigned char*, const half*, __nv_bfloat16*, float*, int*,    \
         int, int, int, int, cudaStream_t                                                                               \
     );
-INSTANTIATE_VQ_GEMM_PROD_U8(2)
-INSTANTIATE_VQ_GEMM_PROD_U8(4)
+INSTANTIATE_VQ_GEMM_PROD_U8(4, 8)
+INSTANTIATE_VQ_GEMM_PROD_U8(3, 8)
+INSTANTIATE_VQ_GEMM_PROD_U8(3, 10)
+INSTANTIATE_VQ_GEMM_PROD_U8(2, 8)
+INSTANTIATE_VQ_GEMM_PROD_U8(2, 10)
 
 // Grouped expert GEMM instantiations — uint8 E4M4 absmax (default)
 #define INSTANTIATE_KBIT_GROUPED_GEMM_PROD_U8(K)                                                                       \
