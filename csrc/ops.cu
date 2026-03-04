@@ -52,10 +52,16 @@ void quantizeBlockwise(
         kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 64) {
 #if BNB_HIP
-        // On HIP with 64-wide warps (CDNA), use specialized kernel for 4-bit types
         if constexpr (DATA_TYPE > 0) {
-            kQuantizeBlockwiseSmall<T, DATA_TYPE>
-                <<<(num_blocks + 1) / 2, 64>>>(code, A, absmax, out, rand, rand_offset, n);
+            if (bnb_host_warp_size() == 64) {
+                // CDNA: kQuantizeBlockwiseSmall is compiled with THREADS=64
+                kQuantizeBlockwiseSmall<T, DATA_TYPE>
+                    <<<(num_blocks + 1) / 2, 64>>>(code, A, absmax, out, rand, rand_offset, n);
+            } else {
+                // RDNA: standard kernel (same as CUDA path)
+                kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>
+                    <<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
+            }
         } else {
             kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE><<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
         }
