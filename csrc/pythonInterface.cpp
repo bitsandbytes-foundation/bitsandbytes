@@ -1762,17 +1762,28 @@ MAKE_CKBIT_REPACK(3)
 MAKE_CKBIT_REPACK(4)
 MAKE_CKBIT_REPACK(5)
 
-// VQ repack extern C wrappers
-#define MAKE_CREPACK_VQ(P)                                                                                             \
-    void crepack_vq_p##P(                                                                                              \
+// VQ repack extern C wrappers — new naming: crepack_vq_p{P}b{IB}
+#define MAKE_CREPACK_VQ(P, IB)                                                                                         \
+    void crepack_vq_p##P##b##IB(                                                                                       \
         const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                  \
         unsigned char* absmax_tiled, int K_dim, int N, cudaStream_t stream                                              \
     ) {                                                                                                                \
-        repack_vq_p##P(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N, stream);                         \
+        repack_vq_p##P##b##IB(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N, stream);                  \
     }
 
-MAKE_CREPACK_VQ(2)
-MAKE_CREPACK_VQ(4)
+MAKE_CREPACK_VQ(4, 8)
+MAKE_CREPACK_VQ(3, 8)
+MAKE_CREPACK_VQ(3, 10)
+MAKE_CREPACK_VQ(2, 8)
+MAKE_CREPACK_VQ(2, 10)
+
+// Backward-compat aliases
+void crepack_vq_p2(
+    const unsigned int* pf, const unsigned char* af, unsigned int* pt, unsigned char* at, int K, int N, cudaStream_t s
+) { crepack_vq_p2b8(pf, af, pt, at, K, N, s); }
+void crepack_vq_p4(
+    const unsigned int* pf, const unsigned char* af, unsigned int* pt, unsigned char* at, int K, int N, cudaStream_t s
+) { crepack_vq_p4b8(pf, af, pt, at, K, N, s); }
 
 // fp16 absmax - all output types
 MAKE_CKBIT_DEQUANT(fp16, half, fp16abs, half, 2)
@@ -1839,58 +1850,136 @@ MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 3)
 MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 4)
 MAKE_CKBIT_DEQUANT_TILED(fp32, float, fp16abs, half, 5)
 
-// VQ quantize extern C wrappers
-#define MAKE_CVQ_QUANT(tname, T, P)                                                                                    \
-    void cquantize_vq_##tname##_p##P(                                                                                  \
+// VQ quantize extern C wrappers — new naming: cquantize_vq_{tname}_p{P}b{IB}
+#define MAKE_CVQ_QUANT(tname, T, P, IB)                                                                                \
+    void cquantize_vq_##tname##_p##P##b##IB(                                                                           \
         const half* codebook, const T* A, unsigned char* absmax, unsigned int* packed_out, int n, cudaStream_t stream   \
     ) {                                                                                                                \
-        quantize_vq_##tname##_p##P(codebook, A, absmax, packed_out, n, stream);                                        \
+        quantize_vq_##tname##_p##P##b##IB(codebook, A, absmax, packed_out, n, stream);                                 \
     }
 
-MAKE_CVQ_QUANT(fp16, half, 2)
-MAKE_CVQ_QUANT(fp16, half, 4)
-MAKE_CVQ_QUANT(bf16, __nv_bfloat16, 2)
-MAKE_CVQ_QUANT(bf16, __nv_bfloat16, 4)
-MAKE_CVQ_QUANT(fp32, float, 2)
-MAKE_CVQ_QUANT(fp32, float, 4)
+// All 5 VQ configs × 3 input dtypes
+MAKE_CVQ_QUANT(fp16, half, 4, 8)
+MAKE_CVQ_QUANT(fp16, half, 3, 8)
+MAKE_CVQ_QUANT(fp16, half, 3, 10)
+MAKE_CVQ_QUANT(fp16, half, 2, 8)
+MAKE_CVQ_QUANT(fp16, half, 2, 10)
+MAKE_CVQ_QUANT(bf16, __nv_bfloat16, 4, 8)
+MAKE_CVQ_QUANT(bf16, __nv_bfloat16, 3, 8)
+MAKE_CVQ_QUANT(bf16, __nv_bfloat16, 3, 10)
+MAKE_CVQ_QUANT(bf16, __nv_bfloat16, 2, 8)
+MAKE_CVQ_QUANT(bf16, __nv_bfloat16, 2, 10)
+MAKE_CVQ_QUANT(fp32, float, 4, 8)
+MAKE_CVQ_QUANT(fp32, float, 3, 8)
+MAKE_CVQ_QUANT(fp32, float, 3, 10)
+MAKE_CVQ_QUANT(fp32, float, 2, 8)
+MAKE_CVQ_QUANT(fp32, float, 2, 10)
 
-// VQ dequant extern C wrappers
-#define MAKE_CVQ_DEQUANT(tname, T, aname, ABSMAX_T, P)                                                                 \
-    void cdequantize_vq_##tname##_##aname##_p##P(                                                                      \
+// Backward-compat aliases for p2/p4 (8-bit)
+#define MAKE_CVQ_QUANT_COMPAT(tname, T, P)                                                                             \
+    void cquantize_vq_##tname##_p##P(                                                                                  \
+        const half* cb, const T* A, unsigned char* am, unsigned int* po, int n, cudaStream_t s                          \
+    ) { cquantize_vq_##tname##_p##P##b8(cb, A, am, po, n, s); }
+MAKE_CVQ_QUANT_COMPAT(fp16, half, 2)
+MAKE_CVQ_QUANT_COMPAT(fp16, half, 4)
+MAKE_CVQ_QUANT_COMPAT(bf16, __nv_bfloat16, 2)
+MAKE_CVQ_QUANT_COMPAT(bf16, __nv_bfloat16, 4)
+MAKE_CVQ_QUANT_COMPAT(fp32, float, 2)
+MAKE_CVQ_QUANT_COMPAT(fp32, float, 4)
+
+// VQ dequant extern C wrappers — new naming: cdequantize_vq_{tname}_{aname}_p{P}b{IB}
+#define MAKE_CVQ_DEQUANT(tname, T, aname, ABSMAX_T, P, IB)                                                            \
+    void cdequantize_vq_##tname##_##aname##_p##P##b##IB(                                                               \
         const unsigned int* packed_in, const half* codebook, const ABSMAX_T* absmax, T* out, int n,                    \
         cudaStream_t stream                                                                                            \
     ) {                                                                                                                \
-        dequantize_vq_##tname##_##aname##_p##P(packed_in, codebook, absmax, out, n, stream);                           \
+        dequantize_vq_##tname##_##aname##_p##P##b##IB(packed_in, codebook, absmax, out, n, stream);                    \
     }
 
+// All 5 VQ configs × 2 output dtypes × 2 absmax types
 // uint8 E4M4 absmax
-MAKE_CVQ_DEQUANT(fp16, half, u8abs, unsigned char, 2)
-MAKE_CVQ_DEQUANT(fp16, half, u8abs, unsigned char, 4)
-MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
-MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+MAKE_CVQ_DEQUANT(fp16, half, u8abs, unsigned char, 4, 8)
+MAKE_CVQ_DEQUANT(fp16, half, u8abs, unsigned char, 3, 8)
+MAKE_CVQ_DEQUANT(fp16, half, u8abs, unsigned char, 3, 10)
+MAKE_CVQ_DEQUANT(fp16, half, u8abs, unsigned char, 2, 8)
+MAKE_CVQ_DEQUANT(fp16, half, u8abs, unsigned char, 2, 10)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 4, 8)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 3, 8)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 3, 10)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 2, 8)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, u8abs, unsigned char, 2, 10)
 // float32 absmax
-MAKE_CVQ_DEQUANT(fp16, half, fp32abs, float, 2)
-MAKE_CVQ_DEQUANT(fp16, half, fp32abs, float, 4)
-MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2)
-MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 4)
+MAKE_CVQ_DEQUANT(fp16, half, fp32abs, float, 4, 8)
+MAKE_CVQ_DEQUANT(fp16, half, fp32abs, float, 3, 8)
+MAKE_CVQ_DEQUANT(fp16, half, fp32abs, float, 3, 10)
+MAKE_CVQ_DEQUANT(fp16, half, fp32abs, float, 2, 8)
+MAKE_CVQ_DEQUANT(fp16, half, fp32abs, float, 2, 10)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 4, 8)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 3, 8)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 3, 10)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2, 8)
+MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2, 10)
 
-// VQ tiled dequant extern C wrappers
-#define MAKE_CVQ_DEQUANT_TILED(tname, T, aname, ABSMAX_T, P)                                                          \
-    void cdequantize_vq_tiled_##tname##_##aname##_p##P(                                                                \
+// Backward-compat aliases for p2/p4 (8-bit)
+#define MAKE_CVQ_DEQUANT_COMPAT(tname, T, aname, ABSMAX_T, P)                                                         \
+    void cdequantize_vq_##tname##_##aname##_p##P(                                                                      \
+        const unsigned int* pi, const half* cb, const ABSMAX_T* am, T* out, int n, cudaStream_t s                      \
+    ) { cdequantize_vq_##tname##_##aname##_p##P##b8(pi, cb, am, out, n, s); }
+MAKE_CVQ_DEQUANT_COMPAT(fp16, half, u8abs, unsigned char, 2)
+MAKE_CVQ_DEQUANT_COMPAT(fp16, half, u8abs, unsigned char, 4)
+MAKE_CVQ_DEQUANT_COMPAT(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+MAKE_CVQ_DEQUANT_COMPAT(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+MAKE_CVQ_DEQUANT_COMPAT(fp16, half, fp32abs, float, 2)
+MAKE_CVQ_DEQUANT_COMPAT(fp16, half, fp32abs, float, 4)
+MAKE_CVQ_DEQUANT_COMPAT(bf16, __nv_bfloat16, fp32abs, float, 2)
+MAKE_CVQ_DEQUANT_COMPAT(bf16, __nv_bfloat16, fp32abs, float, 4)
+
+// VQ tiled dequant extern C wrappers — new naming: cdequantize_vq_tiled_{tname}_{aname}_p{P}b{IB}
+#define MAKE_CVQ_DEQUANT_TILED(tname, T, aname, ABSMAX_T, P, IB)                                                      \
+    void cdequantize_vq_tiled_##tname##_##aname##_p##P##b##IB(                                                         \
         const unsigned int* packed_tiled, const half* codebook, const ABSMAX_T* absmax_tiled, T* out, int K_dim,       \
         int N, cudaStream_t stream                                                                                     \
     ) {                                                                                                                \
-        dequantize_vq_tiled_##tname##_##aname##_p##P(packed_tiled, codebook, absmax_tiled, out, K_dim, N, stream);     \
+        dequantize_vq_tiled_##tname##_##aname##_p##P##b##IB(packed_tiled, codebook, absmax_tiled, out, K_dim, N, stream); \
     }
 
-MAKE_CVQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 2)
-MAKE_CVQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 4)
-MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
-MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
-MAKE_CVQ_DEQUANT_TILED(fp16, half, fp32abs, float, 2)
-MAKE_CVQ_DEQUANT_TILED(fp16, half, fp32abs, float, 4)
-MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 2)
-MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 4)
+// All 5 VQ configs × 2 output dtypes × 2 absmax types
+// uint8 E4M4 absmax
+MAKE_CVQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 4, 8)
+MAKE_CVQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 3, 8)
+MAKE_CVQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 3, 10)
+MAKE_CVQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 2, 8)
+MAKE_CVQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 2, 10)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 4, 8)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 3, 8)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 3, 10)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 2, 8)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 2, 10)
+// float32 absmax
+MAKE_CVQ_DEQUANT_TILED(fp16, half, fp32abs, float, 4, 8)
+MAKE_CVQ_DEQUANT_TILED(fp16, half, fp32abs, float, 3, 8)
+MAKE_CVQ_DEQUANT_TILED(fp16, half, fp32abs, float, 3, 10)
+MAKE_CVQ_DEQUANT_TILED(fp16, half, fp32abs, float, 2, 8)
+MAKE_CVQ_DEQUANT_TILED(fp16, half, fp32abs, float, 2, 10)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 4, 8)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 3, 8)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 3, 10)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 2, 8)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 2, 10)
+
+// Backward-compat aliases for p2/p4 (8-bit)
+#define MAKE_CVQ_DEQUANT_TILED_COMPAT(tname, T, aname, ABSMAX_T, P)                                                   \
+    void cdequantize_vq_tiled_##tname##_##aname##_p##P(                                                                \
+        const unsigned int* pt, const half* cb, const ABSMAX_T* at, T* out, int K, int N, cudaStream_t s               \
+    ) { cdequantize_vq_tiled_##tname##_##aname##_p##P##b8(pt, cb, at, out, K, N, s); }
+MAKE_CVQ_DEQUANT_TILED_COMPAT(fp16, half, u8abs, unsigned char, 2)
+MAKE_CVQ_DEQUANT_TILED_COMPAT(fp16, half, u8abs, unsigned char, 4)
+MAKE_CVQ_DEQUANT_TILED_COMPAT(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+MAKE_CVQ_DEQUANT_TILED_COMPAT(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+MAKE_CVQ_DEQUANT_TILED_COMPAT(fp16, half, fp32abs, float, 2)
+MAKE_CVQ_DEQUANT_TILED_COMPAT(fp16, half, fp32abs, float, 4)
+MAKE_CVQ_DEQUANT_TILED_COMPAT(bf16, __nv_bfloat16, fp32abs, float, 2)
+MAKE_CVQ_DEQUANT_TILED_COMPAT(bf16, __nv_bfloat16, fp32abs, float, 4)
 
 // VQ scalar GEMV extern C wrappers (flat + tiled)
 // New naming: cvq_scalar_gemv_{dtype}_p{P}b{IB}

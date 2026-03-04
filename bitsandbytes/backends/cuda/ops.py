@@ -964,23 +964,24 @@ _VQ_DTYPE_SUFFIX = {
 
 
 @register_kernel("bitsandbytes::quantize_vq", "cuda")
-def _(A: torch.Tensor, codebook: torch.Tensor, p: int) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+def _(A: torch.Tensor, codebook: torch.Tensor, p: int, index_bits: int = 8) -> tuple[torch.Tensor, torch.Tensor]:
+    from bitsandbytes._ops import _vq_traits
+
     torch._check(
         A.dtype in _VQ_DTYPE_SUFFIX,
         lambda: f"quantize_vq only supports float16/bfloat16/float32, got {A.dtype}",
     )
     torch._check(codebook.dtype == torch.float16, lambda: f"codebook must be float16, got {codebook.dtype}")
 
+    traits = _vq_traits(p, index_bits)
     n = A.numel()
-    num_blocks = -(n // -32)
-    words_per_block = 32 // p // 4
-    packed = torch.zeros(num_blocks * words_per_block, device=A.device, dtype=torch.int32)
+    num_blocks = -(n // -traits["BS"])
+    packed = torch.zeros(num_blocks * traits["WORDS"], device=A.device, dtype=torch.int32)
     absmax = torch.zeros(num_blocks, device=A.device, dtype=torch.uint8)
 
     with _cuda_device_of(A):
         tname = _VQ_DTYPE_SUFFIX[A.dtype]
-        fn = getattr(lib, f"cquantize_vq_{tname}_p{p}")
+        fn = getattr(lib, f"cquantize_vq_{tname}_p{p}b{index_bits}")
         fn(
             get_ptr(codebook),
             get_ptr(A),
@@ -1001,8 +1002,8 @@ def _dequantize_vq_impl(
     n: int,
     dtype: torch.dtype,
     out: torch.Tensor,
+    index_bits: int = 8,
 ) -> None:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
     torch._check(
         dtype in _VQ_DTYPE_SUFFIX,
         lambda: f"dequantize_vq only supports float16/bfloat16/float32, got {dtype}",
@@ -1019,7 +1020,7 @@ def _dequantize_vq_impl(
     aname = _KBIT_ABSMAX_SUFFIX[absmax.dtype]
 
     with _cuda_device_of(packed):
-        fn = getattr(lib, f"cdequantize_vq_{tname}_{aname}_p{p}")
+        fn = getattr(lib, f"cdequantize_vq_{tname}_{aname}_p{p}b{index_bits}")
         fn(
             get_ptr(packed),
             get_ptr(codebook),
@@ -1038,10 +1039,12 @@ def _(
     p: int,
     n: int,
     dtype: torch.dtype,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    num_blocks = -(n // -32)
-    out = torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
-    _dequantize_vq_impl(packed, codebook, absmax, p, n, dtype, out)
+    BS = 48 if p == 3 else 32
+    num_blocks = -(n // -BS)
+    out = torch.empty(num_blocks * BS, device=packed.device, dtype=dtype)
+    _dequantize_vq_impl(packed, codebook, absmax, p, n, dtype, out, index_bits)
     return out
 
 
@@ -1054,8 +1057,9 @@ def _(
     n: int,
     dtype: torch.dtype,
     out: torch.Tensor,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    _dequantize_vq_impl(packed, codebook, absmax, p, n, dtype, out)
+    _dequantize_vq_impl(packed, codebook, absmax, p, n, dtype, out, index_bits)
     return out
 
 
@@ -1068,9 +1072,9 @@ def _dequantize_vq_tiled_impl(
     N: int,
     dtype: torch.dtype,
     out: torch.Tensor,
+    index_bits: int = 8,
 ) -> None:
     torch._check(codebook.dtype == torch.float16, lambda: f"codebook must be float16, got {codebook.dtype}")
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
 
     if dtype in (torch.float16,):
         tname = "fp16"
@@ -1087,7 +1091,7 @@ def _dequantize_vq_tiled_impl(
         raise ValueError(f"absmax must be uint8 or float32, got {absmax_tiled.dtype}")
 
     with _cuda_device_of(packed_tiled):
-        fn = getattr(lib, f"cdequantize_vq_tiled_{tname}_{aname}_p{p}")
+        fn = getattr(lib, f"cdequantize_vq_tiled_{tname}_{aname}_p{p}b{index_bits}")
         fn(
             get_ptr(packed_tiled),
             get_ptr(codebook),
@@ -1108,9 +1112,10 @@ def _(
     K_dim: int,
     N: int,
     dtype: torch.dtype,
+    index_bits: int = 8,
 ) -> torch.Tensor:
     out = torch.empty(N * K_dim, device=packed_tiled.device, dtype=dtype)
-    _dequantize_vq_tiled_impl(packed_tiled, codebook, absmax_tiled, p, K_dim, N, dtype, out)
+    _dequantize_vq_tiled_impl(packed_tiled, codebook, absmax_tiled, p, K_dim, N, dtype, out, index_bits)
     return out
 
 
@@ -1124,8 +1129,9 @@ def _(
     N: int,
     dtype: torch.dtype,
     out: torch.Tensor,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    _dequantize_vq_tiled_impl(packed_tiled, codebook, absmax_tiled, p, K_dim, N, dtype, out)
+    _dequantize_vq_tiled_impl(packed_tiled, codebook, absmax_tiled, p, K_dim, N, dtype, out, index_bits)
     return out
 
 
@@ -1139,13 +1145,14 @@ def _vq_scalar_gemv_impl(
     p: int,
     out: torch.Tensor,
     tiled: bool = False,
+    index_bits: int = 8,
 ) -> None:
     M = A.shape[0]
     dtype_suffix = "fp16" if A.dtype == torch.float16 else "bf16"
     tiled_str = "_tiled" if tiled else ""
 
     with _cuda_device_of(A):
-        fn = getattr(lib, f"cvq_scalar_gemv{tiled_str}_{dtype_suffix}_p{p}")
+        fn = getattr(lib, f"cvq_scalar_gemv{tiled_str}_{dtype_suffix}_p{p}b{index_bits}")
         fn(
             get_ptr(A),
             get_ptr(B_packed),
@@ -1168,15 +1175,15 @@ def _(
     K_dim: int,
     N: int,
     p: int,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
     torch._check(
         A.dtype in (torch.float16, torch.bfloat16),
         lambda: f"vq_scalar_gemv supports float16 and bfloat16, got {A.dtype}",
     )
     M = A.shape[0]
     out = torch.empty(M, N, device=A.device, dtype=A.dtype)
-    _vq_scalar_gemv_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, out=out)
+    _vq_scalar_gemv_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, out=out, index_bits=index_bits)
     return out
 
 
@@ -1190,8 +1197,9 @@ def _(
     N: int,
     p: int,
     out: torch.Tensor,
+    index_bits: int = 8,
 ) -> None:
-    _vq_scalar_gemv_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, out=out)
+    _vq_scalar_gemv_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, out=out, index_bits=index_bits)
 
 
 @register_kernel("bitsandbytes::vq_scalar_gemv_tiled", "cuda")
@@ -1203,15 +1211,15 @@ def _(
     K_dim: int,
     N: int,
     p: int,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
     torch._check(
         A.dtype in (torch.float16, torch.bfloat16),
         lambda: f"vq_scalar_gemv_tiled supports float16 and bfloat16, got {A.dtype}",
     )
     M = A.shape[0]
     out = torch.empty(M, N, device=A.device, dtype=A.dtype)
-    _vq_scalar_gemv_impl(A, B_packed_tiled, B_absmax_tiled, codebook, K_dim, N, p, out=out, tiled=True)
+    _vq_scalar_gemv_impl(A, B_packed_tiled, B_absmax_tiled, codebook, K_dim, N, p, out=out, tiled=True, index_bits=index_bits)
     return out
 
 
@@ -1225,14 +1233,14 @@ def _(
     N: int,
     p: int,
     out: torch.Tensor,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
     torch._check(
         A.dtype in (torch.float16, torch.bfloat16),
         lambda: f"vq_scalar_gemv_tiled_ supports float16 and bfloat16, got {A.dtype}",
     )
     M = A.shape[0]
-    _vq_scalar_gemv_impl(A, B_packed_tiled, B_absmax_tiled, codebook, K_dim, N, p, out=out, tiled=True)
+    _vq_scalar_gemv_impl(A, B_packed_tiled, B_absmax_tiled, codebook, K_dim, N, p, out=out, tiled=True, index_bits=index_bits)
     return out
 
 
@@ -1287,31 +1295,36 @@ def _(
     K_dim: int,
     N: int,
     p: int,
+    index_bits: int = 8,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    from bitsandbytes._ops import _vq_traits
+
     torch._check(packed_flat.dtype == torch.int32, lambda: f"packed_flat must be int32, got {packed_flat.dtype}")
     torch._check(
         absmax_flat.dtype == torch.uint8, lambda: f"absmax_flat must be uint8 (E4M4), got {absmax_flat.dtype}"
     )
 
-    TILE_K, TILE_N, BLOCKSIZE = 64, 128, 32
+    traits = _vq_traits(p, index_bits)
+    BS = traits["BS"]
+    TILE_K = traits["TILE_K"]
+    TILE_N = traits["TILE_N"]
+    WORDS = traits["WORDS"]
+    KB_PER_TILE = traits["KB_PER_TILE"]
     torch._check(N % TILE_N == 0, lambda: f"N ({N}) must be divisible by {TILE_N}")
-    torch._check(K_dim % BLOCKSIZE == 0, lambda: f"K_dim ({K_dim}) must be divisible by {BLOCKSIZE}")
+    torch._check(K_dim % BS == 0, lambda: f"K_dim ({K_dim}) must be divisible by {BS}")
 
     K_dim_padded = ((K_dim + TILE_K - 1) // TILE_K) * TILE_K
     k_tiles = K_dim_padded // TILE_K
     n_tiles = N // TILE_N
-    k_blocks_per_tile = TILE_K // BLOCKSIZE
-    words_per_block = BLOCKSIZE // (p * 4)
-    total_words = k_tiles * n_tiles * TILE_N * k_blocks_per_tile * words_per_block
-    total_absmax = k_tiles * n_tiles * TILE_N * k_blocks_per_tile
+    total_words = k_tiles * n_tiles * TILE_N * KB_PER_TILE * WORDS
+    total_absmax = k_tiles * n_tiles * TILE_N * KB_PER_TILE
 
     # Zero-fill for padding regions (when K_dim is not multiple of TILE_K)
     packed_tiled = torch.zeros(total_words, device=packed_flat.device, dtype=torch.int32)
     absmax_tiled = torch.zeros(total_absmax, device=packed_flat.device, dtype=torch.uint8)
 
     with _cuda_device_of(packed_flat):
-        fn = getattr(lib, f"crepack_vq_p{p}")
+        fn = getattr(lib, f"crepack_vq_p{p}b{index_bits}")
         fn(
             get_ptr(packed_flat),
             get_ptr(absmax_flat),
@@ -1470,7 +1483,7 @@ def _(
     return out
 
 
-def _vq_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, C, C_workspace, tile_counters):
+def _vq_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, C, C_workspace, tile_counters, index_bits=8):
     dtype_suffix = "fp16" if A.dtype == torch.float16 else "bf16"
 
     # Zero workspace and counters (required by atomicAdd accumulation)
@@ -1478,7 +1491,7 @@ def _vq_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, C
     tile_counters.zero_()
 
     with _cuda_device_of(A):
-        fn = getattr(lib, f"cvq_gemm_prod_{dtype_suffix}_p{p}")
+        fn = getattr(lib, f"cvq_gemm_prod_{dtype_suffix}_p{p}b{index_bits}")
         fn(
             get_ptr(A),
             get_ptr(B_packed),
@@ -1505,8 +1518,8 @@ def _(
     N: int,
     p: int,
     k_chunks: int,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
     torch._check(
         A.dtype in (torch.float16, torch.bfloat16),
         lambda: f"vq_gemm_prod supports float16 and bfloat16, got {A.dtype}",
@@ -1523,7 +1536,7 @@ def _(
     C_workspace = torch.zeros(M, N, device=A.device, dtype=torch.float32)
     tile_counters = torch.zeros(m_tiles * n_tiles, device=A.device, dtype=torch.int32)
 
-    _vq_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, C, C_workspace, tile_counters)
+    _vq_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, C, C_workspace, tile_counters, index_bits)
     return C
 
 
@@ -1540,13 +1553,13 @@ def _(
     out: torch.Tensor,
     C_workspace: torch.Tensor,
     tile_counters: torch.Tensor,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
     torch._check(
         A.dtype in (torch.float16, torch.bfloat16),
         lambda: f"vq_gemm_prod_ supports float16 and bfloat16, got {A.dtype}",
     )
-    _vq_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, out, C_workspace, tile_counters)
+    _vq_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, out, C_workspace, tile_counters, index_bits)
     return out
 
 
@@ -1728,6 +1741,7 @@ def _vq_grouped_gemm_impl(
     C_concat,
     C_workspace,
     tile_counters,
+    index_bits=8,
 ):
     dtype_suffix = "fp16" if A_concat.dtype == torch.float16 else "bf16"
 
@@ -1766,6 +1780,7 @@ def _(
     p: int,
     num_experts: int,
     max_M: int,
+    index_bits: int = 8,
 ) -> torch.Tensor:
     _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p)
 
@@ -1802,6 +1817,7 @@ def _(
         C_concat,
         C_workspace,
         tile_counters,
+        index_bits,
     )
     return C_concat
 
@@ -1821,6 +1837,7 @@ def _(
     out: torch.Tensor,
     C_workspace: torch.Tensor,
     tile_counters: torch.Tensor,
+    index_bits: int = 8,
 ) -> torch.Tensor:
     _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p)
     _vq_grouped_gemm_impl(
@@ -1837,6 +1854,7 @@ def _(
         out,
         C_workspace,
         tile_counters,
+        index_bits,
     )
     return out
 

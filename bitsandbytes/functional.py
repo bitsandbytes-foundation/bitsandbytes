@@ -1068,7 +1068,7 @@ _VQ_CODEBOOK_P2_1024_B64 = "/DT/M6y4MjA4tPq1lzLctaOrECZJLfCuhLBHsrglPTGdM8suBTGi
 _vq_codebook_cache: dict[tuple[int, int, torch.device], torch.Tensor] = {}
 
 
-def create_vq_codebook(p: int, n_entries: int = 256, device=None) -> torch.Tensor:
+def create_vq_codebook(p: int, n_entries: int = 256, device=None, index_bits: int = 0) -> torch.Tensor:
     """Create a VQ codebook for p-dimensional standard Gaussian vectors.
 
     Returns a precomputed codebook trained via k-means on N(0,1)^p samples.
@@ -1077,12 +1077,15 @@ def create_vq_codebook(p: int, n_entries: int = 256, device=None) -> torch.Tenso
 
     Args:
         p: VQ dimension (2, 3, or 4).
-        n_entries: Number of codebook entries (256 or 1024).
+        n_entries: Number of codebook entries (256 or 1024). Overridden by index_bits if set.
         device: Target device. Defaults to "cuda".
+        index_bits: If > 0, determines n_entries as 2^index_bits (8->256, 10->1024).
 
     Returns:
         Float16 tensor of shape (n_entries, p) with values in [-1, 1].
     """
+    if index_bits > 0:
+        n_entries = 1 << index_bits
     import base64
 
     if device is None:
@@ -1328,31 +1331,33 @@ def quantize_vq(
     A: Tensor,
     p: int = 2,
     codebook: Optional[Tensor] = None,
+    index_bits: int = 8,
 ) -> tuple[Tensor, Tensor, Tensor]:
-    """Quantize a tensor using VQ codebook quantization (blocksize=32).
+    """Quantize a tensor using VQ codebook quantization.
 
     Each group of p consecutive weights is mapped to the nearest entry in a
-    256-entry codebook. Produces 8/p bits per weight (p=2: 4 bits, p=4: 2 bits).
+    codebook. Blocksize is 48 for p=3, 32 otherwise.
 
     Args:
         A: Input tensor. Supports float16, bfloat16, or float32.
-        p: VQ dimension (2 or 4). Each byte index maps to p weight values.
-        codebook: Optional fp16 codebook tensor of shape [256, p].
+        p: VQ dimension (2, 3, or 4). Each index maps to p weight values.
+        codebook: Optional fp16 codebook tensor of shape [n_entries, p].
             If None, uses precomputed Gaussian codebook.
+        index_bits: Bits per codebook index (8 or 10). Default 8.
 
     Returns:
         Tuple of (packed, absmax, codebook):
-        - packed: int32 tensor of packed byte indices.
+        - packed: int32 tensor of packed indices.
         - absmax: uint8 tensor of E4M4 per-block absmax values.
         - codebook: The codebook tensor used.
     """
     if codebook is None:
-        codebook = create_vq_codebook(p, device=A.device)
+        codebook = create_vq_codebook(p, device=A.device, index_bits=index_bits)
     else:
         codebook = codebook.to(device=A.device, dtype=torch.float16)
 
     A_flat = A.contiguous().view(-1)
-    packed, absmax = torch.ops.bitsandbytes.quantize_vq(A_flat, codebook, p)
+    packed, absmax = torch.ops.bitsandbytes.quantize_vq(A_flat, codebook, p, index_bits)
     return packed, absmax, codebook
 
 
@@ -1364,29 +1369,32 @@ def dequantize_vq(
     n: int,
     dtype: torch.dtype = torch.float16,
     out: Optional[Tensor] = None,
+    index_bits: int = 8,
 ) -> Tensor:
     """Dequantize a VQ codebook quantized tensor.
 
     Args:
-        packed: int32 tensor of packed byte indices (from quantize_vq).
+        packed: int32 tensor of packed indices (from quantize_vq).
         absmax: Per-block absmax values (uint8 E4M4 or float32).
-        codebook: fp16 codebook tensor of shape [256, p].
-        p: VQ dimension (2 or 4).
+        codebook: fp16 codebook tensor of shape [n_entries, p].
+        p: VQ dimension (2, 3, or 4).
         n: Number of original elements.
         dtype: Output dtype. Defaults to float16.
         out: Optional pre-allocated output tensor.
+        index_bits: Bits per codebook index (8 or 10). Default 8.
 
     Returns:
         Dequantized tensor of shape (n,) with the given dtype.
     """
-    num_blocks = -(n // -32)
-    padded_n = num_blocks * 32
+    BS = 48 if p == 3 else 32
+    num_blocks = -(n // -BS)
+    padded_n = num_blocks * BS
 
     if out is not None:
-        torch.ops.bitsandbytes.dequantize_vq_(packed, codebook, absmax, p, n, dtype, out)
+        torch.ops.bitsandbytes.dequantize_vq_(packed, codebook, absmax, p, n, dtype, out, index_bits)
         return out[:n]
 
-    result = torch.ops.bitsandbytes.dequantize_vq(packed, codebook, absmax, p, n, dtype)
+    result = torch.ops.bitsandbytes.dequantize_vq(packed, codebook, absmax, p, n, dtype, index_bits)
     return result[:n]
 
 
@@ -1396,23 +1404,25 @@ def repack_vq(
     K_dim: int,
     N: int,
     p: int = 2,
+    index_bits: int = 8,
 ) -> tuple[Tensor, Tensor]:
     """Repack VQ quantized weights from flat to tiled layout.
 
-    Rearranges packed byte indices and absmax from flat column-major layout
+    Rearranges packed indices and absmax from flat column-major layout
     to tile-interleaved layout used by vq_scalar_gemv_tiled and vq_gemm_prod.
 
     Args:
-        packed_flat: int32 tensor of packed byte indices (from quantize_vq).
+        packed_flat: int32 tensor of packed indices (from quantize_vq).
         absmax_flat: uint8 E4M4 per-block absmax values.
         K_dim: Reduction dimension.
         N: Output dimension (must be multiple of 128).
-        p: VQ dimension (2 or 4).
+        p: VQ dimension (2, 3, or 4).
+        index_bits: Bits per codebook index (8 or 10). Default 8.
 
     Returns:
         Tuple of (packed_tiled, absmax_tiled).
     """
-    return torch.ops.bitsandbytes.repack_vq(packed_flat, absmax_flat, K_dim, N, p)
+    return torch.ops.bitsandbytes.repack_vq(packed_flat, absmax_flat, K_dim, N, p, index_bits)
 
 
 def dequantize_kbit_tiled(
@@ -1569,6 +1579,7 @@ def vq_linear(
     N: int,
     out: Optional[Tensor] = None,
     workspace: Optional[dict] = None,
+    index_bits: int = 8,
 ) -> Tensor:
     """Unified dispatch for VQ codebook quantized linear (C = A @ B^T).
 
@@ -1583,8 +1594,8 @@ def vq_linear(
         A: Input activations [M, K_dim], fp16 or bf16.
         B_packed: Tiled VQ packed weights (from repack_vq).
         B_absmax: Tiled per-block absmax values (from repack_vq).
-        codebook: fp16 codebook tensor [256, p].
-        p: VQ dimension (2 or 4).
+        codebook: fp16 codebook tensor [n_entries, p].
+        p: VQ dimension (2, 3, or 4).
         K_dim: Reduction dimension of weight matrix.
         N: Output dimension of weight matrix.
         out: Optional pre-allocated output [M, N] for CUDA graph compat.
@@ -1592,6 +1603,7 @@ def vq_linear(
             'C_workspace': float32 [M, N] for MMA accumulation
             'tile_counters': int32 [m_tiles * n_tiles] for persistent kernel
             'dequant_buf': fp16/bf16 [N * K_dim] for dequant+matmul path
+        index_bits: Bits per codebook index (8 or 10). Default 8.
 
     Returns:
         Output tensor [M, N] with same dtype as A.
@@ -1603,9 +1615,9 @@ def vq_linear(
         # Scalar GEMV: tiled layout, shared memory codebook lookup
         if out is not None:
             return torch.ops.bitsandbytes.vq_scalar_gemv_tiled_(
-                A, B_packed, B_absmax, codebook, K_dim, N, p, out[:M]
+                A, B_packed, B_absmax, codebook, K_dim, N, p, out[:M], index_bits
             )
-        return torch.ops.bitsandbytes.vq_scalar_gemv_tiled(A, B_packed, B_absmax, codebook, K_dim, N, p)
+        return torch.ops.bitsandbytes.vq_scalar_gemv_tiled(A, B_packed, B_absmax, codebook, K_dim, N, p, index_bits)
 
     if M <= 16:
         # Fused dequant + MMA: tiled layout, tensor core path
@@ -1614,19 +1626,19 @@ def vq_linear(
             C_workspace = workspace["C_workspace"]
             tile_counters = workspace["tile_counters"]
             return torch.ops.bitsandbytes.vq_gemm_prod_(
-                A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, out, C_workspace, tile_counters
+                A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, out, C_workspace, tile_counters, index_bits
             )
-        return torch.ops.bitsandbytes.vq_gemm_prod(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks)
+        return torch.ops.bitsandbytes.vq_gemm_prod(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, index_bits)
 
     # M > 16: dequantize tiled VQ to dense + cuBLAS matmul
     if workspace is not None and "dequant_buf" in workspace:
         dequant_buf = workspace["dequant_buf"]
         torch.ops.bitsandbytes.dequantize_vq_tiled_(
-            B_packed, codebook, B_absmax, p, K_dim, N, dtype, dequant_buf
+            B_packed, codebook, B_absmax, p, K_dim, N, dtype, dequant_buf, index_bits
         )
         W = dequant_buf[: N * K_dim].view(N, K_dim)
     else:
-        W_flat = torch.ops.bitsandbytes.dequantize_vq_tiled(B_packed, codebook, B_absmax, p, K_dim, N, dtype)
+        W_flat = torch.ops.bitsandbytes.dequantize_vq_tiled(B_packed, codebook, B_absmax, p, K_dim, N, dtype, index_bits)
         W = W_flat[: N * K_dim].view(N, K_dim)
 
     if out is not None:
@@ -1642,7 +1654,7 @@ def vq_linear_workspace(M: int, K_dim: int, N: int, p: int, dtype: torch.dtype, 
         M: Maximum batch size (must be >= actual M at runtime).
         K_dim: Reduction dimension.
         N: Output dimension.
-        p: VQ dimension (2 or 4).
+        p: VQ dimension (2, 3, or 4).
         dtype: Activation dtype (fp16 or bf16).
         device: CUDA device.
 
@@ -1653,12 +1665,13 @@ def vq_linear_workspace(M: int, K_dim: int, N: int, p: int, dtype: torch.dtype, 
     m_tiles = (M + TILE_M - 1) // TILE_M
     n_tiles = N // TILE_N
     n_total = N * K_dim
-    num_blocks = -(n_total // -32)
+    BS = 48 if p == 3 else 32
+    num_blocks = -(n_total // -BS)
 
     return {
         "C_workspace": torch.zeros(M, N, device=device, dtype=torch.float32),
         "tile_counters": torch.zeros(m_tiles * n_tiles, device=device, dtype=torch.int32),
-        "dequant_buf": torch.empty(num_blocks * 32, device=device, dtype=dtype),
+        "dequant_buf": torch.empty(num_blocks * BS, device=device, dtype=dtype),
     }
 
 
@@ -1675,6 +1688,7 @@ def vq_expert_linear(
     max_M: int,
     out: Optional[Tensor] = None,
     workspace: Optional[dict] = None,
+    index_bits: int = 8,
 ) -> Tensor:
     """Unified dispatch for VQ codebook quantized MoE expert linear.
 
@@ -1688,15 +1702,16 @@ def vq_expert_linear(
         A_concat: Concatenated activations [total_M, K_dim], fp16 or bf16.
         B_packed_all: Tiled VQ packed weights for all experts, concatenated.
         B_absmax_all: Tiled absmax for all experts, concatenated (uint8 E4M4).
-        codebook: fp16 codebook tensor [256, p].
+        codebook: fp16 codebook tensor [n_entries, p].
         expert_offsets: int32 tensor [num_experts+1] with cumulative token offsets.
-        p: VQ dimension (2 only for grouped kernel).
+        p: VQ dimension (2, 3, or 4). Grouped kernel supports p=2 only.
         K_dim: Reduction dimension.
         N: Output dimension per expert.
         num_experts: Number of experts.
         max_M: Maximum tokens routed to any single expert.
         out: Optional pre-allocated output [total_M, N].
         workspace: Optional dict with pre-allocated buffers.
+        index_bits: Bits per codebook index (8 or 10). Default 8.
 
     Returns:
         Output tensor [total_M, N] with same dtype as A_concat.
@@ -1723,6 +1738,7 @@ def vq_expert_linear(
                 out,
                 C_workspace,
                 tile_counters,
+                index_bits,
             )
         return torch.ops.bitsandbytes.vq_grouped_gemm(
             A_concat,
@@ -1735,6 +1751,7 @@ def vq_expert_linear(
             p,
             num_experts,
             max_M,
+            index_bits,
         )
 
     # max_M > 16: per-expert dequant + matmul

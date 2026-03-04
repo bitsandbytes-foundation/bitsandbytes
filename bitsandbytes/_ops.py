@@ -558,28 +558,51 @@ def _(
 
 
 # VQ (Vector Quantization) quantize/dequantize
+#
+# VQ traits helper: compute derived constants from (p, index_bits).
+# Must match VQTraits<P_VAL, INDEX_BITS> in csrc/ops.cu.
+_VQ_VALID_CONFIGS = {(2, 8), (2, 10), (3, 8), (3, 10), (4, 8)}
+
+
+def _vq_traits(p: int, index_bits: int = 8) -> dict:
+    BS = 48 if p == 3 else 32
+    CB_ENTRIES = 256 if index_bits == 8 else 1024
+    GROUPS = BS // p
+    WORDS = (GROUPS * index_bits + 31) // 32
+    TILE_K = 96 if p == 3 else 64
+    TILE_N = 128
+    KB_PER_TILE = TILE_K // BS
+    return {
+        "BS": BS,
+        "CB_ENTRIES": CB_ENTRIES,
+        "GROUPS": GROUPS,
+        "WORDS": WORDS,
+        "TILE_K": TILE_K,
+        "TILE_N": TILE_N,
+        "KB_PER_TILE": KB_PER_TILE,
+    }
+
 
 torch.library.define(
     "bitsandbytes::quantize_vq",
-    "(Tensor A, Tensor codebook, int p) -> (Tensor, Tensor)",
+    "(Tensor A, Tensor codebook, int p, int index_bits=8) -> (Tensor, Tensor)",
 )
 
 
 @register_fake("bitsandbytes::quantize_vq")
-def _(A: torch.Tensor, codebook: torch.Tensor, p: int) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
-    torch._check(codebook.shape == (256, p), lambda: f"codebook must be [256, {p}], got {codebook.shape}")
+def _(A: torch.Tensor, codebook: torch.Tensor, p: int, index_bits: int = 8) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config: p={p}, index_bits={index_bits}")
+    traits = _vq_traits(p, index_bits)
     n = A.numel()
-    num_blocks = -(n // -32)
-    words_per_block = 32 // p // 4  # p=2: 4, p=4: 2
-    packed = torch.empty(num_blocks * words_per_block, device=A.device, dtype=torch.int32)
+    num_blocks = -(n // -traits["BS"])
+    packed = torch.empty(num_blocks * traits["WORDS"], device=A.device, dtype=torch.int32)
     absmax = torch.empty(num_blocks, device=A.device, dtype=torch.uint8)
     return packed, absmax
 
 
 torch.library.define(
     "bitsandbytes::dequantize_vq",
-    "(Tensor packed, Tensor codebook, Tensor absmax, int p, int n, ScalarType dtype) -> Tensor",
+    "(Tensor packed, Tensor codebook, Tensor absmax, int p, int n, ScalarType dtype, int index_bits=8) -> Tensor",
 )
 
 
@@ -591,15 +614,18 @@ def _(
     p: int,
     n: int,
     dtype: torch.dtype,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
-    num_blocks = -(n // -32)
-    return torch.empty(num_blocks * 32, device=packed.device, dtype=dtype)
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config: p={p}, index_bits={index_bits}")
+    BS = 48 if p == 3 else 32
+    num_blocks = -(n // -BS)
+    return torch.empty(num_blocks * BS, device=packed.device, dtype=dtype)
 
 
 torch.library.define(
     "bitsandbytes::dequantize_vq_",
-    "(Tensor packed, Tensor codebook, Tensor absmax, int p, int n, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)",
+    "(Tensor packed, Tensor codebook, Tensor absmax, int p, int n, ScalarType dtype, Tensor(a!) out, "
+    "int index_bits=8) -> Tensor(a!)",
 )
 
 
@@ -612,8 +638,9 @@ def _(
     n: int,
     dtype: torch.dtype,
     out: torch.Tensor,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config: p={p}, index_bits={index_bits}")
     return out
 
 
@@ -621,7 +648,8 @@ def _(
 
 torch.library.define(
     "bitsandbytes::dequantize_vq_tiled",
-    "(Tensor packed_tiled, Tensor codebook, Tensor absmax_tiled, int p, int K_dim, int N, ScalarType dtype) -> Tensor",
+    "(Tensor packed_tiled, Tensor codebook, Tensor absmax_tiled, int p, int K_dim, int N, ScalarType dtype, "
+    "int index_bits=8) -> Tensor",
 )
 
 
@@ -634,15 +662,16 @@ def _(
     K_dim: int,
     N: int,
     dtype: torch.dtype,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config: p={p}, index_bits={index_bits}")
     return torch.empty(N * K_dim, device=packed_tiled.device, dtype=dtype)
 
 
 torch.library.define(
     "bitsandbytes::dequantize_vq_tiled_",
     "(Tensor packed_tiled, Tensor codebook, Tensor absmax_tiled, int p, int K_dim, int N, ScalarType dtype, "
-    "Tensor(a!) out) -> Tensor(a!)",
+    "Tensor(a!) out, int index_bits=8) -> Tensor(a!)",
 )
 
 
@@ -656,16 +685,18 @@ def _(
     N: int,
     dtype: torch.dtype,
     out: torch.Tensor,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config: p={p}, index_bits={index_bits}")
     return out
 
 
-# VQ scalar GEMV: byte-indexed codebook lookup GEMV for M=1-4
+# VQ scalar GEMV: codebook lookup GEMV for M=1-4
 
 torch.library.define(
     "bitsandbytes::vq_scalar_gemv",
-    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int p) -> Tensor",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int p, "
+    "int index_bits=8) -> Tensor",
 )
 
 
@@ -678,8 +709,9 @@ def _(
     K_dim: int,
     N: int,
     p: int,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config: p={p}, index_bits={index_bits}")
     torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
     torch._check(A.shape[0] <= 4, lambda: f"vq_scalar_gemv supports M<=4, got {A.shape[0]}")
     torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
@@ -689,7 +721,8 @@ def _(
 
 torch.library.define(
     "bitsandbytes::vq_scalar_gemv.out",
-    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int p, Tensor(a!) out) -> ()",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int p, Tensor(a!) out, "
+    "int index_bits=8) -> ()",
 )
 
 
@@ -703,6 +736,7 @@ def _(
     N: int,
     p: int,
     out: torch.Tensor,
+    index_bits: int = 8,
 ) -> None:
     pass
 
@@ -711,7 +745,8 @@ def _(
 
 torch.library.define(
     "bitsandbytes::vq_scalar_gemv_tiled",
-    "(Tensor A, Tensor B_packed_tiled, Tensor B_absmax_tiled, Tensor codebook, int K_dim, int N, int p) -> Tensor",
+    "(Tensor A, Tensor B_packed_tiled, Tensor B_absmax_tiled, Tensor codebook, int K_dim, int N, int p, "
+    "int index_bits=8) -> Tensor",
 )
 
 
@@ -724,8 +759,9 @@ def _(
     K_dim: int,
     N: int,
     p: int,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config: p={p}, index_bits={index_bits}")
     torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
     torch._check(A.shape[0] <= 4, lambda: f"vq_scalar_gemv_tiled supports M<=4, got {A.shape[0]}")
     torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
@@ -738,7 +774,7 @@ def _(
 torch.library.define(
     "bitsandbytes::vq_scalar_gemv_tiled_",
     "(Tensor A, Tensor B_packed_tiled, Tensor B_absmax_tiled, Tensor codebook, int K_dim, int N, int p, "
-    "Tensor(a!) out) -> Tensor(a!)",
+    "Tensor(a!) out, int index_bits=8) -> Tensor(a!)",
 )
 
 
@@ -752,8 +788,9 @@ def _(
     N: int,
     p: int,
     out: torch.Tensor,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config: p={p}, index_bits={index_bits}")
     torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
     torch._check(A.shape[0] <= 4, lambda: f"vq_scalar_gemv_tiled_ supports M<=4, got {A.shape[0]}")
     torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
@@ -792,25 +829,28 @@ def _(
 
 torch.library.define(
     "bitsandbytes::repack_vq",
-    "(Tensor packed_flat, Tensor absmax_flat, int K_dim, int N, int p) -> (Tensor, Tensor)",
+    "(Tensor packed_flat, Tensor absmax_flat, int K_dim, int N, int p, int index_bits=8) -> (Tensor, Tensor)",
 )
 
 
 @register_fake("bitsandbytes::repack_vq")
 def _(
-    packed_flat: torch.Tensor, absmax_flat: torch.Tensor, K_dim: int, N: int, p: int
+    packed_flat: torch.Tensor, absmax_flat: torch.Tensor, K_dim: int, N: int, p: int, index_bits: int = 8
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
-    TILE_K, TILE_N, BLOCKSIZE = 64, 128, 32
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config: p={p}, index_bits={index_bits}")
+    traits = _vq_traits(p, index_bits)
+    BS = traits["BS"]
+    TILE_K = traits["TILE_K"]
+    TILE_N = traits["TILE_N"]
+    WORDS = traits["WORDS"]
+    KB_PER_TILE = traits["KB_PER_TILE"]
     torch._check(N % TILE_N == 0, lambda: f"N ({N}) must be divisible by {TILE_N}")
-    torch._check(K_dim % BLOCKSIZE == 0, lambda: f"K_dim ({K_dim}) must be divisible by {BLOCKSIZE}")
+    torch._check(K_dim % BS == 0, lambda: f"K_dim ({K_dim}) must be divisible by {BS}")
     K_dim_padded = ((K_dim + TILE_K - 1) // TILE_K) * TILE_K
     k_tiles = K_dim_padded // TILE_K
     n_tiles = N // TILE_N
-    k_blocks_per_tile = TILE_K // BLOCKSIZE
-    words_per_block = BLOCKSIZE // (p * 4)
-    total_words = k_tiles * n_tiles * TILE_N * k_blocks_per_tile * words_per_block
-    total_absmax = k_tiles * n_tiles * TILE_N * k_blocks_per_tile
+    total_words = k_tiles * n_tiles * TILE_N * KB_PER_TILE * WORDS
+    total_absmax = k_tiles * n_tiles * TILE_N * KB_PER_TILE
     packed_tiled = torch.empty(total_words, device=packed_flat.device, dtype=torch.int32)
     absmax_tiled = torch.empty(total_absmax, device=packed_flat.device, dtype=torch.uint8)
     return packed_tiled, absmax_tiled
@@ -947,7 +987,8 @@ def _(
 
 torch.library.define(
     "bitsandbytes::vq_gemm_prod",
-    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int p, int k_chunks) -> Tensor",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int p, int k_chunks, "
+    "int index_bits=8) -> Tensor",
 )
 
 
@@ -961,8 +1002,9 @@ def _(
     N: int,
     p: int,
     k_chunks: int,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config: p={p}, index_bits={index_bits}")
     torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
     torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
     M = A.shape[0]
@@ -974,7 +1016,7 @@ def _(
 torch.library.define(
     "bitsandbytes::vq_gemm_prod_",
     "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int p, int k_chunks, "
-    "Tensor(a!) out, Tensor C_workspace, Tensor tile_counters) -> Tensor(a!)",
+    "Tensor(a!) out, Tensor C_workspace, Tensor tile_counters, int index_bits=8) -> Tensor(a!)",
 )
 
 
@@ -991,8 +1033,9 @@ def _(
     out: torch.Tensor,
     C_workspace: torch.Tensor,
     tile_counters: torch.Tensor,
+    index_bits: int = 8,
 ) -> torch.Tensor:
-    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config: p={p}, index_bits={index_bits}")
     torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
     torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
     M = A.shape[0]
@@ -1076,7 +1119,7 @@ def _(
 torch.library.define(
     "bitsandbytes::vq_grouped_gemm",
     "(Tensor A_concat, Tensor B_packed_all, Tensor B_absmax_all, Tensor codebook, "
-    "Tensor expert_offsets, int K_dim, int N, int p, int num_experts, int max_M) -> Tensor",
+    "Tensor expert_offsets, int K_dim, int N, int p, int num_experts, int max_M, int index_bits=8) -> Tensor",
 )
 
 
@@ -1092,6 +1135,7 @@ def _(
     p: int,
     num_experts: int,
     max_M: int,
+    index_bits: int = 8,
 ) -> torch.Tensor:
     torch._check(p == 2, lambda: f"VQ grouped GEMM only supports p=2, got {p}")
     torch._check(A_concat.dim() == 2 and A_concat.shape[1] == K_dim, lambda: "A_concat must be [total_M, K_dim]")
@@ -1108,7 +1152,7 @@ torch.library.define(
     "bitsandbytes::vq_grouped_gemm_",
     "(Tensor A_concat, Tensor B_packed_all, Tensor B_absmax_all, Tensor codebook, "
     "Tensor expert_offsets, int K_dim, int N, int p, int num_experts, int max_M, "
-    "Tensor(a!) out, Tensor C_workspace, Tensor tile_counters) -> Tensor(a!)",
+    "Tensor(a!) out, Tensor C_workspace, Tensor tile_counters, int index_bits=8) -> Tensor(a!)",
 )
 
 
@@ -1127,6 +1171,7 @@ def _(
     out: torch.Tensor,
     C_workspace: torch.Tensor,
     tile_counters: torch.Tensor,
+    index_bits: int = 8,
 ) -> torch.Tensor:
     torch._check(p == 2, lambda: f"VQ grouped GEMM only supports p=2, got {p}")
     torch._check(A_concat.dim() == 2 and A_concat.shape[1] == K_dim, lambda: "A_concat must be [total_M, K_dim]")
