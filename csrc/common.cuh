@@ -10,7 +10,8 @@
 // CDNA (gfx9xx) = 64, RDNA (gfx10xx/gfx11xx/gfx12xx) = 32.
 // __AMDGCN_WAVEFRONT_SIZE is not defined by all compiler versions (removed since ROCm 7.0),
 // so fall back to architecture-family macros when it is absent.
-// This is a macro that is defined by the compiler during each device-code pass and as such should only be used inside kernels.
+// This is a macro that is defined by the compiler during each device-code pass and as such
+// should only be used inside kernels.
 #ifdef __AMDGCN_WAVEFRONT_SIZE
 #define BNB_WARP_SIZE __AMDGCN_WAVEFRONT_SIZE
 #elif defined(__GFX9__)
