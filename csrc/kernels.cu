@@ -1791,9 +1791,9 @@ MAKE_kQuantizeBlockwiseSmall(half, 64, NF4)
 MAKE_kQuantizeBlockwiseSmall(float, 64, NF4)
 MAKE_kQuantizeBlockwiseSmall(bnb_bfloat16, 64, NF4)
 
-    template __global__ void kDequantizeBlockwise<half, 512, 64, 8, FP4>(
-        float* code, unsigned char* A, float* absmax, half* out, const int blocksize, const int n
-    );
+template __global__ void kDequantizeBlockwise<half, 512, 64, 8, FP4>(
+    float* code, unsigned char* A, float* absmax, half* out, const int blocksize, const int n
+);
 template __global__ void kDequantizeBlockwise<half, 512, 64, 8, General8bit>(
     float* code, unsigned char* A, float* absmax, half* out, const int blocksize, const int n
 );
