@@ -1186,6 +1186,76 @@ def _(
     return out
 
 
+# VQ Grouped Scalar GEMV: fused MoE expert scalar GEMV for M=1..4
+
+torch.library.define(
+    "bitsandbytes::vq_grouped_scalar_gemv",
+    "(Tensor A_concat, Tensor B_packed_all, Tensor B_absmax_all, Tensor codebook, "
+    "Tensor expert_offsets, int K_dim, int N, int p, int num_experts, int max_M, int index_bits=8) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::vq_grouped_scalar_gemv")
+def _(
+    A_concat: torch.Tensor,
+    B_packed_all: torch.Tensor,
+    B_absmax_all: torch.Tensor,
+    codebook: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    num_experts: int,
+    max_M: int,
+    index_bits: int = 8,
+) -> torch.Tensor:
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config ({p}, {index_bits})")
+    torch._check(A_concat.dim() == 2 and A_concat.shape[1] == K_dim, lambda: "A_concat must be [total_M, K_dim]")
+    torch._check(
+        A_concat.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A_concat.dtype}"
+    )
+    torch._check(max_M <= 4, lambda: f"vq_grouped_scalar_gemv supports max_M<=4, got {max_M}")
+    total_M = A_concat.shape[0]
+    return torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
+
+
+# VQ Grouped Scalar GEMV — inplace with pre-allocated output (CUDA graph compatible)
+
+torch.library.define(
+    "bitsandbytes::vq_grouped_scalar_gemv_",
+    "(Tensor A_concat, Tensor B_packed_all, Tensor B_absmax_all, Tensor codebook, "
+    "Tensor expert_offsets, int K_dim, int N, int p, int num_experts, int max_M, "
+    "Tensor(a!) out, int index_bits=8) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::vq_grouped_scalar_gemv_")
+def _(
+    A_concat: torch.Tensor,
+    B_packed_all: torch.Tensor,
+    B_absmax_all: torch.Tensor,
+    codebook: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    num_experts: int,
+    max_M: int,
+    out: torch.Tensor,
+    index_bits: int = 8,
+) -> torch.Tensor:
+    torch._check((p, index_bits) in _VQ_VALID_CONFIGS, lambda: f"Invalid VQ config ({p}, {index_bits})")
+    torch._check(A_concat.dim() == 2 and A_concat.shape[1] == K_dim, lambda: "A_concat must be [total_M, K_dim]")
+    torch._check(
+        A_concat.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A_concat.dtype}"
+    )
+    torch._check(max_M <= 4, lambda: f"vq_grouped_scalar_gemv_ supports max_M<=4, got {max_M}")
+    total_M = A_concat.shape[0]
+    torch._check(out.shape == (total_M, N), lambda: f"out must be [{total_M}, {N}], got {list(out.shape)}")
+    torch._check(out.dtype == A_concat.dtype, lambda: f"out dtype {out.dtype} must match A dtype {A_concat.dtype}")
+    return out
+
+
 # K-bit scalar GEMV: C[M,N] = A[M,K_dim] * W_kbit^T (M=1..4, scalar FMA)
 
 torch.library.define(

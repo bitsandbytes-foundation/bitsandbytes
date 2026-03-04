@@ -1864,6 +1864,91 @@ def _(
     return out
 
 
+# VQ Grouped Scalar GEMV — fused VQ codebook MoE scalar GEMV (M=1-4)
+
+def _vq_grouped_scalar_gemv_impl(
+    A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets,
+    K_dim, N, p, num_experts, max_M, C_concat, index_bits=8,
+):
+    dtype_suffix = "fp16" if A_concat.dtype == torch.float16 else "bf16"
+
+    with _cuda_device_of(A_concat):
+        fn = getattr(lib, f"cvq_grouped_scalar_gemv_{dtype_suffix}_p{p}b{index_bits}")
+        fn(
+            get_ptr(A_concat),
+            get_ptr(B_packed_all),
+            get_ptr(B_absmax_all),
+            get_ptr(codebook),
+            get_ptr(C_concat),
+            get_ptr(expert_offsets),
+            ct.c_int(K_dim),
+            ct.c_int(N),
+            ct.c_int(num_experts),
+            ct.c_int(max_M),
+            _get_tensor_stream(A_concat),
+        )
+
+
+@register_kernel("bitsandbytes::vq_grouped_scalar_gemv", "cuda")
+def _(
+    A_concat: torch.Tensor,
+    B_packed_all: torch.Tensor,
+    B_absmax_all: torch.Tensor,
+    codebook: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    num_experts: int,
+    max_M: int,
+    index_bits: int = 8,
+) -> torch.Tensor:
+    _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p, index_bits)
+    torch._check(max_M <= 4, lambda: f"vq_grouped_scalar_gemv supports max_M<=4, got {max_M}")
+    torch._check(
+        A_concat.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"vq_grouped_scalar_gemv supports float16 and bfloat16, got {A_concat.dtype}",
+    )
+
+    total_M = A_concat.shape[0]
+    C_concat = torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
+
+    _vq_grouped_scalar_gemv_impl(
+        A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets,
+        K_dim, N, p, num_experts, max_M, C_concat, index_bits,
+    )
+    return C_concat
+
+
+@register_kernel("bitsandbytes::vq_grouped_scalar_gemv_", "cuda")
+def _(
+    A_concat: torch.Tensor,
+    B_packed_all: torch.Tensor,
+    B_absmax_all: torch.Tensor,
+    codebook: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    num_experts: int,
+    max_M: int,
+    out: torch.Tensor,
+    index_bits: int = 8,
+) -> torch.Tensor:
+    _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p, index_bits)
+    torch._check(max_M <= 4, lambda: f"vq_grouped_scalar_gemv_ supports max_M<=4, got {max_M}")
+    torch._check(
+        A_concat.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"vq_grouped_scalar_gemv_ supports float16 and bfloat16, got {A_concat.dtype}",
+    )
+
+    _vq_grouped_scalar_gemv_impl(
+        A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets,
+        K_dim, N, p, num_experts, max_M, out, index_bits,
+    )
+    return out
+
+
 def _kbit_scalar_gemv_impl(
     A: torch.Tensor,
     B_packed: torch.Tensor,

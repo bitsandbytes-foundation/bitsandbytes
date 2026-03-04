@@ -1719,8 +1719,39 @@ def vq_expert_linear(
     total_M = A_concat.shape[0]
     dtype = A_concat.dtype
 
+    if max_M <= 4:
+        # Grouped VQ Scalar GEMV: optimal for M=1-4 (typical MoE decode)
+        if out is not None:
+            return torch.ops.bitsandbytes.vq_grouped_scalar_gemv_(
+                A_concat,
+                B_packed_all,
+                B_absmax_all,
+                codebook,
+                expert_offsets,
+                K_dim,
+                N,
+                p,
+                num_experts,
+                max_M,
+                out,
+                index_bits,
+            )
+        return torch.ops.bitsandbytes.vq_grouped_scalar_gemv(
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            p,
+            num_experts,
+            max_M,
+            index_bits,
+        )
+
     if max_M <= 16:
-        # Grouped VQ MMA: single fused kernel launch
+        # Grouped VQ MMA: single fused kernel launch for M=5-16
         if out is not None and workspace is not None:
             C_workspace = workspace["C_workspace"]
             tile_counters = workspace["tile_counters"]
