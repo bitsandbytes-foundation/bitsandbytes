@@ -2396,7 +2396,18 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
     constexpr int K_STEPS_PER_BLOCK = BS / 16;
     constexpr int TOTAL_K_STEPS = KB_PER_TILE * K_STEPS_PER_BLOCK;
 
-    constexpr int A_STAGE_ELEMS = TILE_M * TILE_K;
+    // A stride must be padded to next power-of-2 multiple of 8 so that the XOR
+    // swizzle (col_group ^ (row % 8)) never exceeds the allocated row width.
+    // For TILE_K=64: stride=64 (no change).  For TILE_K=96: stride=128.
+    static constexpr int _next_p2_groups = []() constexpr {
+        int g = TILE_K / 8;
+        int p2 = 1;
+        while (p2 < g) p2 *= 2;
+        return p2;
+    }();
+    constexpr int A_STRIDE_K = _next_p2_groups * 8;
+
+    constexpr int A_STAGE_ELEMS = TILE_M * A_STRIDE_K;
     constexpr int B_STAGE_WORDS = TILE_N * B_COL_WORDS;
     constexpr int ABS_STAGE_ELEMS = TILE_N * KB_PER_TILE;
     constexpr int ABS_STAGE_BYTES = ABS_STAGE_ELEMS * (int)sizeof(ABSMAX_T);
@@ -2489,30 +2500,34 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
             for (int i = threadIdx.x; i < ABS_INT4S; i += blockDim.x)
                 cp_async_cg_16(&abs_dst[i], &abs_src[i]);
 
-            // A tile via cp.async with XOR swizzle
+            // A tile via cp.async with XOR swizzle.
+            // Uses A_STRIDE_K (power-of-2 padded) as row pitch so XOR stays in bounds.
             scalar_t* a_dst = sh_a(stage);
-            constexpr int A_GROUPS = A_STAGE_ELEMS / 8;
-            const bool a_interior = (m_base + TILE_M <= M) && (k_base + TILE_K <= K_dim);
+            constexpr int A_GROUPS_TOTAL = A_STAGE_ELEMS / 8;
+            constexpr int A_K_GROUPS = A_STRIDE_K / 8;   // groups per row (may exceed TILE_K/8)
+            constexpr int REAL_K_GROUPS = TILE_K / 8;     // actual data groups per row
+            const bool a_interior = (m_base + TILE_M <= M) && (k_base + TILE_K <= K_dim)
+                                    && (A_STRIDE_K == TILE_K);
 
             if (a_interior) {
-                for (int i = threadIdx.x; i < A_GROUPS; i += blockDim.x) {
-                    int row = i / (TILE_K / 8);
-                    int col_group = i % (TILE_K / 8);
+                for (int i = threadIdx.x; i < A_GROUPS_TOTAL; i += blockDim.x) {
+                    int row = i / A_K_GROUPS;
+                    int col_group = i % A_K_GROUPS;
                     int swizzled_group = col_group ^ (row % 8);
-                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * A_STRIDE_K + swizzled_group * 8]);
                     const int4* src =
                         reinterpret_cast<const int4*>(&A[(m_base + row) * K_dim + k_base + col_group * 8]);
                     cp_async_cg_16(dst, src);
                 }
             } else {
-                for (int i = threadIdx.x; i < A_GROUPS; i += blockDim.x) {
-                    int row = i / (TILE_K / 8);
-                    int col_group = i % (TILE_K / 8);
+                for (int i = threadIdx.x; i < A_GROUPS_TOTAL; i += blockDim.x) {
+                    int row = i / A_K_GROUPS;
+                    int col_group = i % A_K_GROUPS;
                     int swizzled_group = col_group ^ (row % 8);
-                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * A_STRIDE_K + swizzled_group * 8]);
                     int gr = m_base + row;
                     int gc = k_base + col_group * 8;
-                    if (gr < M && gc < K_dim) {
+                    if (gr < M && gc < K_dim && col_group < REAL_K_GROUPS) {
                         const int4* src = reinterpret_cast<const int4*>(&A[gr * K_dim + gc]);
                         cp_async_cg_16(dst, src);
                     } else {
@@ -2546,7 +2561,7 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
                     const int swizzled_group = col_group ^ (a_row % 8);
                     const int swizzled_col_start = swizzled_group * 8;
 
-                    const scalar_t* addr = &a_ptr[a_row * TILE_K + swizzled_col_start];
+                    const scalar_t* addr = &a_ptr[a_row * A_STRIDE_K + swizzled_col_start];
                     uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
 
                     asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
@@ -2584,6 +2599,7 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
                         vq_cb_lookup<P_VAL, CB_ENTRIES>(cb_shmem, idx, cb_vals);
                         vals[v] = Ops::from_float(cb_vals[di] * scale_f);
                     }
+
 
                     uint32_t frag_b[2];
                     frag_b[0] = pack_two<scalar_t>(vals[0], vals[1]);
@@ -2705,7 +2721,16 @@ static void vqGemmProdLaunch(
     constexpr int NUM_WARPS = TILE_N / (N_BLOCKS * 8);
     constexpr int BLOCK_DIM = NUM_WARPS * 32;
 
-    constexpr int A_STAGE_BYTES = TILE_M * TILE_K * sizeof(scalar_t);
+    // Match A_STRIDE_K in kernel: pad to next power-of-2 of (TILE_K/8) groups
+    static constexpr int _launch_p2_groups = []() constexpr {
+        int g = TILE_K / 8;
+        int p2 = 1;
+        while (p2 < g) p2 *= 2;
+        return p2;
+    }();
+    constexpr int A_STRIDE_K = _launch_p2_groups * 8;
+
+    constexpr int A_STAGE_BYTES = TILE_M * A_STRIDE_K * sizeof(scalar_t);
     constexpr int B_STAGE_BYTES = TILE_N * B_COL_WORDS * sizeof(unsigned int);
     constexpr int ABS_STAGE_BYTES = TILE_N * KB_PER_TILE * (int)sizeof(ABSMAX_T);
     constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
@@ -4149,15 +4174,12 @@ __global__ void __launch_bounds__(64, VQGemvLaunchBounds<P_VAL, INDEX_BITS, M_VA
         const unsigned int* B_src = TILED ? B_packed : B_col;
         unsigned int words[WORDS];
         if constexpr (WORDS == 5) {
-            // 10-bit: 5 words = 20 bytes, no clean vector type. Load as 4+1.
-            if (valid) {
-                int4 pv = *reinterpret_cast<const int4*>(&B_src[word_base]);
-                words[0] = (unsigned int)pv.x; words[1] = (unsigned int)pv.y;
-                words[2] = (unsigned int)pv.z; words[3] = (unsigned int)pv.w;
-                words[4] = B_src[word_base + 4];
-            } else {
-                words[0] = 0; words[1] = 0; words[2] = 0; words[3] = 0; words[4] = 0;
-            }
+            // 10-bit: 5 words = 20 bytes. Blocks are at 20-byte intervals,
+            // so int4 (16-byte aligned) loads would fault on odd blocks.
+            // Use scalar loads instead.
+            #pragma unroll
+            for (int i = 0; i < 5; i++)
+                words[i] = valid ? B_src[word_base + i] : 0u;
         } else if constexpr (WORDS == 4) {
             int4 pv;
             if (valid)
