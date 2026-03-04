@@ -233,6 +233,8 @@ elseif(BUILD_ROCM)
     # auto-detect a single GPU and override the defaults.
     if(DEFINED BNB_ROCM_ARCH)
       set(CMAKE_HIP_ARCHITECTURES ${BNB_ROCM_ARCH})
+    elseif(AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
+      set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
     elseif(NOT CMAKE_HIP_ARCHITECTURES)
       set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100;gfx1101;gfx1150;gfx1151;gfx1200;gfx1201")
     endif()
