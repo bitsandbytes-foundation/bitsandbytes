@@ -248,6 +248,9 @@ def _(
 
     # Quantize with the lookup table
     code = CODE[quant_type].to(scaled.device).to(scaled.dtype)
+    # Pad to even length so packing pairs all elements
+    if scaled.numel() % 2 != 0:
+        scaled = torch.nn.functional.pad(scaled, (0, 1), value=0.0)
     quantized = torch.argmin(torch.abs(scaled.view(-1, 1) - code), dim=-1, keepdim=True).to(torch.uint8)
 
     # Pack two quantized values per byte
@@ -274,17 +277,20 @@ def _dequantize_4bit_impl(
     A = A.reshape(-1)
     # Map nf4 to [-1, 1]
     out_dq = torch.empty(A.size(0) * 2, dtype=torch.int32, device=A.device)
-    n = out_dq.numel()
     out_dq[1::2] = A & 0xF
     out_dq[::2] = A >> 4
     # code is fp32, cast to dtype to avoid the mismatch issue
     code = CODE[quant_type].to(dtype).to(A.device)
     out_dq = code[out_dq]
 
+    # Use the actual output size, not the unpacked size (which may include padding)
+    n = 1
+    for s in shape:
+        n *= s
+    # Trim any extra elements from padding during quantization
+    out_dq = out_dq[:n]
+
     # Apply scales
-    if out_dq.numel() != n:
-        assert out_dq.numel() == n + 1
-        out_dq = torch.narrow(out_dq, 0, 0, n)
     blocks = n // blocksize
     blocks += 1 if n % blocksize > 0 else 0
     rem = n % blocksize
