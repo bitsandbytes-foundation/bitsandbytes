@@ -905,52 +905,98 @@ MAKE_KBIT_SCALAR_GEMV_V2_FP16ABS(4)
 MAKE_KBIT_SCALAR_GEMV_V2_FP16ABS(5)
 
 // Forward declarations of VQ scalar GEMV templates
-template <int P, typename scalar_t, typename ABSMAX_T>
+template <int P, int IB, typename scalar_t, typename ABSMAX_T>
 void vqScalarGemv(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax,
     const half* codebook, scalar_t* C, int M, int K_dim, int N, cudaStream_t stream
 );
-template <int P, typename scalar_t, typename ABSMAX_T>
+template <int P, int IB, typename scalar_t, typename ABSMAX_T>
 void vqScalarGemvTiled(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax,
     const half* codebook, scalar_t* C, int M, int K_dim, int N, cudaStream_t stream
 );
 
 // VQ scalar GEMV wrappers (flat layout)
-#define MAKE_VQ_SCALAR_GEMV(P)                                                                                         \
-    void vq_scalar_gemv_fp16_p##P(                                                                                     \
+// Naming: cvq_scalar_gemv_{dtype}_p{P}b{IB}
+// For backward compat, p2 and p4 also get aliases without bIB (defaulting to 8-bit)
+#define MAKE_VQ_SCALAR_GEMV(P, IB)                                                                                     \
+    void vq_scalar_gemv_fp16_p##P##b##IB(                                                                              \
         const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,  \
         cudaStream_t s                                                                                                 \
     ) {                                                                                                                \
-        vqScalarGemv<P, half, unsigned char>(A, B, abs, cb, C, M, K, N, s);                                            \
+        vqScalarGemv<P, IB, half, unsigned char>(A, B, abs, cb, C, M, K, N, s);                                        \
     }                                                                                                                  \
-    void vq_scalar_gemv_bf16_p##P(                                                                                     \
+    void vq_scalar_gemv_bf16_p##P##b##IB(                                                                              \
         const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,     \
         int M, int K, int N, cudaStream_t s                                                                            \
     ) {                                                                                                                \
-        vqScalarGemv<P, __nv_bfloat16, unsigned char>(A, B, abs, cb, C, M, K, N, s);                                   \
+        vqScalarGemv<P, IB, __nv_bfloat16, unsigned char>(A, B, abs, cb, C, M, K, N, s);                               \
     }
 
-MAKE_VQ_SCALAR_GEMV(2)
-MAKE_VQ_SCALAR_GEMV(4)
+// All 5 VQ configs
+MAKE_VQ_SCALAR_GEMV(2, 8)
+MAKE_VQ_SCALAR_GEMV(2, 10)
+MAKE_VQ_SCALAR_GEMV(3, 8)
+MAKE_VQ_SCALAR_GEMV(3, 10)
+MAKE_VQ_SCALAR_GEMV(4, 8)
+
+// Backward-compat aliases for existing p2 and p4 (8-bit)
+void vq_scalar_gemv_fp16_p2(
+    const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,
+    cudaStream_t s
+) { vqScalarGemv<2, 8, half, unsigned char>(A, B, abs, cb, C, M, K, N, s); }
+void vq_scalar_gemv_bf16_p2(
+    const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,
+    int M, int K, int N, cudaStream_t s
+) { vqScalarGemv<2, 8, __nv_bfloat16, unsigned char>(A, B, abs, cb, C, M, K, N, s); }
+void vq_scalar_gemv_fp16_p4(
+    const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,
+    cudaStream_t s
+) { vqScalarGemv<4, 8, half, unsigned char>(A, B, abs, cb, C, M, K, N, s); }
+void vq_scalar_gemv_bf16_p4(
+    const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,
+    int M, int K, int N, cudaStream_t s
+) { vqScalarGemv<4, 8, __nv_bfloat16, unsigned char>(A, B, abs, cb, C, M, K, N, s); }
 
 // VQ scalar GEMV wrappers (tiled layout)
-#define MAKE_VQ_SCALAR_GEMV_TILED(P)                                                                                   \
-    void vq_scalar_gemv_tiled_fp16_p##P(                                                                               \
+#define MAKE_VQ_SCALAR_GEMV_TILED(P, IB)                                                                               \
+    void vq_scalar_gemv_tiled_fp16_p##P##b##IB(                                                                        \
         const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,  \
         cudaStream_t s                                                                                                 \
     ) {                                                                                                                \
-        vqScalarGemvTiled<P, half, unsigned char>(A, B, abs, cb, C, M, K, N, s);                                       \
+        vqScalarGemvTiled<P, IB, half, unsigned char>(A, B, abs, cb, C, M, K, N, s);                                   \
     }                                                                                                                  \
-    void vq_scalar_gemv_tiled_bf16_p##P(                                                                               \
+    void vq_scalar_gemv_tiled_bf16_p##P##b##IB(                                                                        \
         const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,     \
         int M, int K, int N, cudaStream_t s                                                                            \
     ) {                                                                                                                \
-        vqScalarGemvTiled<P, __nv_bfloat16, unsigned char>(A, B, abs, cb, C, M, K, N, s);                              \
+        vqScalarGemvTiled<P, IB, __nv_bfloat16, unsigned char>(A, B, abs, cb, C, M, K, N, s);                          \
     }
 
-MAKE_VQ_SCALAR_GEMV_TILED(2)
-MAKE_VQ_SCALAR_GEMV_TILED(4)
+// All 5 VQ configs
+MAKE_VQ_SCALAR_GEMV_TILED(2, 8)
+MAKE_VQ_SCALAR_GEMV_TILED(2, 10)
+MAKE_VQ_SCALAR_GEMV_TILED(3, 8)
+MAKE_VQ_SCALAR_GEMV_TILED(3, 10)
+MAKE_VQ_SCALAR_GEMV_TILED(4, 8)
+
+// Backward-compat aliases for existing p2 and p4 (8-bit)
+void vq_scalar_gemv_tiled_fp16_p2(
+    const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,
+    cudaStream_t s
+) { vqScalarGemvTiled<2, 8, half, unsigned char>(A, B, abs, cb, C, M, K, N, s); }
+void vq_scalar_gemv_tiled_bf16_p2(
+    const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,
+    int M, int K, int N, cudaStream_t s
+) { vqScalarGemvTiled<2, 8, __nv_bfloat16, unsigned char>(A, B, abs, cb, C, M, K, N, s); }
+void vq_scalar_gemv_tiled_fp16_p4(
+    const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,
+    cudaStream_t s
+) { vqScalarGemvTiled<4, 8, half, unsigned char>(A, B, abs, cb, C, M, K, N, s); }
+void vq_scalar_gemv_tiled_bf16_p4(
+    const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,
+    int M, int K, int N, cudaStream_t s
+) { vqScalarGemvTiled<4, 8, __nv_bfloat16, unsigned char>(A, B, abs, cb, C, M, K, N, s); }
 
 // Debug MMA test
 void testMMA(const half*, const half*, float*);
@@ -1716,41 +1762,87 @@ MAKE_CVQ_DEQUANT_TILED(fp16, half, fp32abs, float, 4)
 MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 2)
 MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 4)
 
-// VQ scalar GEMV extern C wrappers (flat layout)
-#define MAKE_CVQ_SCALAR_GEMV(P)                                                                                        \
-    void cvq_scalar_gemv_fp16_p##P(                                                                                    \
+// VQ scalar GEMV extern C wrappers (flat + tiled)
+// New naming: cvq_scalar_gemv_{dtype}_p{P}b{IB}
+// Backward-compat aliases: cvq_scalar_gemv_{dtype}_p{P} (for 8-bit p=2 and p=4)
+#define MAKE_CVQ_SCALAR_GEMV(P, IB)                                                                                    \
+    void cvq_scalar_gemv_fp16_p##P##b##IB(                                                                             \
         const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,  \
         cudaStream_t s                                                                                                 \
     ) {                                                                                                                \
-        vq_scalar_gemv_fp16_p##P(A, B, abs, cb, C, M, K, N, s);                                                       \
+        vq_scalar_gemv_fp16_p##P##b##IB(A, B, abs, cb, C, M, K, N, s);                                                \
     }                                                                                                                  \
-    void cvq_scalar_gemv_bf16_p##P(                                                                                    \
+    void cvq_scalar_gemv_bf16_p##P##b##IB(                                                                             \
         const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,     \
         int M, int K, int N, cudaStream_t s                                                                            \
     ) {                                                                                                                \
-        vq_scalar_gemv_bf16_p##P(A, B, abs, cb, C, M, K, N, s);                                                       \
+        vq_scalar_gemv_bf16_p##P##b##IB(A, B, abs, cb, C, M, K, N, s);                                                \
     }
 
-MAKE_CVQ_SCALAR_GEMV(2)
-MAKE_CVQ_SCALAR_GEMV(4)
+// All 5 VQ configs
+MAKE_CVQ_SCALAR_GEMV(2, 8)
+MAKE_CVQ_SCALAR_GEMV(2, 10)
+MAKE_CVQ_SCALAR_GEMV(3, 8)
+MAKE_CVQ_SCALAR_GEMV(3, 10)
+MAKE_CVQ_SCALAR_GEMV(4, 8)
 
-// VQ scalar GEMV extern C wrappers (tiled layout)
-#define MAKE_CVQ_SCALAR_GEMV_TILED(P)                                                                                  \
-    void cvq_scalar_gemv_tiled_fp16_p##P(                                                                              \
+// Backward-compat extern C aliases for p2/p4 (8-bit)
+void cvq_scalar_gemv_fp16_p2(
+    const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,
+    cudaStream_t s
+) { cvq_scalar_gemv_fp16_p2b8(A, B, abs, cb, C, M, K, N, s); }
+void cvq_scalar_gemv_bf16_p2(
+    const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,
+    int M, int K, int N, cudaStream_t s
+) { cvq_scalar_gemv_bf16_p2b8(A, B, abs, cb, C, M, K, N, s); }
+void cvq_scalar_gemv_fp16_p4(
+    const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,
+    cudaStream_t s
+) { cvq_scalar_gemv_fp16_p4b8(A, B, abs, cb, C, M, K, N, s); }
+void cvq_scalar_gemv_bf16_p4(
+    const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,
+    int M, int K, int N, cudaStream_t s
+) { cvq_scalar_gemv_bf16_p4b8(A, B, abs, cb, C, M, K, N, s); }
+
+// Tiled layout
+#define MAKE_CVQ_SCALAR_GEMV_TILED(P, IB)                                                                              \
+    void cvq_scalar_gemv_tiled_fp16_p##P##b##IB(                                                                       \
         const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,  \
         cudaStream_t s                                                                                                 \
     ) {                                                                                                                \
-        vq_scalar_gemv_tiled_fp16_p##P(A, B, abs, cb, C, M, K, N, s);                                                 \
+        vq_scalar_gemv_tiled_fp16_p##P##b##IB(A, B, abs, cb, C, M, K, N, s);                                          \
     }                                                                                                                  \
-    void cvq_scalar_gemv_tiled_bf16_p##P(                                                                              \
+    void cvq_scalar_gemv_tiled_bf16_p##P##b##IB(                                                                       \
         const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,     \
         int M, int K, int N, cudaStream_t s                                                                            \
     ) {                                                                                                                \
-        vq_scalar_gemv_tiled_bf16_p##P(A, B, abs, cb, C, M, K, N, s);                                                 \
+        vq_scalar_gemv_tiled_bf16_p##P##b##IB(A, B, abs, cb, C, M, K, N, s);                                          \
     }
 
-MAKE_CVQ_SCALAR_GEMV_TILED(2)
-MAKE_CVQ_SCALAR_GEMV_TILED(4)
+// All 5 VQ configs
+MAKE_CVQ_SCALAR_GEMV_TILED(2, 8)
+MAKE_CVQ_SCALAR_GEMV_TILED(2, 10)
+MAKE_CVQ_SCALAR_GEMV_TILED(3, 8)
+MAKE_CVQ_SCALAR_GEMV_TILED(3, 10)
+MAKE_CVQ_SCALAR_GEMV_TILED(4, 8)
+
+// Backward-compat extern C aliases for p2/p4 (8-bit)
+void cvq_scalar_gemv_tiled_fp16_p2(
+    const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,
+    cudaStream_t s
+) { cvq_scalar_gemv_tiled_fp16_p2b8(A, B, abs, cb, C, M, K, N, s); }
+void cvq_scalar_gemv_tiled_bf16_p2(
+    const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,
+    int M, int K, int N, cudaStream_t s
+) { cvq_scalar_gemv_tiled_bf16_p2b8(A, B, abs, cb, C, M, K, N, s); }
+void cvq_scalar_gemv_tiled_fp16_p4(
+    const half* A, const unsigned int* B, const unsigned char* abs, const half* cb, half* C, int M, int K, int N,
+    cudaStream_t s
+) { cvq_scalar_gemv_tiled_fp16_p4b8(A, B, abs, cb, C, M, K, N, s); }
+void cvq_scalar_gemv_tiled_bf16_p4(
+    const __nv_bfloat16* A, const unsigned int* B, const unsigned char* abs, const half* cb, __nv_bfloat16* C,
+    int M, int K, int N, cudaStream_t s
+) { cvq_scalar_gemv_tiled_bf16_p4b8(A, B, abs, cb, C, M, K, N, s); }
 
 // Production GEMM extern C wrappers (fp16 and bf16)
 #define MAKE_CKBIT_GEMM_PROD(K)                                                                                        \
