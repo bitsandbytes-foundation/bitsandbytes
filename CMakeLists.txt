@@ -325,6 +325,7 @@ elseif(BUILD_ROCM)
                     "  2. hipconfig --version — not found or returned no version\n"
                     "Please install ROCm and ensure ROCM_PATH is set correctly, or\n"
                 )
+            endif()
         endif()
 
         string(REPLACE "." "" _DETECTED_ROCM_VERSION_SHORT "${_DETECTED_ROCM_VERSION}")
