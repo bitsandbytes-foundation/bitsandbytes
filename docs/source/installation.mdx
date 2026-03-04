@@ -225,7 +225,7 @@ git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bits
 
 # Compile & install
 apt-get install -y build-essential cmake  # install build tools dependencies, unless present
-cmake -DCOMPUTE_BACKEND=hip -S .  # Use -DBNB_ROCM_ARCH="gfx90a;gfx942" to target specific gpu arch
+cmake -DCOMPUTE_BACKEND=rocm -S .  # Use -DBNB_ROCM_ARCH="gfx90a;gfx942" to target specific gpu arch
 make
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```

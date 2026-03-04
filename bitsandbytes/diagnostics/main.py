@@ -61,6 +61,7 @@ def show_environment():
 
     print(f"PyTorch: {torch.__version__}")
     print(f"  CUDA: {torch.version.cuda or 'N/A'}")
+    print(f"  ROCm: {getattr(torch.version, 'rocm', 'N/A') or 'N/A'}")
     print(f"  HIP: {torch.version.hip or 'N/A'}")
     print(f"  XPU: {getattr(torch.version, 'xpu', 'N/A') or 'N/A'}")
 
