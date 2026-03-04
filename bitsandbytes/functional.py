@@ -1376,6 +1376,31 @@ def dequantize_vq(
     return result[:n]
 
 
+def repack_vq(
+    packed_flat: Tensor,
+    absmax_flat: Tensor,
+    K_dim: int,
+    N: int,
+    p: int = 2,
+) -> tuple[Tensor, Tensor]:
+    """Repack VQ quantized weights from flat to tiled layout.
+
+    Rearranges packed byte indices and absmax from flat column-major layout
+    to tile-interleaved layout used by vq_scalar_gemv_tiled and vq_gemm_prod.
+
+    Args:
+        packed_flat: int32 tensor of packed byte indices (from quantize_vq).
+        absmax_flat: uint8 E4M4 per-block absmax values.
+        K_dim: Reduction dimension.
+        N: Output dimension (must be multiple of 128).
+        p: VQ dimension (2 or 4).
+
+    Returns:
+        Tuple of (packed_tiled, absmax_tiled).
+    """
+    return torch.ops.bitsandbytes.repack_vq(packed_flat, absmax_flat, K_dim, N, p)
+
+
 def dequantize_kbit_tiled(
     packed: Tensor,
     absmax: Tensor,

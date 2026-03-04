@@ -1210,6 +1210,51 @@ def _(
     return packed_tiled, absmax_tiled
 
 
+@register_kernel("bitsandbytes::repack_vq", "cuda")
+def _(
+    packed_flat: torch.Tensor,
+    absmax_flat: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(packed_flat.dtype == torch.int32, lambda: f"packed_flat must be int32, got {packed_flat.dtype}")
+    torch._check(
+        absmax_flat.dtype == torch.uint8, lambda: f"absmax_flat must be uint8 (E4M4), got {absmax_flat.dtype}"
+    )
+
+    TILE_K, TILE_N, BLOCKSIZE = 64, 128, 32
+    torch._check(N % TILE_N == 0, lambda: f"N ({N}) must be divisible by {TILE_N}")
+    torch._check(K_dim % BLOCKSIZE == 0, lambda: f"K_dim ({K_dim}) must be divisible by {BLOCKSIZE}")
+
+    K_dim_padded = ((K_dim + TILE_K - 1) // TILE_K) * TILE_K
+    k_tiles = K_dim_padded // TILE_K
+    n_tiles = N // TILE_N
+    k_blocks_per_tile = TILE_K // BLOCKSIZE
+    words_per_block = BLOCKSIZE // (p * 4)
+    total_words = k_tiles * n_tiles * TILE_N * k_blocks_per_tile * words_per_block
+    total_absmax = k_tiles * n_tiles * TILE_N * k_blocks_per_tile
+
+    # Zero-fill for padding regions (when K_dim is not multiple of TILE_K)
+    packed_tiled = torch.zeros(total_words, device=packed_flat.device, dtype=torch.int32)
+    absmax_tiled = torch.zeros(total_absmax, device=packed_flat.device, dtype=torch.uint8)
+
+    with _cuda_device_of(packed_flat):
+        fn = getattr(lib, f"crepack_vq_p{p}")
+        fn(
+            get_ptr(packed_flat),
+            get_ptr(absmax_flat),
+            get_ptr(packed_tiled),
+            get_ptr(absmax_tiled),
+            ct.c_int(K_dim),
+            ct.c_int(N),
+            _get_tensor_stream(packed_flat),
+        )
+
+    return packed_tiled, absmax_tiled
+
+
 @register_kernel("bitsandbytes::hadamard_rotate_", "cuda")
 def _(data: torch.Tensor, block_size: int, signs: Optional[torch.Tensor]) -> torch.Tensor:
     torch._check(

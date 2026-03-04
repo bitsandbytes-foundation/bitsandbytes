@@ -570,6 +570,21 @@ MAKE_KBIT_REPACK(3)
 MAKE_KBIT_REPACK(4)
 MAKE_KBIT_REPACK(5)
 
+// Forward declaration of VQ repack launcher
+template <int P>
+void repackVQ(const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int, cudaStream_t);
+
+#define MAKE_VQ_REPACK(P)                                                                                              \
+    void repack_vq_p##P(                                                                                               \
+        const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                  \
+        unsigned char* absmax_tiled, int K_dim, int N, cudaStream_t stream                                              \
+    ) {                                                                                                                \
+        repackVQ<P>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N, stream);                            \
+    }
+
+MAKE_VQ_REPACK(2)
+MAKE_VQ_REPACK(4)
+
 // Forward declarations of GEMM launchers
 template <int K, typename scalar_t, typename ABSMAX_T>
 void kbitGemmProd(
@@ -1518,6 +1533,18 @@ MAKE_CKBIT_REPACK(2)
 MAKE_CKBIT_REPACK(3)
 MAKE_CKBIT_REPACK(4)
 MAKE_CKBIT_REPACK(5)
+
+// VQ repack extern C wrappers
+#define MAKE_CREPACK_VQ(P)                                                                                             \
+    void crepack_vq_p##P(                                                                                              \
+        const unsigned int* packed_flat, const unsigned char* absmax_flat, unsigned int* packed_tiled,                  \
+        unsigned char* absmax_tiled, int K_dim, int N, cudaStream_t stream                                              \
+    ) {                                                                                                                \
+        repack_vq_p##P(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N, stream);                         \
+    }
+
+MAKE_CREPACK_VQ(2)
+MAKE_CREPACK_VQ(4)
 
 // fp16 absmax - all output types
 MAKE_CKBIT_DEQUANT(fp16, half, fp16abs, half, 2)

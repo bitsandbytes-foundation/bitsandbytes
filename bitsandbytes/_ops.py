@@ -744,6 +744,34 @@ def _(
     return packed_tiled, absmax_tiled
 
 
+# VQ repack: flat VQ byte layout -> tiled layout
+
+torch.library.define(
+    "bitsandbytes::repack_vq",
+    "(Tensor packed_flat, Tensor absmax_flat, int K_dim, int N, int p) -> (Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::repack_vq")
+def _(
+    packed_flat: torch.Tensor, absmax_flat: torch.Tensor, K_dim: int, N: int, p: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    TILE_K, TILE_N, BLOCKSIZE = 64, 128, 32
+    torch._check(N % TILE_N == 0, lambda: f"N ({N}) must be divisible by {TILE_N}")
+    torch._check(K_dim % BLOCKSIZE == 0, lambda: f"K_dim ({K_dim}) must be divisible by {BLOCKSIZE}")
+    K_dim_padded = ((K_dim + TILE_K - 1) // TILE_K) * TILE_K
+    k_tiles = K_dim_padded // TILE_K
+    n_tiles = N // TILE_N
+    k_blocks_per_tile = TILE_K // BLOCKSIZE
+    words_per_block = BLOCKSIZE // (p * 4)
+    total_words = k_tiles * n_tiles * TILE_N * k_blocks_per_tile * words_per_block
+    total_absmax = k_tiles * n_tiles * TILE_N * k_blocks_per_tile
+    packed_tiled = torch.empty(total_words, device=packed_flat.device, dtype=torch.int32)
+    absmax_tiled = torch.empty(total_absmax, device=packed_flat.device, dtype=torch.uint8)
+    return packed_tiled, absmax_tiled
+
+
 # Hadamard rotation (in-place, for kbit quantization outlier spreading)
 
 torch.library.define(

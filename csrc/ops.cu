@@ -1180,6 +1180,67 @@ void repackKbit(
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
+// ---- VQ Repack (flat VQ bytes -> tiled layout) ----
+// Same tile geometry as kbit repack but with VQ byte words instead of bit planes.
+// words_per_block = BS / (P_VAL * 4): p=2→4, p=4→2
+
+template <int P_VAL>
+__global__ void kRepackVQ(
+    const unsigned int* __restrict__ packed_flat, const unsigned char* __restrict__ absmax_flat,
+    unsigned int* __restrict__ packed_tiled, unsigned char* __restrict__ absmax_tiled, const int K_dim, const int N
+) {
+    constexpr int BS = 32;
+    constexpr int WORDS_PER_BLOCK = BS / (P_VAL * 4); // p=2: 4, p=4: 2
+    const int total_k_blocks = K_dim / BS;
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= N * total_k_blocks)
+        return;
+
+    const int n_idx = idx / total_k_blocks;
+    const int k_block_idx = idx % total_k_blocks;
+    const int k_start = k_block_idx * BS;
+
+    // Source: flat layout
+    const int flat_block_id = n_idx * total_k_blocks + k_block_idx;
+
+    // Destination: tiled layout
+    const int k_tile = k_start / KBIT_TILE_K;
+    const int n_tile = n_idx / KBIT_TILE_N;
+    const int col = n_idx % KBIT_TILE_N;
+    const int kb = (k_start % KBIT_TILE_K) / BS;
+
+    const int n_tiles = N / KBIT_TILE_N;
+    constexpr int KB_PER_TILE = KBIT_TILE_K / BS; // 2
+    constexpr int WORDS_PER_TILE = KBIT_TILE_N * KB_PER_TILE * WORDS_PER_BLOCK;
+    constexpr int ABS_PER_TILE = KBIT_TILE_N * KB_PER_TILE;
+
+    const int tile_base = k_tile * n_tiles + n_tile;
+    const int dst_word_base = tile_base * WORDS_PER_TILE + (col * KB_PER_TILE + kb) * WORDS_PER_BLOCK;
+    const int src_word_base = flat_block_id * WORDS_PER_BLOCK;
+
+#pragma unroll
+    for (int w = 0; w < WORDS_PER_BLOCK; w++)
+        packed_tiled[dst_word_base + w] = packed_flat[src_word_base + w];
+
+    const int dst_abs_idx = tile_base * ABS_PER_TILE + col * KB_PER_TILE + kb;
+    absmax_tiled[dst_abs_idx] = absmax_flat[flat_block_id];
+}
+
+// VQ Repack launcher
+template <int P_VAL>
+void repackVQ(
+    const unsigned int* packed_flat, const unsigned char* absmax_flat,
+    unsigned int* packed_tiled, unsigned char* absmax_tiled,
+    int K_dim, int N, cudaStream_t stream
+) {
+    int total_work = N * (K_dim / 32);
+    int block_size = 256;
+    int grid_size = (total_work + block_size - 1) / block_size;
+    kRepackVQ<P_VAL>
+        <<<grid_size, block_size, 0, stream>>>(packed_flat, absmax_flat, packed_tiled, absmax_tiled, K_dim, N);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
 // ===========================================================================
 // Hadamard rotation kernel (in-place, blocksize-templated)
 //
@@ -3499,6 +3560,14 @@ INSTANTIATE_KBIT_REPACK(2)
 INSTANTIATE_KBIT_REPACK(3)
 INSTANTIATE_KBIT_REPACK(4)
 INSTANTIATE_KBIT_REPACK(5)
+
+// VQ repack: P_VAL
+#define INSTANTIATE_VQ_REPACK(P)                                                                                       \
+    template void repackVQ<P>(                                                                                         \
+        const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int, cudaStream_t                \
+    );
+INSTANTIATE_VQ_REPACK(2)
+INSTANTIATE_VQ_REPACK(4)
 
 // Production kernel instantiations — uint8 E4M4 absmax (default)
 #define INSTANTIATE_KBIT_GEMM_PROD_U8(K)                                                                               \
