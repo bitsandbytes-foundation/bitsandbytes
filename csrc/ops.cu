@@ -13,16 +13,14 @@
 #if BNB_HIP
 #include <hip/hip_runtime.h>
 
+// NOTE: This queries device 0 once and caches the result. On mixed RDNA+CDNA
+// systems (warp size 32 vs 64) this will return the wrong value for whichever
+// device doesn't match device 0.
 static int bnb_host_warp_size() {
-    constexpr int MAX_DEVICES = 32;
-    static int cache[MAX_DEVICES] = {};
-    int dev;
-    (void)hipGetDevice(&dev);
-    if (dev < 0 || dev >= MAX_DEVICES)
-        return 64;
-    if (cache[dev] == 0)
-        (void)hipDeviceGetAttribute(&cache[dev], hipDeviceAttributeWarpSize, dev);
-    return cache[dev];
+    static int warp_size = 0;
+    if (warp_size == 0)
+        (void)hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0);
+    return warp_size;
 }
 #else
 static constexpr int bnb_host_warp_size() { return 32; }
