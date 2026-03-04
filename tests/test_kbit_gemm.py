@@ -1203,7 +1203,35 @@ class TestVQLinearDispatch:
 
     @pytest.mark.parametrize("p", [2, 4])
     @pytest.mark.parametrize("M", [5, 8, 16, 32])
-    @pytest.mark.skip(reason="Task 5 (VQ MMA kernel) not yet implemented")
     def test_vq_mma_kernel(self, p, M):
-        """VQ MMA kernel correctness (placeholder for Task 5)."""
-        pass
+        """VQ MMA kernel (vq_gemm_prod) correctness."""
+        from bitsandbytes.functional import create_vq_codebook, quantize_vq, repack_vq
+
+        K_dim, N = 512, 256
+        torch.manual_seed(42)
+
+        W = torch.randn(N, K_dim)
+        codebook = create_vq_codebook(p, device="cuda")
+        W_gpu = W.half().cuda()
+        packed_flat, absmax_flat, _ = quantize_vq(W_gpu, p=p, codebook=codebook)
+        packed_tiled, absmax_tiled = repack_vq(packed_flat, absmax_flat, K_dim, N, p=p)
+
+        A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
+
+        C = torch.ops.bitsandbytes.vq_gemm_prod(
+            A, packed_tiled, absmax_tiled, codebook, K_dim, N, p, 1,
+        )
+
+        # Reference
+        from bitsandbytes.functional import dequantize_vq
+
+        W_deq = dequantize_vq(packed_flat, absmax_flat, codebook, p=p, n=N * K_dim)
+        W_deq = W_deq.reshape(N, K_dim)
+        C_ref = (A.float() @ W_deq.float().T).to(A.dtype)
+
+        diff = (C.float() - C_ref.float()).abs()
+        scale = C_ref.float().abs().clamp(min=1.0)
+        rel_err = (diff / scale).max().item()
+        assert rel_err < 0.10, (
+            f"p={p}, M={M}: vq_gemm_prod mismatch. Max rel err: {rel_err:.6f}"
+        )

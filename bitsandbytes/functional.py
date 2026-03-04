@@ -1560,7 +1560,8 @@ def vq_linear(
 
     Routes to the optimal kernel based on M (batch dimension):
       - M <= 4:  scalar GEMV (tiled layout, shmem codebook lookup)
-      - M > 4:   dequantize to fp16/bf16 + cuBLAS matmul
+      - M <= 16: fused dequant + MMA (tiled layout, tensor core)
+      - M > 16:  dequantize to fp16/bf16 + cuBLAS matmul
 
     All paths read tiled B layout (from repack_vq output).
 
@@ -1574,6 +1575,8 @@ def vq_linear(
         N: Output dimension of weight matrix.
         out: Optional pre-allocated output [M, N] for CUDA graph compat.
         workspace: Optional dict with pre-allocated buffers:
+            'C_workspace': float32 [M, N] for MMA accumulation
+            'tile_counters': int32 [m_tiles * n_tiles] for persistent kernel
             'dequant_buf': fp16/bf16 [N * K_dim] for dequant+matmul path
 
     Returns:
@@ -1590,7 +1593,18 @@ def vq_linear(
             )
         return torch.ops.bitsandbytes.vq_scalar_gemv_tiled(A, B_packed, B_absmax, codebook, K_dim, N, p)
 
-    # M > 4: dequantize tiled VQ to dense + cuBLAS matmul
+    if M <= 16:
+        # Fused dequant + MMA: tiled layout, tensor core path
+        k_chunks = 1  # auto-selected internally by the kernel
+        if out is not None and workspace is not None:
+            C_workspace = workspace["C_workspace"]
+            tile_counters = workspace["tile_counters"]
+            return torch.ops.bitsandbytes.vq_gemm_prod_(
+                A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, out, C_workspace, tile_counters
+            )
+        return torch.ops.bitsandbytes.vq_gemm_prod(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks)
+
+    # M > 16: dequantize tiled VQ to dense + cuBLAS matmul
     if workspace is not None and "dequant_buf" in workspace:
         dequant_buf = workspace["dequant_buf"]
         torch.ops.bitsandbytes.dequantize_vq_tiled_(
@@ -1619,12 +1633,17 @@ def vq_linear_workspace(M: int, K_dim: int, N: int, p: int, dtype: torch.dtype, 
         device: CUDA device.
 
     Returns:
-        Dict with 'dequant_buf' tensor.
+        Dict with 'C_workspace', 'tile_counters', 'dequant_buf' tensors.
     """
+    TILE_M, TILE_N = 16, 64  # worst-case tile sizes for counter allocation
+    m_tiles = (M + TILE_M - 1) // TILE_M
+    n_tiles = N // TILE_N
     n_total = N * K_dim
     num_blocks = -(n_total // -32)
 
     return {
+        "C_workspace": torch.zeros(M, N, device=device, dtype=torch.float32),
+        "tile_counters": torch.zeros(m_tiles * n_tiles, device=device, dtype=torch.int32),
         "dequant_buf": torch.empty(num_blocks * 32, device=device, dtype=dtype),
     }
 
