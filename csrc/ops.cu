@@ -836,6 +836,149 @@ __global__ void kDequantizeBlockwise_kbit_vec(
     }
 }
 
+// ---- VQ Generalized Template Infrastructure ----
+// VQTraits: compile-time constants for all VQ kernel configurations.
+// Parameterized on P_VAL (vector dimension) and INDEX_BITS (codebook index width).
+//
+// Target configurations:
+//   8-bit/p=4  → 2.00 bits/wt, BS=32, 256 entries, 2 KB shmem
+//   8-bit/p=3  → 2.67 bits/wt, BS=48, 256 entries, 2 KB shmem
+//  10-bit/p=3  → 3.33 bits/wt, BS=48, 1024 entries, 8 KB shmem
+//   8-bit/p=2  → 4.00 bits/wt, BS=32, 256 entries, 1 KB shmem
+//  10-bit/p=2  → 5.00 bits/wt, BS=32, 1024 entries, 4 KB shmem
+
+template <int P_VAL, int INDEX_BITS = 8>
+struct VQTraits {
+    static constexpr int BS = (P_VAL == 3) ? 48 : 32;
+    static constexpr int CB_ENTRIES = 1 << INDEX_BITS;        // 256 (8-bit) or 1024 (10-bit)
+    static constexpr int GROUPS = BS / P_VAL;                 // always exact division
+    static constexpr int TOTAL_BITS = GROUPS * INDEX_BITS;
+    static constexpr int WORDS = (TOTAL_BITS + 31) / 32;     // uint32 words per block
+    static constexpr int CB_PLANES = (P_VAL + 1) / 2;        // 1 for p=2, 2 for p=3/4
+    static constexpr int CB_SHMEM_BYTES = CB_PLANES * CB_ENTRIES * (int)sizeof(half2);
+    static constexpr int TILE_K = 2 * BS;                     // 64 (BS=32) or 96 (BS=48)
+    static constexpr int TILE_N = 128;
+    static constexpr int KB_PER_TILE = 2;
+    static constexpr int WORDS_PER_TILE = TILE_N * KB_PER_TILE * WORDS;
+    static constexpr int ABS_PER_TILE = TILE_N * KB_PER_TILE;
+};
+
+// extract_index: extract the i-th codebook index from packed uint32 words.
+// 8-bit: fast byte extraction. 10-bit: general bit-shift with cross-boundary OR.
+template <int INDEX_BITS>
+__device__ __forceinline__ int vq_extract_index(const unsigned int* words, int i) {
+    if constexpr (INDEX_BITS == 8) {
+        return (words[i >> 2] >> ((i & 3) << 3)) & 0xFF;
+    } else {
+        constexpr unsigned int MASK = (1u << INDEX_BITS) - 1u;
+        const int bit = i * INDEX_BITS;
+        const int w = bit >> 5;       // bit / 32
+        const int off = bit & 31;     // bit % 32
+        unsigned int val = words[w] >> off;
+        if (off > 32 - INDEX_BITS)    // crosses uint32 boundary
+            val |= words[w + 1] << (32 - off);
+        return (int)(val & MASK);
+    }
+}
+
+// cb_lookup: read P_VAL fp16 values from the shared memory codebook.
+// Codebook stored as CB_PLANES planes of half2[CB_ENTRIES]:
+//   p=2: 1 plane  → s_cb[idx] = (val0, val1)
+//   p=3: 2 planes → s_cb[idx] = (val0, val1), s_cb[CB_ENTRIES+idx] = (val2, pad)
+//   p=4: 2 planes → s_cb[idx] = (val0, val1), s_cb[CB_ENTRIES+idx] = (val2, val3)
+template <int P_VAL, int CB_ENTRIES>
+__device__ __forceinline__ void vq_cb_lookup(const half2* s_cb, int idx, float* out) {
+    half2 v0 = s_cb[idx];
+    out[0] = __half2float(v0.x);
+    out[1] = __half2float(v0.y);
+    if constexpr (P_VAL >= 3) {
+        half2 v1 = s_cb[CB_ENTRIES + idx];
+        out[2] = __half2float(v1.x);
+        if constexpr (P_VAL == 4)
+            out[3] = __half2float(v1.y);
+    }
+}
+
+// load_codebook: load the codebook from global memory into shared memory.
+// Handles the plane-split layout for p>=3.
+template <int P_VAL, int CB_ENTRIES, int BLOCK_SIZE>
+__device__ __forceinline__ void vq_load_codebook(half2* s_cb, const half* codebook) {
+    const half2* cb_src = reinterpret_cast<const half2*>(codebook);
+    if constexpr (P_VAL == 2) {
+        // [CB_ENTRIES, 2] fp16 viewed as half2[CB_ENTRIES]
+        for (int i = threadIdx.x; i < CB_ENTRIES; i += BLOCK_SIZE)
+            s_cb[i] = cb_src[i];
+    } else if constexpr (P_VAL == 3) {
+        // [CB_ENTRIES, 3] fp16: store as half2 plane0 (val0,val1) + half2 plane1 (val2, pad=0)
+        // Source layout: 3 half values per entry → 1.5 half2 per entry.
+        // We read 3 half values manually and pack into 2 half2.
+        const half* cb_half = codebook;
+        for (int i = threadIdx.x; i < CB_ENTRIES; i += BLOCK_SIZE) {
+            half h0 = cb_half[i * 3 + 0];
+            half h1 = cb_half[i * 3 + 1];
+            half h2 = cb_half[i * 3 + 2];
+            s_cb[i] = __halves2half2(h0, h1);
+            s_cb[CB_ENTRIES + i] = __halves2half2(h2, __float2half(0.0f));
+        }
+    } else {
+        // p=4: [CB_ENTRIES, 4] fp16 viewed as half2[CB_ENTRIES*2]
+        // Split into lo[CB_ENTRIES] and hi[CB_ENTRIES]
+        for (int i = threadIdx.x; i < CB_ENTRIES; i += BLOCK_SIZE) {
+            s_cb[i] = cb_src[i * 2];             // cb_lo: values 0,1
+            s_cb[CB_ENTRIES + i] = cb_src[i * 2 + 1]; // cb_hi: values 2,3
+        }
+    }
+}
+
+// Static assertions to verify VQTraits for all 5 target configurations
+static_assert(VQTraits<4, 8>::BS == 32 && VQTraits<4, 8>::CB_ENTRIES == 256 &&
+    VQTraits<4, 8>::GROUPS == 8 && VQTraits<4, 8>::WORDS == 2 &&
+    VQTraits<4, 8>::CB_PLANES == 2 && VQTraits<4, 8>::CB_SHMEM_BYTES == 2048 &&
+    VQTraits<4, 8>::TILE_K == 64, "VQTraits<4,8> mismatch");
+
+static_assert(VQTraits<3, 8>::BS == 48 && VQTraits<3, 8>::CB_ENTRIES == 256 &&
+    VQTraits<3, 8>::GROUPS == 16 && VQTraits<3, 8>::WORDS == 4 &&
+    VQTraits<3, 8>::CB_PLANES == 2 && VQTraits<3, 8>::CB_SHMEM_BYTES == 2048 &&
+    VQTraits<3, 8>::TILE_K == 96, "VQTraits<3,8> mismatch");
+
+static_assert(VQTraits<3, 10>::BS == 48 && VQTraits<3, 10>::CB_ENTRIES == 1024 &&
+    VQTraits<3, 10>::GROUPS == 16 && VQTraits<3, 10>::WORDS == 5 &&
+    VQTraits<3, 10>::CB_PLANES == 2 && VQTraits<3, 10>::CB_SHMEM_BYTES == 8192 &&
+    VQTraits<3, 10>::TILE_K == 96, "VQTraits<3,10> mismatch");
+
+static_assert(VQTraits<2, 8>::BS == 32 && VQTraits<2, 8>::CB_ENTRIES == 256 &&
+    VQTraits<2, 8>::GROUPS == 16 && VQTraits<2, 8>::WORDS == 4 &&
+    VQTraits<2, 8>::CB_PLANES == 1 && VQTraits<2, 8>::CB_SHMEM_BYTES == 1024 &&
+    VQTraits<2, 8>::TILE_K == 64, "VQTraits<2,8> mismatch");
+
+static_assert(VQTraits<2, 10>::BS == 32 && VQTraits<2, 10>::CB_ENTRIES == 1024 &&
+    VQTraits<2, 10>::GROUPS == 16 && VQTraits<2, 10>::WORDS == 5 &&
+    VQTraits<2, 10>::CB_PLANES == 1 && VQTraits<2, 10>::CB_SHMEM_BYTES == 4096 &&
+    VQTraits<2, 10>::TILE_K == 64, "VQTraits<2,10> mismatch");
+
+// Dummy kernel to verify helpers instantiate for all 5 (P_VAL, INDEX_BITS) configs
+template <int P_VAL, int INDEX_BITS>
+__global__ void __launch_bounds__(64)
+vq_verify_helpers_dummy(const unsigned int* words_in, const half* cb_in, float* out) {
+    using Traits = VQTraits<P_VAL, INDEX_BITS>;
+    __shared__ half2 s_cb[Traits::CB_PLANES * Traits::CB_ENTRIES];
+    vq_load_codebook<P_VAL, Traits::CB_ENTRIES, 64>(s_cb, cb_in);
+    __syncthreads();
+    int idx = vq_extract_index<INDEX_BITS>(words_in, threadIdx.x % Traits::GROUPS);
+    float vals[P_VAL];
+    vq_cb_lookup<P_VAL, Traits::CB_ENTRIES>(s_cb, idx, vals);
+    float sum = 0;
+    for (int d = 0; d < P_VAL; d++) sum += vals[d];
+    out[threadIdx.x] = sum;
+}
+
+// Force instantiation for all 5 configs
+template __global__ void vq_verify_helpers_dummy<4, 8>(const unsigned int*, const half*, float*);
+template __global__ void vq_verify_helpers_dummy<3, 8>(const unsigned int*, const half*, float*);
+template __global__ void vq_verify_helpers_dummy<3, 10>(const unsigned int*, const half*, float*);
+template __global__ void vq_verify_helpers_dummy<2, 8>(const unsigned int*, const half*, float*);
+template __global__ void vq_verify_helpers_dummy<2, 10>(const unsigned int*, const half*, float*);
+
 // ---- VQ (Vector Quantization) kernels ----
 // VQ replaces bit-plane format with byte-indexed codebook lookup.
 // Each 8-bit index maps to P_VAL fp16 weight values from a 256-entry codebook.
