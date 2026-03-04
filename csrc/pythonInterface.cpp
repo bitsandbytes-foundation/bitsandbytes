@@ -614,6 +614,13 @@ void kbitGemmProd(
     cudaStream_t
 );
 
+// Forward declaration of VQ GEMM launcher
+template <int P, typename scalar_t, typename ABSMAX_T>
+void vqGemmProd(
+    const scalar_t*, const unsigned int*, const ABSMAX_T*, const half*, scalar_t*, float*, int*, int, int, int, int,
+    cudaStream_t
+);
+
 // Production GEMM wrappers — uint8 E4M4 absmax
 #define MAKE_KBIT_GEMM_PROD(K)                                                                                         \
     void kbit_gemm_prod_fp16_k##K(                                                                                     \
@@ -663,6 +670,29 @@ MAKE_KBIT_GEMM_PROD_FP16ABS(2)
 MAKE_KBIT_GEMM_PROD_FP16ABS(3)
 MAKE_KBIT_GEMM_PROD_FP16ABS(4)
 MAKE_KBIT_GEMM_PROD_FP16ABS(5)
+
+// VQ GEMM prod wrappers — uint8 E4M4 absmax
+#define MAKE_VQ_GEMM_PROD(P)                                                                                           \
+    void vq_gemm_prod_fp16_p##P(                                                                                       \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const half* codebook, half* C,     \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream             \
+    ) {                                                                                                                \
+        vqGemmProd<P, half, unsigned char>(                                                                            \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
+        );                                                                                                             \
+    }                                                                                                                  \
+    void vq_gemm_prod_bf16_p##P(                                                                                       \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const half* codebook,     \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks,               \
+        cudaStream_t stream                                                                                            \
+    ) {                                                                                                                \
+        vqGemmProd<P, __nv_bfloat16, unsigned char>(                                                                   \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
+        );                                                                                                             \
+    }
+
+MAKE_VQ_GEMM_PROD(2)
+MAKE_VQ_GEMM_PROD(4)
 
 // Forward declaration of grouped GEMM launcher
 template <int K, typename scalar_t, typename ABSMAX_T>
@@ -1771,6 +1801,29 @@ MAKE_CKBIT_GEMM_PROD_FP16ABS(2)
 MAKE_CKBIT_GEMM_PROD_FP16ABS(3)
 MAKE_CKBIT_GEMM_PROD_FP16ABS(4)
 MAKE_CKBIT_GEMM_PROD_FP16ABS(5)
+
+// VQ GEMM prod extern C wrappers
+#define MAKE_CVQ_GEMM_PROD(P)                                                                                          \
+    void cvq_gemm_prod_fp16_p##P(                                                                                      \
+        const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const half* codebook, half* C,     \
+        float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream             \
+    ) {                                                                                                                \
+        vq_gemm_prod_fp16_p##P(                                                                                        \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
+        );                                                                                                             \
+    }                                                                                                                  \
+    void cvq_gemm_prod_bf16_p##P(                                                                                      \
+        const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const half* codebook,     \
+        __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks,               \
+        cudaStream_t stream                                                                                            \
+    ) {                                                                                                                \
+        vq_gemm_prod_bf16_p##P(                                                                                        \
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream              \
+        );                                                                                                             \
+    }
+
+MAKE_CVQ_GEMM_PROD(2)
+MAKE_CVQ_GEMM_PROD(4)
 
 void ctest_mma(const half* A, const half* B, float* C) { testMMA(A, B, C); }
 

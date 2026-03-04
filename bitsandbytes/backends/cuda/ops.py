@@ -1470,6 +1470,86 @@ def _(
     return out
 
 
+def _vq_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, C, C_workspace, tile_counters):
+    dtype_suffix = "fp16" if A.dtype == torch.float16 else "bf16"
+
+    # Zero workspace and counters (required by atomicAdd accumulation)
+    C_workspace.zero_()
+    tile_counters.zero_()
+
+    with _cuda_device_of(A):
+        fn = getattr(lib, f"cvq_gemm_prod_{dtype_suffix}_p{p}")
+        fn(
+            get_ptr(A),
+            get_ptr(B_packed),
+            get_ptr(B_absmax),
+            get_ptr(codebook),
+            get_ptr(C),
+            get_ptr(C_workspace),
+            get_ptr(tile_counters),
+            ct.c_int(A.shape[0]),
+            ct.c_int(K_dim),
+            ct.c_int(N),
+            ct.c_int(k_chunks),
+            _get_tensor_stream(A),
+        )
+
+
+@register_kernel("bitsandbytes::vq_gemm_prod", "cuda")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    k_chunks: int,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(
+        A.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"vq_gemm_prod supports float16 and bfloat16, got {A.dtype}",
+    )
+
+    M = A.shape[0]
+    C = torch.empty(M, N, device=A.device, dtype=A.dtype)
+
+    TILE_M = 16
+    TILE_N = 64  # worst case (most tiles)
+    m_tiles = (M + TILE_M - 1) // TILE_M
+    n_tiles = N // TILE_N
+
+    C_workspace = torch.zeros(M, N, device=A.device, dtype=torch.float32)
+    tile_counters = torch.zeros(m_tiles * n_tiles, device=A.device, dtype=torch.int32)
+
+    _vq_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, C, C_workspace, tile_counters)
+    return C
+
+
+@register_kernel("bitsandbytes::vq_gemm_prod_", "cuda")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    k_chunks: int,
+    out: torch.Tensor,
+    C_workspace: torch.Tensor,
+    tile_counters: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(
+        A.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"vq_gemm_prod_ supports float16 and bfloat16, got {A.dtype}",
+    )
+    _vq_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, out, C_workspace, tile_counters)
+    return out
+
+
 def _kbit_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, k):
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(

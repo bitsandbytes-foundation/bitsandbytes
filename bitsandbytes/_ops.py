@@ -943,6 +943,64 @@ def _(
     return out
 
 
+# VQ fused dequant + MMA GEMM: codebook-based quantized matmul via tensor cores
+
+torch.library.define(
+    "bitsandbytes::vq_gemm_prod",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int p, int k_chunks) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::vq_gemm_prod")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    k_chunks: int,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
+    torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
+    M = A.shape[0]
+    return torch.empty(M, N, device=A.device, dtype=A.dtype)
+
+
+# VQ fused dequant + MMA GEMM with pre-allocated output and workspace (CUDA graph compatible)
+
+torch.library.define(
+    "bitsandbytes::vq_gemm_prod_",
+    "(Tensor A, Tensor B_packed, Tensor B_absmax, Tensor codebook, int K_dim, int N, int p, int k_chunks, "
+    "Tensor(a!) out, Tensor C_workspace, Tensor tile_counters) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::vq_gemm_prod_")
+def _(
+    A: torch.Tensor,
+    B_packed: torch.Tensor,
+    B_absmax: torch.Tensor,
+    codebook: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    k_chunks: int,
+    out: torch.Tensor,
+    C_workspace: torch.Tensor,
+    tile_counters: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    torch._check(A.dim() == 2 and A.shape[1] == K_dim, lambda: "A must be [M, K_dim]")
+    torch._check(A.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A.dtype}")
+    M = A.shape[0]
+    torch._check(out.shape == (M, N), lambda: f"out must be [{M}, {N}], got {list(out.shape)}")
+    torch._check(out.dtype == A.dtype, lambda: f"out dtype {out.dtype} must match A dtype {A.dtype}")
+    return out
+
+
 # K-bit grouped expert GEMM: batch multiple MoE expert GEMMs into one launch
 
 torch.library.define(
