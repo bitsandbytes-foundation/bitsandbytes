@@ -236,7 +236,7 @@ elseif(BUILD_HIP)
     elseif(AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
       set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
     elseif(NOT CMAKE_HIP_ARCHITECTURES)
-      set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100;gfx1101;gfx1150;gfx1151;gfx1200;gfx1201")
+      set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
     endif()
 
     enable_language(HIP)
