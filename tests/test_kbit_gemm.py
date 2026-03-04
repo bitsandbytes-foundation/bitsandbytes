@@ -929,3 +929,281 @@ class TestGemmProdCUDA:
             f"M_BLOCKS=1 regression: prod does not match reference.\n"
             f"Max diff: {(C_prod_cpu - C_direct).abs().max().item():.6f}"
         )
+
+
+# ===========================================================================
+# VQ Codebook Tests: dequant+cuBLAS path and vq_linear dispatch
+# ===========================================================================
+
+
+def _vq_dequant_matmul_ref(A, W, p, codebook=None):
+    """Reference: quantize W with VQ, dequantize, then matmul in float32.
+
+    Returns (C_ref, packed_flat, absmax_flat, codebook).
+    """
+    from bitsandbytes.functional import create_vq_codebook, quantize_vq, dequantize_vq
+
+    if codebook is None:
+        codebook = create_vq_codebook(p, device="cuda")
+    W_gpu = W.half().cuda()
+    packed, absmax, codebook = quantize_vq(W_gpu, p=p, codebook=codebook)
+    n_total = W.numel()
+    W_deq = dequantize_vq(packed, absmax, codebook, p=p, n=n_total, dtype=torch.float16)
+    W_deq = W_deq.reshape(W.shape)
+    A_gpu = A.float().cuda()
+    C_ref = (A_gpu @ W_deq.float().T).cpu()
+    return C_ref, packed, absmax, codebook
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+class TestVQDequantCublas:
+    """Test VQ dequantize + cuBLAS matmul path (M > 4 fallback in vq_linear)."""
+
+    @pytest.mark.parametrize("p", [2, 4])
+    @pytest.mark.parametrize("M", [8, 16, 32, 64])
+    def test_dequant_cublas_correctness(self, p, M):
+        """Tiled dequant + matmul matches flat dequant + matmul reference."""
+        from bitsandbytes.functional import create_vq_codebook, quantize_vq, repack_vq
+
+        K_dim, N = 512, 256
+        torch.manual_seed(42)
+
+        W = torch.randn(N, K_dim)
+        codebook = create_vq_codebook(p, device="cuda")
+        W_gpu = W.half().cuda()
+        packed_flat, absmax_flat, _ = quantize_vq(W_gpu, p=p, codebook=codebook)
+        packed_tiled, absmax_tiled = repack_vq(packed_flat, absmax_flat, K_dim, N, p=p)
+
+        # Tiled dequant
+        W_tiled = torch.ops.bitsandbytes.dequantize_vq_tiled(
+            packed_tiled, codebook, absmax_tiled, p, K_dim, N, torch.float16,
+        )
+        W_tiled = W_tiled.reshape(N, K_dim)
+
+        A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
+        C_tiled = (A.float() @ W_tiled.float().T).half()
+
+        # Flat dequant reference
+        from bitsandbytes.functional import dequantize_vq
+
+        W_flat = dequantize_vq(packed_flat, absmax_flat, codebook, p=p, n=N * K_dim)
+        W_flat = W_flat.reshape(N, K_dim)
+        C_ref = (A.float() @ W_flat.float().T).half()
+
+        # Should be bit-identical since same dequant values
+        diff = (C_tiled.float() - C_ref.float()).abs()
+        scale = C_ref.float().abs().clamp(min=1.0)
+        rel_err = (diff / scale).max().item()
+        assert rel_err < 0.01, (
+            f"p={p}, M={M}: tiled dequant+matmul vs flat dequant+matmul mismatch. "
+            f"Max rel err: {rel_err:.6f}"
+        )
+
+    @pytest.mark.parametrize("p", [2, 4])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_dequant_cublas_dtype(self, p, dtype):
+        """Tiled dequant works with both fp16 and bf16."""
+        from bitsandbytes.functional import create_vq_codebook, quantize_vq, repack_vq
+
+        K_dim, N, M = 512, 256, 16
+        torch.manual_seed(42)
+
+        W = torch.randn(N, K_dim)
+        codebook = create_vq_codebook(p, device="cuda")
+        W_gpu = W.to(dtype).cuda()
+        packed_flat, absmax_flat, _ = quantize_vq(W_gpu, p=p, codebook=codebook)
+        packed_tiled, absmax_tiled = repack_vq(packed_flat, absmax_flat, K_dim, N, p=p)
+
+        W_tiled = torch.ops.bitsandbytes.dequantize_vq_tiled(
+            packed_tiled, codebook, absmax_tiled, p, K_dim, N, torch.float16,
+        )
+        # Output should be fp16 (codebook is fp16)
+        assert W_tiled.dtype == torch.float16, f"Expected fp16, got {W_tiled.dtype}"
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+class TestVQLinearDispatch:
+    """Test the vq_linear dispatch function across the full M range."""
+
+    @pytest.mark.parametrize("p", [2, 4])
+    @pytest.mark.parametrize("M", [1, 2, 3, 4])
+    def test_vq_linear_scalar_gemv_path(self, p, M):
+        """vq_linear dispatches to scalar GEMV for M<=4."""
+        from bitsandbytes.functional import create_vq_codebook, quantize_vq, repack_vq, vq_linear
+
+        K_dim, N = 2048, 512
+        torch.manual_seed(42)
+
+        W = torch.randn(N, K_dim)
+        codebook = create_vq_codebook(p, device="cuda")
+        W_gpu = W.half().cuda()
+        packed_flat, absmax_flat, _ = quantize_vq(W_gpu, p=p, codebook=codebook)
+        packed_tiled, absmax_tiled = repack_vq(packed_flat, absmax_flat, K_dim, N, p=p)
+
+        A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
+        C = vq_linear(A, packed_tiled, absmax_tiled, codebook, p, K_dim, N)
+
+        # Reference: dequant flat + matmul
+        from bitsandbytes.functional import dequantize_vq
+
+        W_deq = dequantize_vq(packed_flat, absmax_flat, codebook, p=p, n=N * K_dim)
+        W_deq = W_deq.reshape(N, K_dim)
+        C_ref = (A.float() @ W_deq.float().T).to(A.dtype)
+
+        diff = (C.float() - C_ref.float()).abs()
+        scale = C_ref.float().abs().clamp(min=1.0)
+        rel_err = (diff / scale).max().item()
+        assert rel_err < 0.10, (
+            f"p={p}, M={M}: vq_linear scalar GEMV path mismatch. Max rel err: {rel_err:.6f}"
+        )
+
+    @pytest.mark.parametrize("p", [2, 4])
+    @pytest.mark.parametrize("M", [8, 16, 32, 64])
+    def test_vq_linear_cublas_path(self, p, M):
+        """vq_linear dispatches to dequant+cuBLAS for M>4."""
+        from bitsandbytes.functional import create_vq_codebook, quantize_vq, repack_vq, vq_linear
+
+        K_dim, N = 512, 256
+        torch.manual_seed(42)
+
+        W = torch.randn(N, K_dim)
+        codebook = create_vq_codebook(p, device="cuda")
+        W_gpu = W.half().cuda()
+        packed_flat, absmax_flat, _ = quantize_vq(W_gpu, p=p, codebook=codebook)
+        packed_tiled, absmax_tiled = repack_vq(packed_flat, absmax_flat, K_dim, N, p=p)
+
+        A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
+        C = vq_linear(A, packed_tiled, absmax_tiled, codebook, p, K_dim, N)
+
+        # Reference
+        from bitsandbytes.functional import dequantize_vq
+
+        W_deq = dequantize_vq(packed_flat, absmax_flat, codebook, p=p, n=N * K_dim)
+        W_deq = W_deq.reshape(N, K_dim)
+        C_ref = (A.float() @ W_deq.float().T).to(A.dtype)
+
+        diff = (C.float() - C_ref.float()).abs()
+        scale = C_ref.float().abs().clamp(min=1.0)
+        rel_err = (diff / scale).max().item()
+        assert rel_err < 0.05, (
+            f"p={p}, M={M}: vq_linear cuBLAS path mismatch. Max rel err: {rel_err:.6f}"
+        )
+
+    @pytest.mark.parametrize("p", [2, 4])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_vq_linear_output_dtype(self, p, dtype):
+        """vq_linear output has same dtype as input A."""
+        from bitsandbytes.functional import create_vq_codebook, quantize_vq, repack_vq, vq_linear
+
+        K_dim, N, M = 512, 256, 2
+        torch.manual_seed(42)
+
+        W = torch.randn(N, K_dim)
+        codebook = create_vq_codebook(p, device="cuda")
+        W_gpu = W.to(dtype).cuda()
+        packed_flat, absmax_flat, _ = quantize_vq(W_gpu, p=p, codebook=codebook)
+        packed_tiled, absmax_tiled = repack_vq(packed_flat, absmax_flat, K_dim, N, p=p)
+
+        A = torch.randn(M, K_dim, dtype=dtype, device="cuda")
+        C = vq_linear(A, packed_tiled, absmax_tiled, codebook, p, K_dim, N)
+        assert C.dtype == dtype, f"Expected {dtype}, got {C.dtype}"
+
+    @pytest.mark.parametrize("p", [2, 4])
+    @pytest.mark.parametrize(
+        "K_dim,N",
+        [
+            (2048, 5120),
+            (5120, 2048),
+            (2048, 4096),
+        ],
+    )
+    def test_vq_linear_real_shapes(self, p, K_dim, N):
+        """vq_linear works with shapes from real model projections."""
+        from bitsandbytes.functional import create_vq_codebook, quantize_vq, repack_vq, vq_linear
+
+        M = 1
+        torch.manual_seed(42)
+
+        W = torch.randn(N, K_dim)
+        codebook = create_vq_codebook(p, device="cuda")
+        W_gpu = W.half().cuda()
+        packed_flat, absmax_flat, _ = quantize_vq(W_gpu, p=p, codebook=codebook)
+        packed_tiled, absmax_tiled = repack_vq(packed_flat, absmax_flat, K_dim, N, p=p)
+
+        A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
+        C = vq_linear(A, packed_tiled, absmax_tiled, codebook, p, K_dim, N)
+
+        # Reference
+        from bitsandbytes.functional import dequantize_vq
+
+        W_deq = dequantize_vq(packed_flat, absmax_flat, codebook, p=p, n=N * K_dim)
+        W_deq = W_deq.reshape(N, K_dim)
+        C_ref = (A.float() @ W_deq.float().T).to(A.dtype)
+
+        diff = (C.float() - C_ref.float()).abs()
+        scale = C_ref.float().abs().clamp(min=1.0)
+        rel_err = (diff / scale).max().item()
+        assert rel_err < 0.10, (
+            f"p={p}, ({K_dim},{N}): vq_linear mismatch. Max rel err: {rel_err:.6f}"
+        )
+
+    @pytest.mark.parametrize("p", [2, 4])
+    def test_vq_linear_workspace(self, p):
+        """vq_linear works with pre-allocated workspace."""
+        from bitsandbytes.functional import (
+            create_vq_codebook, quantize_vq, repack_vq, vq_linear, vq_linear_workspace,
+        )
+
+        K_dim, N, M = 512, 256, 32
+        torch.manual_seed(42)
+
+        W = torch.randn(N, K_dim)
+        codebook = create_vq_codebook(p, device="cuda")
+        W_gpu = W.half().cuda()
+        packed_flat, absmax_flat, _ = quantize_vq(W_gpu, p=p, codebook=codebook)
+        packed_tiled, absmax_tiled = repack_vq(packed_flat, absmax_flat, K_dim, N, p=p)
+
+        workspace = vq_linear_workspace(M, K_dim, N, p, torch.float16, torch.device("cuda"))
+
+        A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
+        C = vq_linear(A, packed_tiled, absmax_tiled, codebook, p, K_dim, N, workspace=workspace)
+
+        # Reference (without workspace)
+        C_ref = vq_linear(A, packed_tiled, absmax_tiled, codebook, p, K_dim, N)
+
+        assert torch.equal(C, C_ref), (
+            f"p={p}: workspace path differs from non-workspace path. "
+            f"Max diff: {(C.float() - C_ref.float()).abs().max().item()}"
+        )
+
+    @pytest.mark.parametrize("p", [2, 4])
+    def test_vq_linear_preallocated_output(self, p):
+        """vq_linear works with pre-allocated output tensor."""
+        from bitsandbytes.functional import create_vq_codebook, quantize_vq, repack_vq, vq_linear
+
+        K_dim, N, M = 512, 256, 2
+        torch.manual_seed(42)
+
+        W = torch.randn(N, K_dim)
+        codebook = create_vq_codebook(p, device="cuda")
+        W_gpu = W.half().cuda()
+        packed_flat, absmax_flat, _ = quantize_vq(W_gpu, p=p, codebook=codebook)
+        packed_tiled, absmax_tiled = repack_vq(packed_flat, absmax_flat, K_dim, N, p=p)
+
+        A = torch.randn(M, K_dim, dtype=torch.float16, device="cuda")
+        out = torch.empty(M, N, dtype=torch.float16, device="cuda")
+        C = vq_linear(A, packed_tiled, absmax_tiled, codebook, p, K_dim, N, out=out)
+
+        # Verify it used the pre-allocated buffer
+        assert C.data_ptr() == out.data_ptr(), "vq_linear didn't use pre-allocated output"
+
+        # Verify correctness
+        C_ref = vq_linear(A, packed_tiled, absmax_tiled, codebook, p, K_dim, N)
+        assert torch.equal(C, C_ref), "Pre-allocated output differs from fresh output"
+
+    @pytest.mark.parametrize("p", [2, 4])
+    @pytest.mark.parametrize("M", [5, 8, 16, 32])
+    @pytest.mark.skip(reason="Task 5 (VQ MMA kernel) not yet implemented")
+    def test_vq_mma_kernel(self, p, M):
+        """VQ MMA kernel correctness (placeholder for Task 5)."""
+        pass
