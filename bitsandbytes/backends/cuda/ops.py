@@ -1059,6 +1059,76 @@ def _(
     return out
 
 
+def _dequantize_vq_tiled_impl(
+    packed_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax_tiled: torch.Tensor,
+    p: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    torch._check(codebook.dtype == torch.float16, lambda: f"codebook must be float16, got {codebook.dtype}")
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+
+    if dtype in (torch.float16,):
+        tname = "fp16"
+    elif dtype == torch.bfloat16:
+        tname = "bf16"
+    else:
+        raise ValueError(f"dequantize_vq_tiled only supports float16/bfloat16, got {dtype}")
+
+    if absmax_tiled.dtype == torch.uint8:
+        aname = "u8abs"
+    elif absmax_tiled.dtype == torch.float32:
+        aname = "fp32abs"
+    else:
+        raise ValueError(f"absmax must be uint8 or float32, got {absmax_tiled.dtype}")
+
+    with _cuda_device_of(packed_tiled):
+        fn = getattr(lib, f"cdequantize_vq_tiled_{tname}_{aname}_p{p}")
+        fn(
+            get_ptr(packed_tiled),
+            get_ptr(codebook),
+            get_ptr(absmax_tiled),
+            get_ptr(out),
+            ct.c_int(K_dim),
+            ct.c_int(N),
+            _get_tensor_stream(packed_tiled),
+        )
+
+
+@register_kernel("bitsandbytes::dequantize_vq_tiled", "cuda")
+def _(
+    packed_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax_tiled: torch.Tensor,
+    p: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    out = torch.empty(N * K_dim, device=packed_tiled.device, dtype=dtype)
+    _dequantize_vq_tiled_impl(packed_tiled, codebook, absmax_tiled, p, K_dim, N, dtype, out)
+    return out
+
+
+@register_kernel("bitsandbytes::dequantize_vq_tiled_", "cuda")
+def _(
+    packed_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax_tiled: torch.Tensor,
+    p: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    _dequantize_vq_tiled_impl(packed_tiled, codebook, absmax_tiled, p, K_dim, N, dtype, out)
+    return out
+
+
 def _vq_scalar_gemv_impl(
     A: torch.Tensor,
     B_packed: torch.Tensor,

@@ -980,6 +980,65 @@ __global__ void kDequantize_VQ(
 }
 
 
+// ---- VQ tiled dequantize kernel ----
+// Reads from tiled VQ layout (from repack_vq output), writes flat [N, K_dim] row-major.
+
+template <int P_VAL, typename T, typename ABSMAX_T>
+__global__ void kDequantize_VQ_tiled(
+    const unsigned int* __restrict__ packed_tiled,
+    const half* __restrict__ codebook,
+    const ABSMAX_T* __restrict__ absmax_tiled,
+    T* __restrict__ out,
+    const int K_dim, const int N
+) {
+    constexpr int BS = 32;
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = 128;
+    constexpr int KB_PER_TILE = TILE_K / BS;
+    constexpr int WORDS_PER_BLOCK = BS / (P_VAL * 4);
+    constexpr int WORDS_PER_TILE = TILE_N * KB_PER_TILE * WORDS_PER_BLOCK;
+    constexpr int ABS_PER_TILE = TILE_N * KB_PER_TILE;
+    constexpr int GROUPS_PER_BLOCK = BS / P_VAL;
+
+    const int num_k_blocks = K_dim / BS;
+    const int n_tiles = N / TILE_N;
+
+    // Each thread handles one element in the [N, K_dim] output
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    const int total = N * K_dim;
+    if (idx >= total)
+        return;
+
+    const int n_idx = idx / K_dim;
+    const int k_idx = idx % K_dim;
+    const int k_block = k_idx / BS;
+    const int elem_in_block = k_idx % BS;
+
+    // Tiled addressing
+    const int k_tile = k_block / KB_PER_TILE;
+    const int kb = k_block % KB_PER_TILE;
+    const int n_tile = n_idx / TILE_N;
+    const int col_in_tile = n_idx % TILE_N;
+    const int tile_base = k_tile * n_tiles + n_tile;
+
+    // Load absmax
+    const int abs_idx = tile_base * ABS_PER_TILE + col_in_tile * KB_PER_TILE + kb;
+    float amax = load_absmax(absmax_tiled, abs_idx);
+
+    // Find the byte index for this element
+    const int group = elem_in_block / P_VAL;
+    const int component = elem_in_block % P_VAL;
+    const int word_in_block = group / 4;
+    const int byte_in_word = group % 4;
+
+    const int word_idx = tile_base * WORDS_PER_TILE + (col_in_tile * KB_PER_TILE + kb) * WORDS_PER_BLOCK + word_in_block;
+    unsigned char byte_idx = (packed_tiled[word_idx] >> (byte_in_word * 8)) & 0xFF;
+
+    // Codebook lookup
+    float val = __half2float(codebook[byte_idx * P_VAL + component]) * amax;
+    out[idx] = (T)val;
+}
+
 // ---- Launch wrappers ----
 
 #define KBIT_WARPS_PER_BLOCK 8
@@ -1112,6 +1171,19 @@ void dequantize_vq(
     int num_cuda_blocks = (num_blocks_quant + KBIT_WARPS_PER_BLOCK - 1) / KBIT_WARPS_PER_BLOCK;
     kDequantize_VQ<P_VAL, T, ABSMAX_T>
         <<<num_cuda_blocks, KBIT_THREADS_PER_BLOCK, 0, stream>>>(packed_in, codebook, absmax, out, n);
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+template <int P_VAL, typename T, typename ABSMAX_T>
+void dequantize_vq_tiled(
+    const unsigned int* packed_tiled, const half* codebook, const ABSMAX_T* absmax_tiled,
+    T* out, int K_dim, int N, cudaStream_t stream
+) {
+    int total = N * K_dim;
+    int threads = 256;
+    int blocks = (total + threads - 1) / threads;
+    kDequantize_VQ_tiled<P_VAL, T, ABSMAX_T>
+        <<<blocks, threads, 0, stream>>>(packed_tiled, codebook, absmax_tiled, out, K_dim, N);
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
 }
 
@@ -3736,6 +3808,23 @@ INSTANTIATE_VQ_QUANT(4)
     );
 INSTANTIATE_VQ_DEQUANT(2)
 INSTANTIATE_VQ_DEQUANT(4)
+
+// dequantize_vq_tiled: P_VAL × T × ABSMAX_T
+#define INSTANTIATE_VQ_DEQUANT_TILED(P)                                                                                \
+    template void dequantize_vq_tiled<P, half, unsigned char>(                                                         \
+        const unsigned int*, const half*, const unsigned char*, half*, int, int, cudaStream_t                           \
+    );                                                                                                                 \
+    template void dequantize_vq_tiled<P, __nv_bfloat16, unsigned char>(                                                \
+        const unsigned int*, const half*, const unsigned char*, __nv_bfloat16*, int, int, cudaStream_t                  \
+    );                                                                                                                 \
+    template void dequantize_vq_tiled<P, half, float>(                                                                 \
+        const unsigned int*, const half*, const float*, half*, int, int, cudaStream_t                                   \
+    );                                                                                                                 \
+    template void dequantize_vq_tiled<P, __nv_bfloat16, float>(                                                        \
+        const unsigned int*, const half*, const float*, __nv_bfloat16*, int, int, cudaStream_t                          \
+    );
+INSTANTIATE_VQ_DEQUANT_TILED(2)
+INSTANTIATE_VQ_DEQUANT_TILED(4)
 
 // vq_scalar_gemv: P_VAL × scalar_t × ABSMAX_T (flat + tiled)
 #define INSTANTIATE_VQ_SCALAR_GEMV_U8(P)                                                                               \

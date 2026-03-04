@@ -552,6 +552,28 @@ MAKE_VQ_DEQUANT(fp16, half, fp32abs, float, 4)
 MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2)
 MAKE_VQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 4)
 
+// Forward declaration of VQ tiled dequant launcher
+template <int P_VAL, typename T, typename ABSMAX_T>
+void dequantize_vq_tiled(const unsigned int*, const half*, const ABSMAX_T*, T*, int, int, cudaStream_t);
+
+// Unmangled VQ tiled dequant wrappers
+#define MAKE_VQ_DEQUANT_TILED(tname, T, aname, ABSMAX_T, P)                                                           \
+    void dequantize_vq_tiled_##tname##_##aname##_p##P(                                                                 \
+        const unsigned int* packed_tiled, const half* codebook, const ABSMAX_T* absmax_tiled, T* out, int K_dim,       \
+        int N, cudaStream_t stream                                                                                     \
+    ) {                                                                                                                \
+        dequantize_vq_tiled<P, T, ABSMAX_T>(packed_tiled, codebook, absmax_tiled, out, K_dim, N, stream);              \
+    }
+
+MAKE_VQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 2)
+MAKE_VQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 4)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+MAKE_VQ_DEQUANT_TILED(fp16, half, fp32abs, float, 2)
+MAKE_VQ_DEQUANT_TILED(fp16, half, fp32abs, float, 4)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 2)
+MAKE_VQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 4)
+
 // Forward declaration of repack launcher
 template <int K>
 void repackKbit(const unsigned int*, const unsigned char*, unsigned int*, unsigned char*, int, int, cudaStream_t);
@@ -1645,6 +1667,24 @@ MAKE_CVQ_DEQUANT(fp16, half, fp32abs, float, 2)
 MAKE_CVQ_DEQUANT(fp16, half, fp32abs, float, 4)
 MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 2)
 MAKE_CVQ_DEQUANT(bf16, __nv_bfloat16, fp32abs, float, 4)
+
+// VQ tiled dequant extern C wrappers
+#define MAKE_CVQ_DEQUANT_TILED(tname, T, aname, ABSMAX_T, P)                                                          \
+    void cdequantize_vq_tiled_##tname##_##aname##_p##P(                                                                \
+        const unsigned int* packed_tiled, const half* codebook, const ABSMAX_T* absmax_tiled, T* out, int K_dim,       \
+        int N, cudaStream_t stream                                                                                     \
+    ) {                                                                                                                \
+        dequantize_vq_tiled_##tname##_##aname##_p##P(packed_tiled, codebook, absmax_tiled, out, K_dim, N, stream);     \
+    }
+
+MAKE_CVQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 2)
+MAKE_CVQ_DEQUANT_TILED(fp16, half, u8abs, unsigned char, 4)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 2)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, u8abs, unsigned char, 4)
+MAKE_CVQ_DEQUANT_TILED(fp16, half, fp32abs, float, 2)
+MAKE_CVQ_DEQUANT_TILED(fp16, half, fp32abs, float, 4)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 2)
+MAKE_CVQ_DEQUANT_TILED(bf16, __nv_bfloat16, fp32abs, float, 4)
 
 // VQ scalar GEMV extern C wrappers (flat layout)
 #define MAKE_CVQ_SCALAR_GEMV(P)                                                                                        \

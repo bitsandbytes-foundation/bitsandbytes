@@ -1545,6 +1545,90 @@ def kbit_linear_workspace(M: int, K_dim: int, N: int, dtype: torch.dtype, device
     }
 
 
+def vq_linear(
+    A: Tensor,
+    B_packed: Tensor,
+    B_absmax: Tensor,
+    codebook: Tensor,
+    p: int,
+    K_dim: int,
+    N: int,
+    out: Optional[Tensor] = None,
+    workspace: Optional[dict] = None,
+) -> Tensor:
+    """Unified dispatch for VQ codebook quantized linear (C = A @ B^T).
+
+    Routes to the optimal kernel based on M (batch dimension):
+      - M <= 4:  scalar GEMV (tiled layout, shmem codebook lookup)
+      - M > 4:   dequantize to fp16/bf16 + cuBLAS matmul
+
+    All paths read tiled B layout (from repack_vq output).
+
+    Args:
+        A: Input activations [M, K_dim], fp16 or bf16.
+        B_packed: Tiled VQ packed weights (from repack_vq).
+        B_absmax: Tiled per-block absmax values (from repack_vq).
+        codebook: fp16 codebook tensor [256, p].
+        p: VQ dimension (2 or 4).
+        K_dim: Reduction dimension of weight matrix.
+        N: Output dimension of weight matrix.
+        out: Optional pre-allocated output [M, N] for CUDA graph compat.
+        workspace: Optional dict with pre-allocated buffers:
+            'dequant_buf': fp16/bf16 [N * K_dim] for dequant+matmul path
+
+    Returns:
+        Output tensor [M, N] with same dtype as A.
+    """
+    M = A.shape[0]
+    dtype = A.dtype
+
+    if M <= 4:
+        # Scalar GEMV: tiled layout, shared memory codebook lookup
+        if out is not None:
+            return torch.ops.bitsandbytes.vq_scalar_gemv_tiled_(
+                A, B_packed, B_absmax, codebook, K_dim, N, p, out[:M]
+            )
+        return torch.ops.bitsandbytes.vq_scalar_gemv_tiled(A, B_packed, B_absmax, codebook, K_dim, N, p)
+
+    # M > 4: dequantize tiled VQ to dense + cuBLAS matmul
+    if workspace is not None and "dequant_buf" in workspace:
+        dequant_buf = workspace["dequant_buf"]
+        torch.ops.bitsandbytes.dequantize_vq_tiled_(
+            B_packed, codebook, B_absmax, p, K_dim, N, dtype, dequant_buf
+        )
+        W = dequant_buf[: N * K_dim].view(N, K_dim)
+    else:
+        W_flat = torch.ops.bitsandbytes.dequantize_vq_tiled(B_packed, codebook, B_absmax, p, K_dim, N, dtype)
+        W = W_flat[: N * K_dim].view(N, K_dim)
+
+    if out is not None:
+        torch.mm(A, W.t(), out=out[:M])
+        return out[:M]
+    return torch.mm(A, W.t())
+
+
+def vq_linear_workspace(M: int, K_dim: int, N: int, p: int, dtype: torch.dtype, device: torch.device) -> dict:
+    """Pre-allocate workspace buffers for vq_linear (CUDA graph compatibility).
+
+    Args:
+        M: Maximum batch size (must be >= actual M at runtime).
+        K_dim: Reduction dimension.
+        N: Output dimension.
+        p: VQ dimension (2 or 4).
+        dtype: Activation dtype (fp16 or bf16).
+        device: CUDA device.
+
+    Returns:
+        Dict with 'dequant_buf' tensor.
+    """
+    n_total = N * K_dim
+    num_blocks = -(n_total // -32)
+
+    return {
+        "dequant_buf": torch.empty(num_blocks * 32, device=device, dtype=dtype),
+    }
+
+
 def kbit_expert_linear(
     A_concat: Tensor,
     B_packed_all: Tensor,

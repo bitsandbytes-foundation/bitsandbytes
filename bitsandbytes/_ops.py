@@ -617,6 +617,50 @@ def _(
     return out
 
 
+# VQ tiled dequantize: reads tiled VQ layout, writes flat [N, K_dim] output
+
+torch.library.define(
+    "bitsandbytes::dequantize_vq_tiled",
+    "(Tensor packed_tiled, Tensor codebook, Tensor absmax_tiled, int p, int K_dim, int N, ScalarType dtype) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::dequantize_vq_tiled")
+def _(
+    packed_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax_tiled: torch.Tensor,
+    p: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    return torch.empty(N * K_dim, device=packed_tiled.device, dtype=dtype)
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_vq_tiled_",
+    "(Tensor packed_tiled, Tensor codebook, Tensor absmax_tiled, int p, int K_dim, int N, ScalarType dtype, "
+    "Tensor(a!) out) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::dequantize_vq_tiled_")
+def _(
+    packed_tiled: torch.Tensor,
+    codebook: torch.Tensor,
+    absmax_tiled: torch.Tensor,
+    p: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(p in (2, 4), lambda: f"p must be 2 or 4, got {p}")
+    return out
+
+
 # VQ scalar GEMV: byte-indexed codebook lookup GEMV for M=1-4
 
 torch.library.define(
