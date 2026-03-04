@@ -1712,8 +1712,13 @@ def _(
 
 # VQ Grouped GEMM — fused VQ codebook MoE GEMM
 
-def _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p):
-    torch._check(p == 2, lambda: f"VQ grouped GEMM only supports p=2, got {p}")
+def _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p, index_bits=8):
+    torch._check(p in (2, 3, 4), lambda: f"VQ grouped GEMM supports p=2,3,4, got {p}")
+    torch._check(index_bits in (8, 10), lambda: f"VQ grouped GEMM supports index_bits=8,10, got {index_bits}")
+    torch._check(
+        (p, index_bits) in ((2, 8), (2, 10), (3, 8), (3, 10), (4, 8)),
+        lambda: f"Unsupported VQ config (p={p}, index_bits={index_bits})",
+    )
     torch._check(
         A_concat.dtype in (torch.float16, torch.bfloat16),
         lambda: f"vq_grouped_gemm supports float16 and bfloat16, got {A_concat.dtype}",
@@ -1750,7 +1755,7 @@ def _vq_grouped_gemm_impl(
     tile_counters.zero_()
 
     with _cuda_device_of(A_concat):
-        fn = getattr(lib, f"cvq_grouped_gemm_prod_{dtype_suffix}_p{p}")
+        fn = getattr(lib, f"cvq_grouped_gemm_prod_{dtype_suffix}_p{p}b{index_bits}")
         fn(
             get_ptr(A_concat),
             get_ptr(B_packed_all),
@@ -1782,7 +1787,7 @@ def _(
     max_M: int,
     index_bits: int = 8,
 ) -> torch.Tensor:
-    _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p)
+    _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p, index_bits)
 
     total_M = A_concat.shape[0]
     C_concat = torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
@@ -1839,7 +1844,7 @@ def _(
     tile_counters: torch.Tensor,
     index_bits: int = 8,
 ) -> torch.Tensor:
-    _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p)
+    _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p, index_bits)
     _vq_grouped_gemm_impl(
         A_concat,
         B_packed_all,

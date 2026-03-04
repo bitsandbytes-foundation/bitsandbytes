@@ -3300,11 +3300,10 @@ void kbitGroupedGemmProd(
 // ===========================================================================
 // VQ Codebook Grouped GEMM kernel: vq_grouped_gemm_prod
 // Fuses all MoE expert GEMMs into a single persistent kernel launch.
-// Modeled on kbit_grouped_gemm_prod but replaces bit-plane extraction
-// with byte-indexed shared memory codebook lookup (same as vq_gemm_prod).
+// Generalized for all (P_VAL, INDEX_BITS) configs via VQTraits helpers.
 // ===========================================================================
 
-template <int P_VAL, int M_BLOCKS, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
+template <int P_VAL, int INDEX_BITS, int M_BLOCKS, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
 __global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_grouped_gemm_prod(
     const scalar_t* __restrict__ A_concat, const unsigned int* __restrict__ B_packed_all,
     const ABSMAX_T* __restrict__ B_absmax_all, const half* __restrict__ codebook, scalar_t* __restrict__ C_concat,
@@ -3312,18 +3311,32 @@ __global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_gr
     const int K_dim, const int N, const int num_experts, const int k_splits, const int total_work
 ) {
     using Ops = ScalarOps<scalar_t>;
+    using Traits = VQTraits<P_VAL, INDEX_BITS>;
     constexpr int TILE_M = M_BLOCKS * 16;
-    constexpr int TILE_K = 64;
+    constexpr int TILE_K = Traits::TILE_K;
     constexpr int TILE_N = TN;
-    constexpr int BS = 32;
-    constexpr int KB_PER_TILE = TILE_K / BS; // 2
-    constexpr int WORDS_PER_BLOCK = 32 / (P_VAL * 4); // p=2: 4, p=4: 2
-    constexpr int B_COL_WORDS = KB_PER_TILE * WORDS_PER_BLOCK; // p=2: 8, p=4: 4
+    constexpr int BS = Traits::BS;
+    constexpr int KB_PER_TILE = Traits::KB_PER_TILE;
+    constexpr int WORDS = Traits::WORDS;
+    constexpr int GROUPS = Traits::GROUPS;
+    constexpr int CB_ENTRIES = Traits::CB_ENTRIES;
+    constexpr int B_COL_WORDS = KB_PER_TILE * WORDS;
     constexpr int N_BLOCKS = 2;
+    constexpr int K_STEPS_PER_BLOCK = BS / 16;
+    constexpr int TOTAL_K_STEPS = KB_PER_TILE * K_STEPS_PER_BLOCK;
     constexpr int NUM_WARPS = TILE_N / (N_BLOCKS * 8);
     constexpr int BLOCK_DIM = NUM_WARPS * 32;
 
-    constexpr int A_STAGE_ELEMS = TILE_M * TILE_K;
+    // A stride padded to next power-of-2 multiple of 8 for XOR swizzle safety
+    static constexpr int _next_p2_groups = []() constexpr {
+        int g = TILE_K / 8;
+        int p2 = 1;
+        while (p2 < g) p2 *= 2;
+        return p2;
+    }();
+    constexpr int A_STRIDE_K = _next_p2_groups * 8;
+
+    constexpr int A_STAGE_ELEMS = TILE_M * A_STRIDE_K;
     constexpr int B_STAGE_WORDS = TILE_N * B_COL_WORDS;
     constexpr int ABS_STAGE_ELEMS = TILE_N * KB_PER_TILE;
     constexpr int ABS_STAGE_BYTES = ABS_STAGE_ELEMS * (int)sizeof(ABSMAX_T);
@@ -3334,8 +3347,7 @@ __global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_gr
     constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES_VAL + ABS_STAGE_ALIGNED;
 
     // Codebook in shared memory (persistent, not part of pipeline)
-    // p=2: half2[256] = 1024 bytes; p=4: half2[256]*2 = 2048 bytes
-    constexpr int CB_BYTES = (P_VAL == 2) ? 1024 : 2048;
+    constexpr int CB_BYTES = Traits::CB_SHMEM_BYTES;
     constexpr int CB_ALIGNED = (CB_BYTES + 15) & ~15;
 
 #if BNB_DATACENTER_GPU
@@ -3372,20 +3384,7 @@ __global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_gr
 
     // Load codebook into shared memory (once, persistent)
     half2* cb_shmem = reinterpret_cast<half2*>(smem);
-    if constexpr (P_VAL == 2) {
-        const half2* cb_src = reinterpret_cast<const half2*>(codebook);
-        for (int i = threadIdx.x; i < 256; i += BLOCK_DIM)
-            cb_shmem[i] = cb_src[i];
-    } else {
-        // p=4: split into cb_lo[256] and cb_hi[256]
-        half2* cb_lo = cb_shmem;
-        half2* cb_hi = cb_shmem + 256;
-        const half2* cb_src = reinterpret_cast<const half2*>(codebook);
-        for (int i = threadIdx.x; i < 256; i += BLOCK_DIM) {
-            cb_lo[i] = cb_src[i * 2];
-            cb_hi[i] = cb_src[i * 2 + 1];
-        }
-    }
+    vq_load_codebook<P_VAL, CB_ENTRIES, BLOCK_DIM>(cb_shmem, codebook);
     __syncthreads();
 
     float frag_c[M_BLOCKS][N_BLOCKS][4];
@@ -3438,7 +3437,7 @@ __global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_gr
             for (int nb = 0; nb < N_BLOCKS; nb++)
                 frag_c[mb][nb][0] = frag_c[mb][nb][1] = frag_c[mb][nb][2] = frag_c[mb][nb][3] = 0.0f;
 
-        // Fetch tile lambda (identical to kbit version except B_COL_WORDS differs)
+        // Fetch tile lambda — uses A_STRIDE_K for XOR swizzle safety
         auto fetch_tile = [&](int stage, int kt) {
             const int k_base = kt * TILE_K;
             const int tile_idx = kt * n_tiles + n_tile;
@@ -3459,30 +3458,33 @@ __global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_gr
             for (int i = threadIdx.x; i < ABS_INT4S; i += BLOCK_DIM)
                 cp_async_cg_16(&abs_dst[i], &abs_src[i]);
 
-            // A tile via cp.async with XOR swizzle
+            // A tile via cp.async with XOR swizzle (padded stride)
             scalar_t* a_dst = sh_a(stage);
-            constexpr int A_GROUPS = A_STAGE_ELEMS / 8;
-            const bool a_interior = (m_base + TILE_M <= M_e) && (k_base + TILE_K <= K_dim);
+            constexpr int A_GROUPS_TOTAL = A_STAGE_ELEMS / 8;
+            constexpr int A_K_GROUPS = A_STRIDE_K / 8;
+            constexpr int REAL_K_GROUPS = TILE_K / 8;
+            const bool a_interior = (m_base + TILE_M <= M_e) && (k_base + TILE_K <= K_dim)
+                                    && (A_STRIDE_K == TILE_K);
 
             if (a_interior) {
-                for (int i = threadIdx.x; i < A_GROUPS; i += BLOCK_DIM) {
-                    int row = i / (TILE_K / 8);
-                    int col_group = i % (TILE_K / 8);
+                for (int i = threadIdx.x; i < A_GROUPS_TOTAL; i += BLOCK_DIM) {
+                    int row = i / A_K_GROUPS;
+                    int col_group = i % A_K_GROUPS;
                     int swizzled_group = col_group ^ (row % 8);
-                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * A_STRIDE_K + swizzled_group * 8]);
                     const int4* src =
                         reinterpret_cast<const int4*>(&A[(m_base + row) * K_dim + k_base + col_group * 8]);
                     cp_async_cg_16(dst, src);
                 }
             } else {
-                for (int i = threadIdx.x; i < A_GROUPS; i += BLOCK_DIM) {
-                    int row = i / (TILE_K / 8);
-                    int col_group = i % (TILE_K / 8);
+                for (int i = threadIdx.x; i < A_GROUPS_TOTAL; i += BLOCK_DIM) {
+                    int row = i / A_K_GROUPS;
+                    int col_group = i % A_K_GROUPS;
                     int swizzled_group = col_group ^ (row % 8);
-                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * A_STRIDE_K + swizzled_group * 8]);
                     int gr = m_base + row;
                     int gc = k_base + col_group * 8;
-                    if (gr < M_e && gc < K_dim) {
+                    if (gr < M_e && gc < K_dim && col_group < REAL_K_GROUPS) {
                         const int4* src = reinterpret_cast<const int4*>(&A[gr * K_dim + gc]);
                         cp_async_cg_16(dst, src);
                     } else {
@@ -3492,16 +3494,16 @@ __global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_gr
             }
         };
 
-        // Compute tile: VQ dequant via byte extraction + shmem codebook lookup
+        // Compute tile: VQ dequant via generalized index extraction + codebook lookup
         auto compute_tile = [&](int stage) {
             scalar_t* a_ptr = sh_a(stage);
             unsigned int* b_ptr = sh_b(stage);
             ABSMAX_T* abs_ptr = sh_abs(stage);
 
 #pragma unroll
-            for (int ks = 0; ks < 4; ks++) {
-                const int k_block = ks / 2;
-                const int half_idx = ks % 2;
+            for (int ks = 0; ks < TOTAL_K_STEPS; ks++) {
+                const int k_block = ks / K_STEPS_PER_BLOCK;
+                const int sub_step = ks % K_STEPS_PER_BLOCK;
 
                 uint32_t frag_a[M_BLOCKS][4];
 #pragma unroll
@@ -3515,7 +3517,7 @@ __global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_gr
                     const int swizzled_group = col_group ^ (a_row % 8);
                     const int swizzled_col_start = swizzled_group * 8;
 
-                    const scalar_t* addr = &a_ptr[a_row * TILE_K + swizzled_col_start];
+                    const scalar_t* addr = &a_ptr[a_row * A_STRIDE_K + swizzled_col_start];
                     uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
 
                     asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
@@ -3528,55 +3530,28 @@ __global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_gr
                     int col = warp_n_base + nb * 8 + gid;
 
                     scalar_t scale = Ops::from_float(load_absmax<ABSMAX_T>(abs_ptr, col * KB_PER_TILE + k_block));
+                    float scale_f = Ops::to_float(scale);
 
+                    // Load all packed words for this column's quantization block
+                    int word_base_addr = col * B_COL_WORDS + k_block * WORDS;
+                    unsigned int words_local[5]; // max WORDS is 5
+#pragma unroll
+                    for (int w = 0; w < WORDS; w++)
+                        words_local[w] = b_ptr[word_base_addr + w];
+
+                    // Decode 4 weight values for this thread's MMA positions
                     scalar_t vals[4];
+#pragma unroll
+                    for (int v = 0; v < 4; v++) {
+                        const int pos_off = (v < 2) ? v : (v + 6); // {0, 1, 8, 9}
+                        int k_in_block = sub_step * 16 + 2 * tid + pos_off;
+                        int gi = k_in_block / P_VAL;
+                        int di = k_in_block % P_VAL;
 
-                    if constexpr (P_VAL == 2) {
-                        // p=2: 2 words cover 16 elements (8 bytes, each byte → 2 weights)
-                        int word_base = col * B_COL_WORDS + k_block * WORDS_PER_BLOCK + half_idx * 2;
-                        unsigned int w0 = b_ptr[word_base];
-                        unsigned int w1 = b_ptr[word_base + 1];
-
-                        unsigned int idx0 = (w0 >> (tid * 8)) & 0xFF;
-                        unsigned int idx1 = (w1 >> (tid * 8)) & 0xFF;
-
-                        half2 cb0 = cb_shmem[idx0];
-                        half2 cb1 = cb_shmem[idx1];
-
-                        vals[0] = Ops::mul(Ops::from_float(__low2float(cb0)), scale);
-                        vals[1] = Ops::mul(Ops::from_float(__high2float(cb0)), scale);
-                        vals[2] = Ops::mul(Ops::from_float(__low2float(cb1)), scale);
-                        vals[3] = Ops::mul(Ops::from_float(__high2float(cb1)), scale);
-                    } else {
-                        // p=4: 1 word covers 16 elements (4 bytes, each byte → 4 weights)
-                        int word_addr = col * B_COL_WORDS + k_block * WORDS_PER_BLOCK + half_idx;
-                        unsigned int w = b_ptr[word_addr];
-
-                        int byte_a = tid / 2;
-                        int byte_b = tid / 2 + 2;
-                        int pos_base = 2 * (tid % 2);
-
-                        unsigned int idx_a = (w >> (byte_a * 8)) & 0xFF;
-                        unsigned int idx_b = (w >> (byte_b * 8)) & 0xFF;
-
-                        half2* cb_lo = cb_shmem;
-                        half2* cb_hi = cb_shmem + 256;
-
-                        half2 lo_a = cb_lo[idx_a];
-                        half2 hi_a = cb_hi[idx_a];
-                        half2 lo_b = cb_lo[idx_b];
-                        half2 hi_b = cb_hi[idx_b];
-
-                        float v_a[4] = {__low2float(lo_a), __high2float(lo_a),
-                                        __low2float(hi_a), __high2float(hi_a)};
-                        float v_b[4] = {__low2float(lo_b), __high2float(lo_b),
-                                        __low2float(hi_b), __high2float(hi_b)};
-
-                        float scale_f = Ops::to_float(scale);
-                        vals[0] = Ops::from_float(v_a[pos_base] * scale_f);
-                        vals[1] = Ops::from_float(v_a[pos_base + 1] * scale_f);
-                        vals[2] = Ops::from_float(v_b[pos_base] * scale_f);
-                        vals[3] = Ops::from_float(v_b[pos_base + 1] * scale_f);
+                        int idx = vq_extract_index<INDEX_BITS>(words_local, gi);
+                        float cb_vals[4]; // max P_VAL is 4
+                        vq_cb_lookup<P_VAL, CB_ENTRIES>(cb_shmem, idx, cb_vals);
+                        vals[v] = Ops::from_float(cb_vals[di] * scale_f);
                     }
 
                     uint32_t frag_b[2];
@@ -3683,30 +3658,40 @@ __global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_gr
 }
 
 // VQ Grouped GEMM launcher — supports TILE_N=64/128 and auto k_splits
-template <int P, int MB, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
+template <int P, int IB, int MB, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
 static void vqGroupedGemmProdLaunch(
     const scalar_t* A_concat, const unsigned int* B_packed_all, const ABSMAX_T* B_absmax_all, const half* codebook,
     scalar_t* C_concat, float* C_workspace, int* tile_counters, const int* expert_offsets, int K_dim, int N,
     int num_experts, int max_M, int num_sms, cudaStream_t stream
 ) {
+    using Traits = VQTraits<P, IB>;
     constexpr int TILE_M = MB * 16;
-    constexpr int TILE_K = 64;
+    constexpr int TILE_K = Traits::TILE_K;
     constexpr int TILE_N = TN;
-    constexpr int BS = 32;
-    constexpr int KB_PER_TILE = TILE_K / BS;
-    constexpr int WORDS_PER_BLOCK = 32 / (P * 4);
-    constexpr int B_COL_WORDS = KB_PER_TILE * WORDS_PER_BLOCK;
+    constexpr int BS = Traits::BS;
+    constexpr int KB_PER_TILE = Traits::KB_PER_TILE;
+    constexpr int WORDS = Traits::WORDS;
+    constexpr int B_COL_WORDS = KB_PER_TILE * WORDS;
     constexpr int N_BLOCKS = 2;
     constexpr int NUM_WARPS = TILE_N / (N_BLOCKS * 8);
     constexpr int BLOCK_DIM = NUM_WARPS * 32;
 
-    constexpr int A_STAGE_BYTES = TILE_M * TILE_K * sizeof(scalar_t);
+    // A stride padded to next power-of-2 multiple of 8 (same as kernel)
+    static constexpr int _next_p2_groups = []() constexpr {
+        int g = TILE_K / 8;
+        int p2 = 1;
+        while (p2 < g) p2 *= 2;
+        return p2;
+    }();
+    constexpr int A_STRIDE_K = _next_p2_groups * 8;
+
+    constexpr int A_STAGE_BYTES = TILE_M * A_STRIDE_K * sizeof(scalar_t);
     constexpr int B_STAGE_BYTES = TILE_N * B_COL_WORDS * sizeof(unsigned int);
     constexpr int ABS_STAGE_BYTES = TILE_N * KB_PER_TILE * (int)sizeof(ABSMAX_T);
     constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
     constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES + ABS_STAGE_ALIGNED;
 
-    constexpr int CB_BYTES = (P == 2) ? 1024 : 2048;
+    constexpr int CB_BYTES = Traits::CB_SHMEM_BYTES;
     constexpr int CB_ALIGNED = (CB_BYTES + 15) & ~15;
 
     int n_tiles = N / TILE_N;
@@ -3735,11 +3720,11 @@ static void vqGroupedGemmProdLaunch(
 
     if (smem_size > 48 * 1024) {
         cudaFuncSetAttribute(
-            vq_grouped_gemm_prod<P, MB, TN, scalar_t, ABSMAX_T>, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
+            vq_grouped_gemm_prod<P, IB, MB, TN, scalar_t, ABSMAX_T>, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
         );
     }
 
-    vq_grouped_gemm_prod<P, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size, stream>>>(
+    vq_grouped_gemm_prod<P, IB, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size, stream>>>(
         A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets, K_dim, N,
         num_experts, k_splits, total_work
     );
@@ -3747,7 +3732,7 @@ static void vqGroupedGemmProdLaunch(
 }
 
 // VQ Grouped GEMM public entry point
-template <int P, typename scalar_t, typename ABSMAX_T = unsigned char>
+template <int P, int IB, typename scalar_t, typename ABSMAX_T = unsigned char>
 void vqGroupedGemmProd(
     const scalar_t* A_concat, const unsigned int* B_packed_all, const ABSMAX_T* B_absmax_all, const half* codebook,
     scalar_t* C_concat, float* C_workspace, int* tile_counters, const int* d_expert_offsets, int K_dim, int N,
@@ -3769,32 +3754,32 @@ void vqGroupedGemmProd(
     const bool use_tn64 = (m_blocks == 1) && (N % 64 == 0);
 
     if (use_tn64) {
-        vqGroupedGemmProdLaunch<P, 1, 64, scalar_t, ABSMAX_T>(
+        vqGroupedGemmProdLaunch<P, IB, 1, 64, scalar_t, ABSMAX_T>(
             A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
             K_dim, N, num_experts, max_M, num_sms, stream
         );
     } else {
         switch (m_blocks) {
         case 4:
-            vqGroupedGemmProdLaunch<P, 4, 128, scalar_t, ABSMAX_T>(
+            vqGroupedGemmProdLaunch<P, IB, 4, 128, scalar_t, ABSMAX_T>(
                 A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
                 K_dim, N, num_experts, max_M, num_sms, stream
             );
             break;
         case 3:
-            vqGroupedGemmProdLaunch<P, 3, 128, scalar_t, ABSMAX_T>(
+            vqGroupedGemmProdLaunch<P, IB, 3, 128, scalar_t, ABSMAX_T>(
                 A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
                 K_dim, N, num_experts, max_M, num_sms, stream
             );
             break;
         case 2:
-            vqGroupedGemmProdLaunch<P, 2, 128, scalar_t, ABSMAX_T>(
+            vqGroupedGemmProdLaunch<P, IB, 2, 128, scalar_t, ABSMAX_T>(
                 A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
                 K_dim, N, num_experts, max_M, num_sms, stream
             );
             break;
         default:
-            vqGroupedGemmProdLaunch<P, 1, 128, scalar_t, ABSMAX_T>(
+            vqGroupedGemmProdLaunch<P, IB, 1, 128, scalar_t, ABSMAX_T>(
                 A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
                 K_dim, N, num_experts, max_M, num_sms, stream
             );
@@ -4831,16 +4816,20 @@ INSTANTIATE_KBIT_GROUPED_GEMM_PROD_FP16(4)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD_FP16(5)
 
 // VQ Grouped expert GEMM instantiations — uint8 E4M4 absmax
-#define INSTANTIATE_VQ_GROUPED_GEMM_PROD_U8(P)                                                                         \
-    template void vqGroupedGemmProd<P, half, unsigned char>(                                                           \
+#define INSTANTIATE_VQ_GROUPED_GEMM_PROD_U8(P, IB)                                                                    \
+    template void vqGroupedGemmProd<P, IB, half, unsigned char>(                                                       \
         const half*, const unsigned int*, const unsigned char*, const half*, half*, float*, int*, const int*, int,      \
         int, int, int, cudaStream_t                                                                                    \
     );                                                                                                                 \
-    template void vqGroupedGemmProd<P, __nv_bfloat16, unsigned char>(                                                  \
+    template void vqGroupedGemmProd<P, IB, __nv_bfloat16, unsigned char>(                                              \
         const __nv_bfloat16*, const unsigned int*, const unsigned char*, const half*, __nv_bfloat16*, float*, int*,     \
         const int*, int, int, int, int, cudaStream_t                                                                   \
     );
-INSTANTIATE_VQ_GROUPED_GEMM_PROD_U8(2)
+INSTANTIATE_VQ_GROUPED_GEMM_PROD_U8(2, 8)
+INSTANTIATE_VQ_GROUPED_GEMM_PROD_U8(2, 10)
+INSTANTIATE_VQ_GROUPED_GEMM_PROD_U8(3, 8)
+INSTANTIATE_VQ_GROUPED_GEMM_PROD_U8(3, 10)
+INSTANTIATE_VQ_GROUPED_GEMM_PROD_U8(4, 8)
 
 // Scalar GEMV instantiations — flat layout, C=1
 // uint8 E4M4 absmax (default)

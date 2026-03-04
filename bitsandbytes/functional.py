@@ -1758,14 +1758,18 @@ def vq_expert_linear(
     if out is None:
         out = torch.empty(total_M, N, device=A_concat.device, dtype=dtype)
 
-    # Per-expert weight size in the packed/absmax tensors
-    TILE_K, TILE_N, BS = 64, 128, 32
-    WORDS_PER_BLOCK = 32 // (p * 4)
-    k_blocks_per_tile = TILE_K // BS
+    # Per-expert weight size in the packed/absmax tensors (via VQ traits)
+    from bitsandbytes._ops import _vq_traits
+    traits = _vq_traits(p, index_bits)
+    TILE_K = traits["TILE_K"]
+    TILE_N = traits["TILE_N"]
+    BS = traits["BS"]
+    WORDS = traits["WORDS"]
+    KB_PER_TILE = traits["KB_PER_TILE"]
     k_tiles = K_dim // TILE_K
     n_tiles = N // TILE_N
-    words_per_expert = k_tiles * n_tiles * TILE_N * k_blocks_per_tile * WORDS_PER_BLOCK
-    absmax_per_expert = k_tiles * n_tiles * TILE_N * k_blocks_per_tile
+    words_per_expert = k_tiles * n_tiles * TILE_N * KB_PER_TILE * WORDS
+    absmax_per_expert = k_tiles * n_tiles * TILE_N * KB_PER_TILE
 
     offsets_cpu = expert_offsets.cpu()
     for e in range(num_experts):
@@ -1780,7 +1784,7 @@ def vq_expert_linear(
         B_absmax_e = B_absmax_all[e * absmax_per_expert : (e + 1) * absmax_per_expert]
 
         W_flat = torch.ops.bitsandbytes.dequantize_vq_tiled(
-            B_packed_e, codebook, B_absmax_e, p, K_dim, N, dtype
+            B_packed_e, codebook, B_absmax_e, p, K_dim, N, dtype, index_bits
         )
         W = W_flat[: N * K_dim].view(N, K_dim)
         torch.mm(A_expert, W.t(), out=out[start:end])
