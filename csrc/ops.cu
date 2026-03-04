@@ -12,6 +12,7 @@
 
 #if BNB_HIP
 #include <hip/hip_runtime.h>
+
 static int bnb_host_warp_size() {
     constexpr int MAX_DEVICES = 32;
     static int cache[MAX_DEVICES] = {};
@@ -26,7 +27,6 @@ static int bnb_host_warp_size() {
 #else
 static constexpr int bnb_host_warp_size() { return 32; }
 #endif
-
 
 using std::cout;
 using std::endl;
