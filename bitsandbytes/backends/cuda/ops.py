@@ -1697,6 +1697,150 @@ def _(
     return out
 
 
+# VQ Grouped GEMM — fused VQ codebook MoE GEMM
+
+def _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p):
+    torch._check(p == 2, lambda: f"VQ grouped GEMM only supports p=2, got {p}")
+    torch._check(
+        A_concat.dtype in (torch.float16, torch.bfloat16),
+        lambda: f"vq_grouped_gemm supports float16 and bfloat16, got {A_concat.dtype}",
+    )
+    torch._check(B_packed_all.dtype == torch.int32, lambda: f"B_packed must be int32, got {B_packed_all.dtype}")
+    torch._check(B_absmax_all.dtype == torch.uint8, lambda: f"B_absmax must be uint8 (E4M4), got {B_absmax_all.dtype}")
+    torch._check(codebook.dtype == torch.float16, lambda: f"codebook must be float16, got {codebook.dtype}")
+    torch._check(
+        expert_offsets.dtype == torch.int32, lambda: f"expert_offsets must be int32, got {expert_offsets.dtype}"
+    )
+    torch._check(N % 64 == 0, lambda: f"N ({N}) must be divisible by 64")
+
+
+def _vq_grouped_gemm_impl(
+    A_concat,
+    B_packed_all,
+    B_absmax_all,
+    codebook,
+    expert_offsets,
+    K_dim,
+    N,
+    p,
+    num_experts,
+    max_M,
+    C_concat,
+    C_workspace,
+    tile_counters,
+):
+    dtype_suffix = "fp16" if A_concat.dtype == torch.float16 else "bf16"
+
+    # Zero workspace and counters (required by atomicAdd accumulation)
+    C_workspace.zero_()
+    tile_counters.zero_()
+
+    with _cuda_device_of(A_concat):
+        fn = getattr(lib, f"cvq_grouped_gemm_prod_{dtype_suffix}_p{p}")
+        fn(
+            get_ptr(A_concat),
+            get_ptr(B_packed_all),
+            get_ptr(B_absmax_all),
+            get_ptr(codebook),
+            get_ptr(C_concat),
+            get_ptr(C_workspace),
+            get_ptr(tile_counters),
+            get_ptr(expert_offsets),
+            ct.c_int(K_dim),
+            ct.c_int(N),
+            ct.c_int(num_experts),
+            ct.c_int(max_M),
+            _get_tensor_stream(A_concat),
+        )
+
+
+@register_kernel("bitsandbytes::vq_grouped_gemm", "cuda")
+def _(
+    A_concat: torch.Tensor,
+    B_packed_all: torch.Tensor,
+    B_absmax_all: torch.Tensor,
+    codebook: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    num_experts: int,
+    max_M: int,
+) -> torch.Tensor:
+    _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p)
+
+    total_M = A_concat.shape[0]
+    C_concat = torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
+
+    # Workspace for split-K atomicAdd reduction
+    C_workspace = torch.zeros(total_M, N, device=A_concat.device, dtype=torch.float32)
+    # Tile counters for split-K last-block detection
+    m_blocks = 1
+    if max_M > 48:
+        m_blocks = 4
+    elif max_M > 32:
+        m_blocks = 3
+    elif max_M > 16:
+        m_blocks = 2
+    tile_n = 64 if (m_blocks == 1 and N % 64 == 0) else 128
+    n_tiles = N // tile_n
+    m_tiles = (max_M + m_blocks * 16 - 1) // (m_blocks * 16)
+    mn_tiles = num_experts * m_tiles * n_tiles
+    tile_counters = torch.zeros(mn_tiles, device=A_concat.device, dtype=torch.int32)
+
+    _vq_grouped_gemm_impl(
+        A_concat,
+        B_packed_all,
+        B_absmax_all,
+        codebook,
+        expert_offsets,
+        K_dim,
+        N,
+        p,
+        num_experts,
+        max_M,
+        C_concat,
+        C_workspace,
+        tile_counters,
+    )
+    return C_concat
+
+
+@register_kernel("bitsandbytes::vq_grouped_gemm_", "cuda")
+def _(
+    A_concat: torch.Tensor,
+    B_packed_all: torch.Tensor,
+    B_absmax_all: torch.Tensor,
+    codebook: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    num_experts: int,
+    max_M: int,
+    out: torch.Tensor,
+    C_workspace: torch.Tensor,
+    tile_counters: torch.Tensor,
+) -> torch.Tensor:
+    _vq_grouped_gemm_check(A_concat, B_packed_all, B_absmax_all, codebook, expert_offsets, N, p)
+    _vq_grouped_gemm_impl(
+        A_concat,
+        B_packed_all,
+        B_absmax_all,
+        codebook,
+        expert_offsets,
+        K_dim,
+        N,
+        p,
+        num_experts,
+        max_M,
+        out,
+        C_workspace,
+        tile_counters,
+    )
+    return out
+
+
 def _kbit_scalar_gemv_impl(
     A: torch.Tensor,
     B_packed: torch.Tensor,

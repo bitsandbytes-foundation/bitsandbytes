@@ -1071,6 +1071,76 @@ def _(
     return out
 
 
+# VQ Grouped expert GEMM: fused VQ codebook MoE GEMM across all experts
+
+torch.library.define(
+    "bitsandbytes::vq_grouped_gemm",
+    "(Tensor A_concat, Tensor B_packed_all, Tensor B_absmax_all, Tensor codebook, "
+    "Tensor expert_offsets, int K_dim, int N, int p, int num_experts, int max_M) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::vq_grouped_gemm")
+def _(
+    A_concat: torch.Tensor,
+    B_packed_all: torch.Tensor,
+    B_absmax_all: torch.Tensor,
+    codebook: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    num_experts: int,
+    max_M: int,
+) -> torch.Tensor:
+    torch._check(p == 2, lambda: f"VQ grouped GEMM only supports p=2, got {p}")
+    torch._check(A_concat.dim() == 2 and A_concat.shape[1] == K_dim, lambda: "A_concat must be [total_M, K_dim]")
+    torch._check(
+        A_concat.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A_concat.dtype}"
+    )
+    total_M = A_concat.shape[0]
+    return torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
+
+
+# VQ Grouped expert GEMM — inplace with pre-allocated output, workspace, and tile_counters
+
+torch.library.define(
+    "bitsandbytes::vq_grouped_gemm_",
+    "(Tensor A_concat, Tensor B_packed_all, Tensor B_absmax_all, Tensor codebook, "
+    "Tensor expert_offsets, int K_dim, int N, int p, int num_experts, int max_M, "
+    "Tensor(a!) out, Tensor C_workspace, Tensor tile_counters) -> Tensor(a!)",
+)
+
+
+@register_fake("bitsandbytes::vq_grouped_gemm_")
+def _(
+    A_concat: torch.Tensor,
+    B_packed_all: torch.Tensor,
+    B_absmax_all: torch.Tensor,
+    codebook: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    K_dim: int,
+    N: int,
+    p: int,
+    num_experts: int,
+    max_M: int,
+    out: torch.Tensor,
+    C_workspace: torch.Tensor,
+    tile_counters: torch.Tensor,
+) -> torch.Tensor:
+    torch._check(p == 2, lambda: f"VQ grouped GEMM only supports p=2, got {p}")
+    torch._check(A_concat.dim() == 2 and A_concat.shape[1] == K_dim, lambda: "A_concat must be [total_M, K_dim]")
+    torch._check(
+        A_concat.dtype in (torch.float16, torch.bfloat16), lambda: f"A must be fp16 or bf16, got {A_concat.dtype}"
+    )
+    total_M = A_concat.shape[0]
+    torch._check(out.shape == (total_M, N), lambda: f"out must be [{total_M}, {N}], got {list(out.shape)}")
+    torch._check(out.dtype == A_concat.dtype, lambda: f"out dtype {out.dtype} must match A dtype {A_concat.dtype}")
+    torch._check(C_workspace.dtype == torch.float32, lambda: f"C_workspace must be float32, got {C_workspace.dtype}")
+    torch._check(tile_counters.dtype == torch.int32, lambda: f"tile_counters must be int32, got {tile_counters.dtype}")
+    return out
+
+
 # K-bit scalar GEMV: C[M,N] = A[M,K_dim] * W_kbit^T (M=1..4, scalar FMA)
 
 torch.library.define(

@@ -3110,6 +3110,512 @@ void kbitGroupedGemmProd(
     }
 }
 
+// ===========================================================================
+// VQ Codebook Grouped GEMM kernel: vq_grouped_gemm_prod
+// Fuses all MoE expert GEMMs into a single persistent kernel launch.
+// Modeled on kbit_grouped_gemm_prod but replaces bit-plane extraction
+// with byte-indexed shared memory codebook lookup (same as vq_gemm_prod).
+// ===========================================================================
+
+template <int P_VAL, int M_BLOCKS, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
+__global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_grouped_gemm_prod(
+    const scalar_t* __restrict__ A_concat, const unsigned int* __restrict__ B_packed_all,
+    const ABSMAX_T* __restrict__ B_absmax_all, const half* __restrict__ codebook, scalar_t* __restrict__ C_concat,
+    float* __restrict__ C_workspace, int* __restrict__ tile_counters, const int* __restrict__ expert_offsets,
+    const int K_dim, const int N, const int num_experts, const int k_splits, const int total_work
+) {
+    using Ops = ScalarOps<scalar_t>;
+    constexpr int TILE_M = M_BLOCKS * 16;
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = TN;
+    constexpr int BS = 32;
+    constexpr int KB_PER_TILE = TILE_K / BS; // 2
+    constexpr int WORDS_PER_BLOCK = 32 / (P_VAL * 4); // p=2: 4, p=4: 2
+    constexpr int B_COL_WORDS = KB_PER_TILE * WORDS_PER_BLOCK; // p=2: 8, p=4: 4
+    constexpr int N_BLOCKS = 2;
+    constexpr int NUM_WARPS = TILE_N / (N_BLOCKS * 8);
+    constexpr int BLOCK_DIM = NUM_WARPS * 32;
+
+    constexpr int A_STAGE_ELEMS = TILE_M * TILE_K;
+    constexpr int B_STAGE_WORDS = TILE_N * B_COL_WORDS;
+    constexpr int ABS_STAGE_ELEMS = TILE_N * KB_PER_TILE;
+    constexpr int ABS_STAGE_BYTES = ABS_STAGE_ELEMS * (int)sizeof(ABSMAX_T);
+
+    constexpr int A_STAGE_BYTES = A_STAGE_ELEMS * sizeof(scalar_t);
+    constexpr int B_STAGE_BYTES_VAL = B_STAGE_WORDS * sizeof(unsigned int);
+    constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
+    constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES_VAL + ABS_STAGE_ALIGNED;
+
+    // Codebook in shared memory (persistent, not part of pipeline)
+    // p=2: half2[256] = 1024 bytes; p=4: half2[256]*2 = 2048 bytes
+    constexpr int CB_BYTES = (P_VAL == 2) ? 1024 : 2048;
+    constexpr int CB_ALIGNED = (CB_BYTES + 15) & ~15;
+
+#if BNB_DATACENTER_GPU
+    constexpr int NUM_STAGES = 4;
+#else
+    constexpr int NUM_STAGES = 2;
+#endif
+
+    const int n_tiles = N / TILE_N;
+    const int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
+    const int tiles_per_split = (k_tiles + k_splits - 1) / k_splits;
+
+    // Per-expert B data sizes (same for all experts since K_dim, N are shared)
+    const int b_packed_per_expert = k_tiles * n_tiles * B_STAGE_WORDS;
+    const int b_absmax_per_expert = k_tiles * n_tiles * ABS_STAGE_ELEMS;
+
+    const int warp_id = threadIdx.x / 32;
+    const int lane_id = threadIdx.x % 32;
+    const int gid = lane_id / 4;
+    const int tid = lane_id % 4;
+    const int warp_n_base = warp_id * (TILE_N / NUM_WARPS);
+
+    // Shared memory layout: [codebook | stage0 | stage1 | ...]
+    extern __shared__ char smem[];
+    char* stage_base = smem + CB_ALIGNED;
+
+    auto sh_a = [&](int stage) -> scalar_t* { return reinterpret_cast<scalar_t*>(stage_base + stage * STAGE_BYTES); };
+    auto sh_b = [&](int stage) -> unsigned int* {
+        return reinterpret_cast<unsigned int*>(stage_base + stage * STAGE_BYTES + A_STAGE_BYTES);
+    };
+    auto sh_abs = [&](int stage) -> ABSMAX_T* {
+        return reinterpret_cast<ABSMAX_T*>(stage_base + stage * STAGE_BYTES + A_STAGE_BYTES + B_STAGE_BYTES_VAL);
+    };
+
+    // Load codebook into shared memory (once, persistent)
+    half2* cb_shmem = reinterpret_cast<half2*>(smem);
+    if constexpr (P_VAL == 2) {
+        const half2* cb_src = reinterpret_cast<const half2*>(codebook);
+        for (int i = threadIdx.x; i < 256; i += BLOCK_DIM)
+            cb_shmem[i] = cb_src[i];
+    } else {
+        // p=4: split into cb_lo[256] and cb_hi[256]
+        half2* cb_lo = cb_shmem;
+        half2* cb_hi = cb_shmem + 256;
+        const half2* cb_src = reinterpret_cast<const half2*>(codebook);
+        for (int i = threadIdx.x; i < 256; i += BLOCK_DIM) {
+            cb_lo[i] = cb_src[i * 2];
+            cb_hi[i] = cb_src[i * 2 + 1];
+        }
+    }
+    __syncthreads();
+
+    float frag_c[M_BLOCKS][N_BLOCKS][4];
+
+    // Persistent work loop
+    for (int work_id = blockIdx.x; work_id < total_work; work_id += gridDim.x) {
+        // Decompose work_id into (expert_id, m_tile, n_tile, ks_id)
+        int expert_id = 0;
+        int tiles_so_far = 0;
+        int mn_tiles_e = 0;
+        for (int e = 0; e < num_experts; e++) {
+            int M_e_tmp = expert_offsets[e + 1] - expert_offsets[e];
+            int m_tiles_e = (M_e_tmp + TILE_M - 1) / TILE_M;
+            mn_tiles_e = m_tiles_e * n_tiles;
+            int expert_total = mn_tiles_e * k_splits;
+            if (work_id < tiles_so_far + expert_total) {
+                expert_id = e;
+                break;
+            }
+            tiles_so_far += expert_total;
+        }
+
+        const int local_work_id = work_id - tiles_so_far;
+        const int mn_local = local_work_id / k_splits;
+        const int ks_id = local_work_id % k_splits;
+        const int n_tile = mn_local % n_tiles;
+        const int m_tile = mn_local / n_tiles;
+
+        const int kt_start = ks_id * tiles_per_split;
+        const int kt_end = min(kt_start + tiles_per_split, k_tiles);
+        if (kt_start >= k_tiles)
+            continue;
+
+        // Per-expert parameters
+        const int a_row_offset = expert_offsets[expert_id];
+        const int M_e = expert_offsets[expert_id + 1] - expert_offsets[expert_id];
+        const int m_base = m_tile * TILE_M;
+
+        // Expert-specific pointers
+        const scalar_t* A = A_concat + a_row_offset * K_dim;
+        const unsigned int* B_packed = B_packed_all + expert_id * b_packed_per_expert;
+        const ABSMAX_T* B_absmax = B_absmax_all + expert_id * b_absmax_per_expert;
+        scalar_t* C = C_concat + a_row_offset * N;
+        float* C_ws = (k_splits > 1) ? C_workspace + a_row_offset * N : nullptr;
+
+        // Zero accumulators
+#pragma unroll
+        for (int mb = 0; mb < M_BLOCKS; mb++)
+#pragma unroll
+            for (int nb = 0; nb < N_BLOCKS; nb++)
+                frag_c[mb][nb][0] = frag_c[mb][nb][1] = frag_c[mb][nb][2] = frag_c[mb][nb][3] = 0.0f;
+
+        // Fetch tile lambda (identical to kbit version except B_COL_WORDS differs)
+        auto fetch_tile = [&](int stage, int kt) {
+            const int k_base = kt * TILE_K;
+            const int tile_idx = kt * n_tiles + n_tile;
+
+            // B tile via cp.async
+            const int b_global_base = tile_idx * B_STAGE_WORDS;
+            constexpr int B_INT4S = B_STAGE_BYTES_VAL / 16;
+            const int4* b_src = reinterpret_cast<const int4*>(B_packed + b_global_base);
+            int4* b_dst = reinterpret_cast<int4*>(sh_b(stage));
+            for (int i = threadIdx.x; i < B_INT4S; i += BLOCK_DIM)
+                cp_async_cg_16(&b_dst[i], &b_src[i]);
+
+            // Absmax via cp.async
+            const int abs_global_base = tile_idx * ABS_STAGE_ELEMS;
+            constexpr int ABS_INT4S = (ABS_STAGE_BYTES + 15) / 16;
+            const int4* abs_src = reinterpret_cast<const int4*>(B_absmax + abs_global_base);
+            int4* abs_dst = reinterpret_cast<int4*>(sh_abs(stage));
+            for (int i = threadIdx.x; i < ABS_INT4S; i += BLOCK_DIM)
+                cp_async_cg_16(&abs_dst[i], &abs_src[i]);
+
+            // A tile via cp.async with XOR swizzle
+            scalar_t* a_dst = sh_a(stage);
+            constexpr int A_GROUPS = A_STAGE_ELEMS / 8;
+            const bool a_interior = (m_base + TILE_M <= M_e) && (k_base + TILE_K <= K_dim);
+
+            if (a_interior) {
+                for (int i = threadIdx.x; i < A_GROUPS; i += BLOCK_DIM) {
+                    int row = i / (TILE_K / 8);
+                    int col_group = i % (TILE_K / 8);
+                    int swizzled_group = col_group ^ (row % 8);
+                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                    const int4* src =
+                        reinterpret_cast<const int4*>(&A[(m_base + row) * K_dim + k_base + col_group * 8]);
+                    cp_async_cg_16(dst, src);
+                }
+            } else {
+                for (int i = threadIdx.x; i < A_GROUPS; i += BLOCK_DIM) {
+                    int row = i / (TILE_K / 8);
+                    int col_group = i % (TILE_K / 8);
+                    int swizzled_group = col_group ^ (row % 8);
+                    int4* dst = reinterpret_cast<int4*>(&a_dst[row * TILE_K + swizzled_group * 8]);
+                    int gr = m_base + row;
+                    int gc = k_base + col_group * 8;
+                    if (gr < M_e && gc < K_dim) {
+                        const int4* src = reinterpret_cast<const int4*>(&A[gr * K_dim + gc]);
+                        cp_async_cg_16(dst, src);
+                    } else {
+                        *dst = make_int4(0, 0, 0, 0);
+                    }
+                }
+            }
+        };
+
+        // Compute tile: VQ dequant via byte extraction + shmem codebook lookup
+        auto compute_tile = [&](int stage) {
+            scalar_t* a_ptr = sh_a(stage);
+            unsigned int* b_ptr = sh_b(stage);
+            ABSMAX_T* abs_ptr = sh_abs(stage);
+
+#pragma unroll
+            for (int ks = 0; ks < 4; ks++) {
+                const int k_block = ks / 2;
+                const int half_idx = ks % 2;
+
+                uint32_t frag_a[M_BLOCKS][4];
+#pragma unroll
+                for (int mb = 0; mb < M_BLOCKS; mb++) {
+                    const int mb_row_offset = mb * 16;
+                    const int matrix_id = lane_id / 8;
+                    const int row_in_matrix = lane_id % 8;
+                    const int a_row = mb_row_offset + row_in_matrix + (matrix_id % 2) * 8;
+                    const int col_start = ks * 16 + (matrix_id / 2) * 8;
+                    const int col_group = col_start / 8;
+                    const int swizzled_group = col_group ^ (a_row % 8);
+                    const int swizzled_col_start = swizzled_group * 8;
+
+                    const scalar_t* addr = &a_ptr[a_row * TILE_K + swizzled_col_start];
+                    uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
+
+                    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
+                                 : "=r"(frag_a[mb][0]), "=r"(frag_a[mb][1]), "=r"(frag_a[mb][2]), "=r"(frag_a[mb][3])
+                                 : "r"(smem_addr));
+                }
+
+#pragma unroll
+                for (int nb = 0; nb < N_BLOCKS; nb++) {
+                    int col = warp_n_base + nb * 8 + gid;
+
+                    scalar_t scale = Ops::from_float(load_absmax<ABSMAX_T>(abs_ptr, col * KB_PER_TILE + k_block));
+
+                    scalar_t vals[4];
+
+                    if constexpr (P_VAL == 2) {
+                        // p=2: 2 words cover 16 elements (8 bytes, each byte → 2 weights)
+                        int word_base = col * B_COL_WORDS + k_block * WORDS_PER_BLOCK + half_idx * 2;
+                        unsigned int w0 = b_ptr[word_base];
+                        unsigned int w1 = b_ptr[word_base + 1];
+
+                        unsigned int idx0 = (w0 >> (tid * 8)) & 0xFF;
+                        unsigned int idx1 = (w1 >> (tid * 8)) & 0xFF;
+
+                        half2 cb0 = cb_shmem[idx0];
+                        half2 cb1 = cb_shmem[idx1];
+
+                        vals[0] = Ops::mul(Ops::from_float(__low2float(cb0)), scale);
+                        vals[1] = Ops::mul(Ops::from_float(__high2float(cb0)), scale);
+                        vals[2] = Ops::mul(Ops::from_float(__low2float(cb1)), scale);
+                        vals[3] = Ops::mul(Ops::from_float(__high2float(cb1)), scale);
+                    } else {
+                        // p=4: 1 word covers 16 elements (4 bytes, each byte → 4 weights)
+                        int word_addr = col * B_COL_WORDS + k_block * WORDS_PER_BLOCK + half_idx;
+                        unsigned int w = b_ptr[word_addr];
+
+                        int byte_a = tid / 2;
+                        int byte_b = tid / 2 + 2;
+                        int pos_base = 2 * (tid % 2);
+
+                        unsigned int idx_a = (w >> (byte_a * 8)) & 0xFF;
+                        unsigned int idx_b = (w >> (byte_b * 8)) & 0xFF;
+
+                        half2* cb_lo = cb_shmem;
+                        half2* cb_hi = cb_shmem + 256;
+
+                        half2 lo_a = cb_lo[idx_a];
+                        half2 hi_a = cb_hi[idx_a];
+                        half2 lo_b = cb_lo[idx_b];
+                        half2 hi_b = cb_hi[idx_b];
+
+                        float v_a[4] = {__low2float(lo_a), __high2float(lo_a),
+                                        __low2float(hi_a), __high2float(hi_a)};
+                        float v_b[4] = {__low2float(lo_b), __high2float(lo_b),
+                                        __low2float(hi_b), __high2float(hi_b)};
+
+                        float scale_f = Ops::to_float(scale);
+                        vals[0] = Ops::from_float(v_a[pos_base] * scale_f);
+                        vals[1] = Ops::from_float(v_a[pos_base + 1] * scale_f);
+                        vals[2] = Ops::from_float(v_b[pos_base] * scale_f);
+                        vals[3] = Ops::from_float(v_b[pos_base + 1] * scale_f);
+                    }
+
+                    uint32_t frag_b[2];
+                    frag_b[0] = pack_two<scalar_t>(vals[0], vals[1]);
+                    frag_b[1] = pack_two<scalar_t>(vals[2], vals[3]);
+
+#pragma unroll
+                    for (int mb = 0; mb < M_BLOCKS; mb++) {
+                        mma_m16n8k16<scalar_t>(frag_a[mb], frag_b, frag_c[mb][nb]);
+                    }
+                }
+            }
+        };
+
+        // Pipeline: NUM_STAGES-deep cp.async
+        {
+            int prefill_end = kt_start + NUM_STAGES - 1;
+            if (prefill_end > kt_end)
+                prefill_end = kt_end;
+            for (int pf = kt_start; pf < prefill_end; pf++) {
+                fetch_tile((pf - kt_start) % NUM_STAGES, pf);
+                cp_async_fence();
+            }
+        }
+
+        for (int kt = kt_start; kt < kt_end; kt++) {
+            int cur = (kt - kt_start) % NUM_STAGES;
+            int fetch_kt = kt + NUM_STAGES - 1;
+            if (fetch_kt < kt_end) {
+                fetch_tile((fetch_kt - kt_start) % NUM_STAGES, fetch_kt);
+                cp_async_fence();
+                if (fetch_kt + 1 < kt_end) {
+                    const int pf_tile = (fetch_kt + 1) * n_tiles + n_tile;
+                    prefetch_l2(B_packed + pf_tile * B_STAGE_WORDS);
+                    prefetch_l2(B_absmax + pf_tile * ABS_STAGE_ELEMS);
+                }
+                cp_async_wait<NUM_STAGES - 1>();
+            } else {
+                cp_async_wait<0>();
+            }
+            __syncthreads();
+            compute_tile(cur);
+            __syncthreads();
+        }
+
+        // Write output
+        if (k_splits == 1) {
+#pragma unroll
+            for (int mb = 0; mb < M_BLOCKS; mb++) {
+#pragma unroll
+                for (int nb = 0; nb < N_BLOCKS; nb++) {
+                    int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
+                    int m_row0 = m_base + mb * 16 + gid;
+                    int m_row1 = m_base + mb * 16 + gid + 8;
+                    if (m_row0 < M_e) {
+                        C[m_row0 * N + c_col] = Ops::from_float(frag_c[mb][nb][0]);
+                        C[m_row0 * N + c_col + 1] = Ops::from_float(frag_c[mb][nb][1]);
+                    }
+                    if (m_row1 < M_e) {
+                        C[m_row1 * N + c_col] = Ops::from_float(frag_c[mb][nb][2]);
+                        C[m_row1 * N + c_col + 1] = Ops::from_float(frag_c[mb][nb][3]);
+                    }
+                }
+            }
+        } else {
+            int mn_id = tiles_so_far / k_splits + mn_local;
+#pragma unroll
+            for (int mb = 0; mb < M_BLOCKS; mb++) {
+#pragma unroll
+                for (int nb = 0; nb < N_BLOCKS; nb++) {
+                    int c_col = n_tile * TILE_N + warp_n_base + nb * 8 + tid * 2;
+                    int m_row0 = m_base + mb * 16 + gid;
+                    int m_row1 = m_base + mb * 16 + gid + 8;
+                    if (m_row0 < M_e) {
+                        atomicAdd(&C_ws[m_row0 * N + c_col], frag_c[mb][nb][0]);
+                        atomicAdd(&C_ws[m_row0 * N + c_col + 1], frag_c[mb][nb][1]);
+                    }
+                    if (m_row1 < M_e) {
+                        atomicAdd(&C_ws[m_row1 * N + c_col], frag_c[mb][nb][2]);
+                        atomicAdd(&C_ws[m_row1 * N + c_col + 1], frag_c[mb][nb][3]);
+                    }
+                }
+            }
+
+            __threadfence();
+
+            __shared__ int is_last;
+            if (threadIdx.x == 0) {
+                int done = atomicAdd(&tile_counters[mn_id], 1);
+                is_last = (done == k_splits - 1) ? 1 : 0;
+            }
+            __syncthreads();
+
+            if (is_last) {
+                for (int i = threadIdx.x; i < TILE_M * TILE_N; i += BLOCK_DIM) {
+                    int row = m_base + i / TILE_N;
+                    int col = n_tile * TILE_N + i % TILE_N;
+                    if (row < M_e)
+                        C[row * N + col] = Ops::from_float(C_ws[row * N + col]);
+                }
+            }
+        }
+    } // end persistent work loop
+}
+
+// VQ Grouped GEMM launcher — supports TILE_N=64/128 and auto k_splits
+template <int P, int MB, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
+static void vqGroupedGemmProdLaunch(
+    const scalar_t* A_concat, const unsigned int* B_packed_all, const ABSMAX_T* B_absmax_all, const half* codebook,
+    scalar_t* C_concat, float* C_workspace, int* tile_counters, const int* expert_offsets, int K_dim, int N,
+    int num_experts, int max_M, int num_sms, cudaStream_t stream
+) {
+    constexpr int TILE_M = MB * 16;
+    constexpr int TILE_K = 64;
+    constexpr int TILE_N = TN;
+    constexpr int BS = 32;
+    constexpr int KB_PER_TILE = TILE_K / BS;
+    constexpr int WORDS_PER_BLOCK = 32 / (P * 4);
+    constexpr int B_COL_WORDS = KB_PER_TILE * WORDS_PER_BLOCK;
+    constexpr int N_BLOCKS = 2;
+    constexpr int NUM_WARPS = TILE_N / (N_BLOCKS * 8);
+    constexpr int BLOCK_DIM = NUM_WARPS * 32;
+
+    constexpr int A_STAGE_BYTES = TILE_M * TILE_K * sizeof(scalar_t);
+    constexpr int B_STAGE_BYTES = TILE_N * B_COL_WORDS * sizeof(unsigned int);
+    constexpr int ABS_STAGE_BYTES = TILE_N * KB_PER_TILE * (int)sizeof(ABSMAX_T);
+    constexpr int ABS_STAGE_ALIGNED = (ABS_STAGE_BYTES + 15) & ~15;
+    constexpr int STAGE_BYTES = A_STAGE_BYTES + B_STAGE_BYTES + ABS_STAGE_ALIGNED;
+
+    constexpr int CB_BYTES = (P == 2) ? 1024 : 2048;
+    constexpr int CB_ALIGNED = (CB_BYTES + 15) & ~15;
+
+    int n_tiles = N / TILE_N;
+    int k_tiles = (K_dim + TILE_K - 1) / TILE_K;
+    int m_tiles_per_expert = (max_M + TILE_M - 1) / TILE_M;
+    int mn_tiles = num_experts * m_tiles_per_expert * n_tiles;
+
+    int target_blocks_per_sm;
+    if constexpr (BLOCK_DIM <= 128)
+        target_blocks_per_sm = (num_sms > 130) ? 6 : 4;
+    else
+        target_blocks_per_sm = (num_sms > 130) ? 2 : 1;
+    int target_blocks = num_sms * target_blocks_per_sm;
+
+    int k_splits = 1;
+    if (mn_tiles < target_blocks && k_tiles > 1) {
+        k_splits = min(k_tiles, (target_blocks + mn_tiles - 1) / mn_tiles);
+    }
+
+    int total_work = mn_tiles * k_splits;
+    int grid_size = (k_splits == 1) ? min(num_sms, total_work) : min(target_blocks, total_work);
+
+    dim3 block(BLOCK_DIM);
+    int num_stages = pipelineNumStages();
+    int smem_size = CB_ALIGNED + num_stages * STAGE_BYTES;
+
+    if (smem_size > 48 * 1024) {
+        cudaFuncSetAttribute(
+            vq_grouped_gemm_prod<P, MB, TN, scalar_t, ABSMAX_T>, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
+        );
+    }
+
+    vq_grouped_gemm_prod<P, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size, stream>>>(
+        A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, expert_offsets, K_dim, N,
+        num_experts, k_splits, total_work
+    );
+    CUDA_CHECK_RETURN(cudaPeekAtLastError());
+}
+
+// VQ Grouped GEMM public entry point
+template <int P, typename scalar_t, typename ABSMAX_T = unsigned char>
+void vqGroupedGemmProd(
+    const scalar_t* A_concat, const unsigned int* B_packed_all, const ABSMAX_T* B_absmax_all, const half* codebook,
+    scalar_t* C_concat, float* C_workspace, int* tile_counters, const int* d_expert_offsets, int K_dim, int N,
+    int num_experts, int max_M, cudaStream_t stream
+) {
+    if (max_M == 0 || N == 0)
+        return;
+
+    const int num_sms = cachedNumSMs();
+
+    int m_blocks = 1;
+    if (max_M > 48)
+        m_blocks = 4;
+    else if (max_M > 32)
+        m_blocks = 3;
+    else if (max_M > 16)
+        m_blocks = 2;
+
+    const bool use_tn64 = (m_blocks == 1) && (N % 64 == 0);
+
+    if (use_tn64) {
+        vqGroupedGemmProdLaunch<P, 1, 64, scalar_t, ABSMAX_T>(
+            A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
+            K_dim, N, num_experts, max_M, num_sms, stream
+        );
+    } else {
+        switch (m_blocks) {
+        case 4:
+            vqGroupedGemmProdLaunch<P, 4, 128, scalar_t, ABSMAX_T>(
+                A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
+                K_dim, N, num_experts, max_M, num_sms, stream
+            );
+            break;
+        case 3:
+            vqGroupedGemmProdLaunch<P, 3, 128, scalar_t, ABSMAX_T>(
+                A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
+                K_dim, N, num_experts, max_M, num_sms, stream
+            );
+            break;
+        case 2:
+            vqGroupedGemmProdLaunch<P, 2, 128, scalar_t, ABSMAX_T>(
+                A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
+                K_dim, N, num_experts, max_M, num_sms, stream
+            );
+            break;
+        default:
+            vqGroupedGemmProdLaunch<P, 1, 128, scalar_t, ABSMAX_T>(
+                A_concat, B_packed_all, B_absmax_all, codebook, C_concat, C_workspace, tile_counters, d_expert_offsets,
+                K_dim, N, num_experts, max_M, num_sms, stream
+            );
+            break;
+        }
+    }
+}
+
 // ===================================================================
 // Scalar GEMV kernel: C[M,N] = A[M,K_dim] * W_kbit^T  (M=1..4)
 // ===================================================================
@@ -4183,6 +4689,18 @@ INSTANTIATE_KBIT_GROUPED_GEMM_PROD_FP16(2)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD_FP16(3)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD_FP16(4)
 INSTANTIATE_KBIT_GROUPED_GEMM_PROD_FP16(5)
+
+// VQ Grouped expert GEMM instantiations — uint8 E4M4 absmax
+#define INSTANTIATE_VQ_GROUPED_GEMM_PROD_U8(P)                                                                         \
+    template void vqGroupedGemmProd<P, half, unsigned char>(                                                           \
+        const half*, const unsigned int*, const unsigned char*, const half*, half*, float*, int*, const int*, int,      \
+        int, int, int, cudaStream_t                                                                                    \
+    );                                                                                                                 \
+    template void vqGroupedGemmProd<P, __nv_bfloat16, unsigned char>(                                                  \
+        const __nv_bfloat16*, const unsigned int*, const unsigned char*, const half*, __nv_bfloat16*, float*, int*,     \
+        const int*, int, int, int, int, cudaStream_t                                                                   \
+    );
+INSTANTIATE_VQ_GROUPED_GEMM_PROD_U8(2)
 
 // Scalar GEMV instantiations — flat layout, C=1
 // uint8 E4M4 absmax (default)
