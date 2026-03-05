@@ -10,6 +10,26 @@
 
 #define ERR_NOT_IMPLEMENTED 100
 
+#if BNB_HIP
+#include <atomic>
+#include <hip/hip_runtime.h>
+
+// NOTE: This queries device 0 once and caches the result. On mixed RDNA+CDNA
+// systems (warp size 32 vs 64) this will return the wrong value for whichever
+// device doesn't match device 0.
+static int bnb_host_warp_size() {
+    static std::atomic<int> warp_size{0};
+    int ws = warp_size.load(std::memory_order_relaxed);
+    if (ws == 0) {
+        (void)hipDeviceGetAttribute(&ws, hipDeviceAttributeWarpSize, 0);
+        warp_size.store(ws, std::memory_order_relaxed);
+    }
+    return ws;
+}
+#else
+static constexpr int bnb_host_warp_size() { return 32; }
+#endif
+
 using std::cout;
 using std::endl;
 
@@ -35,10 +55,16 @@ void quantizeBlockwise(
         kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 64) {
 #if BNB_HIP
-        // On HIP with 64-wide warps (CDNA), use specialized kernel for 4-bit types
         if constexpr (DATA_TYPE > 0) {
-            kQuantizeBlockwiseSmall<T, DATA_TYPE>
-                <<<(num_blocks + 1) / 2, 64>>>(code, A, absmax, out, rand, rand_offset, n);
+            if (bnb_host_warp_size() == 64) {
+                // CDNA: kQuantizeBlockwiseSmall is compiled with THREADS=64
+                kQuantizeBlockwiseSmall<T, DATA_TYPE>
+                    <<<(num_blocks + 1) / 2, 64>>>(code, A, absmax, out, rand, rand_offset, n);
+            } else {
+                // RDNA: standard kernel (same as CUDA path)
+                kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>
+                    <<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
+            }
         } else {
             kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE><<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
         }
@@ -407,8 +433,7 @@ void gemm_4bit_inference_naive(
 
     int num_blocks = (m + 3) / 4;
 #if BNB_HIP
-    // On 64-wide warp architectures, each warp processes 2 rows instead of 4
-    if (BNB_WARP_SIZE == 64) {
+    if (bnb_host_warp_size() == 64) {
         num_blocks = (m + 1) / 2;
     }
 #endif
