@@ -1350,6 +1350,56 @@ def gemm_nvfp4_to_nvfp4(
     return packed, out_state
 
 
+def gemm_nvfp4_grouped(
+    A_data: torch.Tensor,
+    A_state: NVFP4QuantState,
+    B_data_all: torch.Tensor,
+    B_scales_all: torch.Tensor,
+    B_tensor_scale: float,
+    expert_offsets: torch.Tensor,
+    N: int,
+    K: int,
+) -> torch.Tensor:
+    """Grouped NVFP4 GEMM for MoE: fuse all expert GEMMs into a single kernel launch.
+
+    Args:
+        A_data: Packed FP4 activations, concatenated across experts [total_tokens * K/2].
+        A_state: Quantization state for activations (total_tokens x K).
+        B_data_all: Packed FP4 weights for all experts [num_experts * N * K/2].
+        B_scales_all: Flat block scales for all experts [num_experts * N * K/16].
+        B_tensor_scale: Shared tensor scale for all expert weights.
+        expert_offsets: Cumulative token offsets [num_experts + 1], int32.
+        N: Output dimension per expert.
+        K: Input dimension per expert.
+
+    Returns:
+        Output tensor of shape (total_tokens, N) in float32 with tensor scales applied.
+    """
+    num_experts = expert_offsets.numel() - 1
+
+    # Compute cumulative m-tile counts for the kernel's work decomposition.
+    # BLOCK_M_DIM = 32 in kGroupedGemmNVFP4_smem.
+    BLOCK_M = 32
+    expert_tokens = expert_offsets[1:] - expert_offsets[:-1]
+    m_tiles_per_expert = (expert_tokens + BLOCK_M - 1) // BLOCK_M
+    cumul_m_tiles = torch.zeros(num_experts + 1, dtype=torch.int32, device=expert_offsets.device)
+    torch.cumsum(m_tiles_per_expert, dim=0, out=cumul_m_tiles[1:])
+
+    return torch.ops.bitsandbytes.gemm_nvfp4_grouped(
+        A_data,
+        B_data_all,
+        A_state.block_scales,
+        B_scales_all,
+        expert_offsets,
+        cumul_m_tiles,
+        A_state.tensor_scale,
+        B_tensor_scale,
+        N,
+        K,
+        num_experts,
+    )
+
+
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def quantize(
     A: Tensor,

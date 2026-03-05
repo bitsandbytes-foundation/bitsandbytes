@@ -509,3 +509,41 @@ def _(
     torch._check_is_size(N)
     torch._check_is_size(K)
     return torch.empty(M, N, dtype=torch.float32, device=A_packed.device)
+
+
+# Grouped NVFP4 GEMM for MoE inference
+# Fuses all expert GEMMs into a single kernel launch.
+# A_concat:      [total_tokens, K/2]     packed activations (all experts concatenated)
+# B_all:         [num_experts * N, K/2]  packed weights (per-expert, stacked)
+# SFA_concat:    [total_tokens, K/16]    activation scales (flat, concatenated)
+# SFB_all:       [num_experts * N, K/16] weight scales (flat, stacked)
+# expert_offsets: [num_experts + 1]       cumulative token offsets (int32)
+# cumul_m_tiles:  [num_experts + 1]       cumulative m-tile counts (int32)
+torch.library.define(
+    "bitsandbytes::gemm_nvfp4_grouped",
+    "(Tensor A_concat, Tensor B_all, Tensor SFA_concat, Tensor SFB_all, "
+    "Tensor expert_offsets, Tensor cumul_m_tiles, "
+    "float A_tensor_scale, float B_tensor_scale, "
+    "int N, int K, int num_experts) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::gemm_nvfp4_grouped")
+def _(
+    A_concat: torch.Tensor,
+    B_all: torch.Tensor,
+    SFA_concat: torch.Tensor,
+    SFB_all: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    cumul_m_tiles: torch.Tensor,
+    A_tensor_scale: float,
+    B_tensor_scale: float,
+    N: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    torch._check_is_size(N)
+    torch._check_is_size(K)
+    # total_tokens = number of rows in A_concat = A_concat.numel() / (K/2)
+    total_tokens = A_concat.numel() // (K // 2)
+    return torch.empty(total_tokens, N, dtype=torch.bfloat16, device=A_concat.device)

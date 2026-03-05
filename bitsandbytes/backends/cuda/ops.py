@@ -1134,3 +1134,75 @@ def _(
         N,
         K,
     )
+
+
+# Grouped NVFP4 GEMM for MoE inference (SM_120+)
+#
+# Fuses all expert GEMMs into a single kernel launch using expert-offset
+# work decomposition with binary search. Uses flat (non-swizzled) scales.
+# CUDA-graph-safe: no dynamic allocations.
+def _gemm_nvfp4_grouped_raw(
+    A_concat: torch.Tensor,
+    B_all: torch.Tensor,
+    SFA_concat: torch.Tensor,
+    SFB_all: torch.Tensor,
+    D_concat: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    cumul_m_tiles: torch.Tensor,
+    N: int,
+    K: int,
+    num_experts: int,
+    total_tiles: int,
+) -> None:
+    """Raw grouped NVFP4 GEMM (BF16 output) — zero allocations, CUDA-graph-safe.
+
+    All buffers must be pre-allocated. D_concat must be BF16 of shape (total_tokens, N).
+    expert_offsets and cumul_m_tiles must be int32 on the same device.
+    """
+    lib.cgemm_nvfp4_grouped_bf16(
+        get_ptr(A_concat),
+        get_ptr(B_all),
+        get_ptr(SFA_concat),
+        get_ptr(SFB_all),
+        get_ptr(D_concat),
+        get_ptr(expert_offsets),
+        get_ptr(cumul_m_tiles),
+        ct.c_int(N),
+        ct.c_int(K),
+        ct.c_int(num_experts),
+        ct.c_int(total_tiles),
+        _get_tensor_stream(A_concat),
+    )
+
+
+@register_kernel("bitsandbytes::gemm_nvfp4_grouped", "cuda")
+def _(
+    A_concat: torch.Tensor,
+    B_all: torch.Tensor,
+    SFA_concat: torch.Tensor,
+    SFB_all: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    cumul_m_tiles: torch.Tensor,
+    A_tensor_scale: float,
+    B_tensor_scale: float,
+    N: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    """Grouped NVFP4 GEMM for MoE: fuse all expert GEMMs into one launch."""
+    total_tokens = A_concat.numel() // (K // 2)
+
+    # Kernel tile dimensions: BLOCK_M_DIM=32, BLOCK_N_DIM=128
+    num_n_tiles = (N + 127) // 128
+
+    with _cuda_device_of(A_concat):
+        D_concat = torch.empty(total_tokens, N, dtype=torch.bfloat16, device=A_concat.device)
+        total_tiles = cumul_m_tiles[-1].item() * num_n_tiles
+
+        _gemm_nvfp4_grouped_raw(
+            A_concat, B_all, SFA_concat, SFB_all, D_concat,
+            expert_offsets, cumul_m_tiles, N, K, num_experts, total_tiles,
+        )
+
+    # Apply tensor scales
+    return D_concat.float() * (A_tensor_scale * B_tensor_scale)

@@ -14,6 +14,7 @@ from .modules import (
     LinearFP4,
     LinearNF4,
     LinearNVFP4,
+    LinearNVFP4MoE,
     OutlierAwareLinear,
     Params4bit,
     StableEmbedding,

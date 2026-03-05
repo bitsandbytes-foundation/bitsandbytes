@@ -740,6 +740,154 @@ class LinearNVFP4(nn.Linear):
         return out.to(inp_dtype)
 
 
+class LinearNVFP4MoE(nn.Module):
+    """NVFP4 (E2M1) quantized MoE linear layer for Blackwell GPUs (SM_120).
+
+    Wraps multiple expert weight matrices and fuses their GEMMs into a single
+    grouped kernel launch. Each expert has shape (output_features, input_features).
+
+    Usage:
+        layer = LinearNVFP4MoE(num_experts=128, input_features=2048, output_features=1536)
+        # Load weights: layer.experts[i].weight = ...
+        # Or from an existing list of nn.Linear:
+        # layer = LinearNVFP4MoE.from_linear_experts(expert_linears)
+        out = layer(x, expert_offsets)
+
+    Args:
+        num_experts: Number of experts.
+        input_features: Input dimension (K) per expert.
+        output_features: Output dimension (N) per expert.
+        bias: Whether experts have bias. Defaults to False.
+        device: Device for initialization.
+    """
+
+    def __init__(
+        self,
+        num_experts: int,
+        input_features: int,
+        output_features: int,
+        bias: bool = False,
+        device=None,
+    ):
+        super().__init__()
+        self.num_experts = num_experts
+        self.input_features = input_features
+        self.output_features = output_features
+        self.has_bias = bias
+        self._quantized = False
+
+        # Store raw weights until first forward (or explicit quantize call)
+        self.weight = nn.Parameter(
+            torch.empty(num_experts, output_features, input_features, device=device, dtype=torch.bfloat16),
+            requires_grad=False,
+        )
+        if bias:
+            self.bias = nn.Parameter(
+                torch.zeros(num_experts, output_features, device=device, dtype=torch.bfloat16),
+                requires_grad=False,
+            )
+        else:
+            self.bias = None
+
+        # Quantized state (populated by _quantize_weights)
+        self.register_buffer("weight_packed", None)
+        self.register_buffer("weight_scales", None)
+        self.weight_tensor_scale: float = 1.0
+
+    @classmethod
+    def from_linear_experts(cls, experts: list[nn.Linear], device=None) -> "LinearNVFP4MoE":
+        """Create from a list of nn.Linear expert modules."""
+        num_experts = len(experts)
+        out_features, in_features = experts[0].weight.shape
+        has_bias = experts[0].bias is not None
+        dev = device or experts[0].weight.device
+
+        layer = cls(num_experts, in_features, out_features, bias=has_bias, device=dev)
+        with torch.no_grad():
+            for i, expert in enumerate(experts):
+                layer.weight.data[i] = expert.weight.data.to(torch.bfloat16)
+                if has_bias and expert.bias is not None:
+                    layer.bias.data[i] = expert.bias.data.to(torch.bfloat16)
+        return layer
+
+    def _quantize_weights(self):
+        """Quantize all expert weights to NVFP4 and stack into contiguous buffers."""
+        from bitsandbytes.functional import quantize_nvfp4
+
+        N, K = self.output_features, self.input_features
+
+        # Quantize all experts and find a shared tensor scale
+        all_packed = []
+        all_scales = []
+        tensor_scales = []
+
+        for i in range(self.num_experts):
+            w = self.weight.data[i].to(torch.bfloat16).contiguous()
+            packed, state = quantize_nvfp4(w)
+            all_packed.append(state.packed_data)
+            all_scales.append(state.block_scales)
+            tensor_scales.append(state.tensor_scale)
+
+        # Stack into contiguous buffers: [num_experts * N, K/2] and [num_experts * N, K/16]
+        self.weight_packed = torch.cat(all_packed, dim=0).contiguous()
+        self.weight_scales = torch.cat(all_scales, dim=0).contiguous()
+        self.weight_tensor_scale = max(tensor_scales)
+
+        self._quantized = True
+        # Free original weights
+        self.weight = nn.Parameter(
+            torch.empty(0, device=self.weight_packed.device, dtype=torch.bfloat16),
+            requires_grad=False,
+        )
+
+    def forward(self, x: torch.Tensor, expert_offsets: torch.Tensor) -> torch.Tensor:
+        """Run grouped NVFP4 GEMM across all experts.
+
+        Args:
+            x: Concatenated activations from all experts [total_tokens, K] in token order.
+                Tokens for expert 0 come first, then expert 1, etc.
+            expert_offsets: Cumulative token offsets [num_experts + 1], int32.
+                expert_offsets[i] is the starting token index for expert i.
+                expert_offsets[-1] = total_tokens.
+
+        Returns:
+            Output tensor [total_tokens, N] with expert results in the same token order.
+        """
+        if not self._quantized:
+            self._quantize_weights()
+
+        from bitsandbytes.functional import gemm_nvfp4_grouped, quantize_nvfp4
+
+        inp_dtype = x.dtype
+        N, K = self.output_features, self.input_features
+
+        # Quantize activations
+        x_2d = x.reshape(-1, K).to(torch.bfloat16).contiguous()
+        x_packed, x_state = quantize_nvfp4(x_2d)
+
+        # Run grouped GEMM
+        out = gemm_nvfp4_grouped(
+            x_packed,
+            x_state,
+            self.weight_packed,
+            self.weight_scales,
+            self.weight_tensor_scale,
+            expert_offsets.to(torch.int32),
+            N,
+            K,
+        )
+
+        # Add per-expert bias if present
+        if self.bias is not None:
+            for i in range(self.num_experts):
+                start = expert_offsets[i].item()
+                end = expert_offsets[i + 1].item()
+                if end > start:
+                    out[start:end] = out[start:end] + self.bias[i].to(out.dtype)
+
+        return out.to(inp_dtype)
+
+
 class Int8Params(torch.nn.Parameter):
     def __new__(
         cls,
