@@ -1,6 +1,6 @@
 import pytest
 
-from bitsandbytes.cextension import HIP_ENVIRONMENT, get_cuda_bnb_library_path
+from bitsandbytes.cextension import BNB_BACKEND, get_cuda_bnb_library_path
 from bitsandbytes.cuda_specs import CUDASpecs
 
 
@@ -14,7 +14,7 @@ def cuda120_spec() -> CUDASpecs:
     )
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm")
+@pytest.mark.skipif(BNB_BACKEND != "CUDA", reason="this test requires a CUDA backend")
 def test_get_cuda_bnb_library_path(monkeypatch, cuda120_spec):
     """Without overrides, library path uses the detected CUDA 12.0 version."""
     monkeypatch.delenv("BNB_ROCM_VERSION", raising=False)
@@ -22,7 +22,7 @@ def test_get_cuda_bnb_library_path(monkeypatch, cuda120_spec):
     assert get_cuda_bnb_library_path(cuda120_spec).stem == "libbitsandbytes_cuda120"
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm")
+@pytest.mark.skipif(BNB_BACKEND != "CUDA", reason="this test requires a CUDA backend")
 def test_get_cuda_bnb_library_path_override(monkeypatch, cuda120_spec, caplog):
     """BNB_CUDA_VERSION=110 overrides path selection to the CUDA 11.0 binary."""
     monkeypatch.setenv("BNB_CUDA_VERSION", "110")
@@ -30,12 +30,12 @@ def test_get_cuda_bnb_library_path_override(monkeypatch, cuda120_spec, caplog):
     assert "BNB_CUDA_VERSION" in caplog.text  # did we get the warning?
 
 
-@pytest.mark.skipif(HIP_ENVIRONMENT, reason="this test is not supported on ROCm")
+@pytest.mark.skipif(BNB_BACKEND != "CUDA", reason="this test requires a CUDA backend")
 def test_get_cuda_bnb_library_path_rejects_rocm_override(monkeypatch, cuda120_spec):
     """BNB_ROCM_VERSION should be rejected on CUDA with a helpful error."""
     monkeypatch.delenv("BNB_CUDA_VERSION", raising=False)
     monkeypatch.setenv("BNB_ROCM_VERSION", "72")
-    with pytest.raises(RuntimeError, match=r"BNB_ROCM_VERSION.*detected for CUDA!"):
+    with pytest.raises(RuntimeError, match=r"BNB_ROCM_VERSION.*detected for CUDA"):
         get_cuda_bnb_library_path(cuda120_spec)
 
 
@@ -49,7 +49,7 @@ def rocm70_spec() -> CUDASpecs:
     )
 
 
-@pytest.mark.skipif(not HIP_ENVIRONMENT, reason="this test is only supported on ROCm")
+@pytest.mark.skipif(BNB_BACKEND != "ROCm", reason="this test requires a ROCm backend")
 def test_get_rocm_bnb_library_path(monkeypatch, rocm70_spec):
     """Without override, library path uses PyTorch's ROCm 7.0 version."""
     monkeypatch.delenv("BNB_ROCM_VERSION", raising=False)
@@ -57,7 +57,7 @@ def test_get_rocm_bnb_library_path(monkeypatch, rocm70_spec):
     assert get_cuda_bnb_library_path(rocm70_spec).stem == "libbitsandbytes_rocm70"
 
 
-@pytest.mark.skipif(not HIP_ENVIRONMENT, reason="this test is only supported on ROCm")
+@pytest.mark.skipif(BNB_BACKEND != "ROCm", reason="this test requires a ROCm backend")
 def test_get_rocm_bnb_library_path_override(monkeypatch, rocm70_spec, caplog):
     """BNB_ROCM_VERSION=72 overrides to load the ROCm 7.2 library instead of 7.0."""
     monkeypatch.setenv("BNB_ROCM_VERSION", "72")
@@ -66,10 +66,10 @@ def test_get_rocm_bnb_library_path_override(monkeypatch, rocm70_spec, caplog):
     assert "BNB_ROCM_VERSION" in caplog.text
 
 
-@pytest.mark.skipif(not HIP_ENVIRONMENT, reason="this test is only supported on ROCm")
+@pytest.mark.skipif(BNB_BACKEND != "ROCm", reason="this test requires a ROCm backend")
 def test_get_rocm_bnb_library_path_rejects_cuda_override(monkeypatch, rocm70_spec):
     """BNB_CUDA_VERSION should be rejected on ROCm with a helpful error."""
     monkeypatch.delenv("BNB_ROCM_VERSION", raising=False)
     monkeypatch.setenv("BNB_CUDA_VERSION", "120")
-    with pytest.raises(RuntimeError, match=r"BNB_CUDA_VERSION.*detected for ROCm!"):
+    with pytest.raises(RuntimeError, match=r"BNB_CUDA_VERSION.*detected for ROCm"):
         get_cuda_bnb_library_path(rocm70_spec)
