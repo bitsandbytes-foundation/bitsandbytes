@@ -448,36 +448,6 @@ static void launch_gemm_nvfp4(
 }
 
 // ============================================================================
-// C entry points — FP32 output (backward compatible)
-// ============================================================================
-extern "C" void cgemm_nvfp4(
-    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
-    int N, int K, cudaStream_t stream
-) {
-    int num_m_blocks = (M + BLOCK_M_DIM - 1) / BLOCK_M_DIM;
-    int num_n_blocks = (N + BLOCK_N_DIM - 1) / BLOCK_N_DIM;
-    int base_blocks = num_m_blocks * num_n_blocks;
-    int split_k = compute_split_k(base_blocks, K);
-
-    // FP32 output: D serves as both output and workspace for split-K
-    launch_gemm_nvfp4<float>(A, B, SFA, SFB, D, D, M, N, K, split_k, stream);
-}
-
-extern "C" void cgemm_nvfp4_splitk(
-    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB, float* D, int M,
-    int N, int K, int split_k, cudaStream_t stream
-) {
-    if (split_k < 1)
-        split_k = 1;
-    int max_k_splits = K / 64;
-    if (split_k > max_k_splits)
-        split_k = max_k_splits;
-
-    // FP32 output: D serves as both output and workspace
-    launch_gemm_nvfp4<float>(A, B, SFA, SFB, D, D, M, N, K, split_k, stream);
-}
-
-// ============================================================================
 // C entry points — BF16 output
 // ============================================================================
 extern "C" void cgemm_nvfp4_bf16(
@@ -488,19 +458,6 @@ extern "C" void cgemm_nvfp4_bf16(
     int num_n_blocks = (N + BLOCK_N_DIM - 1) / BLOCK_N_DIM;
     int base_blocks = num_m_blocks * num_n_blocks;
     int split_k = compute_split_k(base_blocks, K);
-
-    launch_gemm_nvfp4<__nv_bfloat16>(A, B, SFA, SFB, D, workspace, M, N, K, split_k, stream);
-}
-
-extern "C" void cgemm_nvfp4_bf16_splitk(
-    const unsigned char* A, const unsigned char* B, const unsigned char* SFA, const unsigned char* SFB,
-    __nv_bfloat16* D, float* workspace, int M, int N, int K, int split_k, cudaStream_t stream
-) {
-    if (split_k < 1)
-        split_k = 1;
-    int max_k_splits = K / 64;
-    if (split_k > max_k_splits)
-        split_k = max_k_splits;
 
     launch_gemm_nvfp4<__nv_bfloat16>(A, B, SFA, SFB, D, workspace, M, N, K, split_k, stream);
 }

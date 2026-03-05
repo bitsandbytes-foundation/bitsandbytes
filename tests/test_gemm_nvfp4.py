@@ -54,23 +54,25 @@ def cuda_dequantize_nvfp4(packed, block_scales, tensor_scale, n, dtype=torch.flo
 
 
 def cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K):
-    """Run GEMM using the CUDA kernel."""
+    """Run GEMM using the CUDA kernel (BF16 output)."""
     lib = get_lib()
-    D_out = torch.zeros(M, N, dtype=torch.float32, device=A_packed.device)
+    D_out = torch.zeros(M, N, dtype=torch.bfloat16, device=A_packed.device)
+    workspace = torch.zeros(M, N, dtype=torch.float32, device=A_packed.device)
     stream = torch.cuda.current_stream()
-    lib.cgemm_nvfp4(
+    lib.cgemm_nvfp4_bf16(
         ctypes.c_void_p(A_packed.data_ptr()),
         ctypes.c_void_p(B_packed.data_ptr()),
         ctypes.c_void_p(A_scales.data_ptr()),
         ctypes.c_void_p(B_scales.data_ptr()),
         ctypes.c_void_p(D_out.data_ptr()),
+        ctypes.c_void_p(workspace.data_ptr()),
         ctypes.c_int(M),
         ctypes.c_int(N),
         ctypes.c_int(K),
         ctypes.c_void_p(stream.cuda_stream),
     )
     torch.cuda.synchronize()
-    return D_out
+    return D_out.float()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
