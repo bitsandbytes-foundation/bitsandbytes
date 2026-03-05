@@ -714,18 +714,6 @@ static void launch_grouped_gemm_nvfp4(
     );
 }
 
-extern "C" void cgemm_nvfp4_grouped(
-    const unsigned char* A_concat, const unsigned char* B_all,
-    const unsigned char* SFA_concat, const unsigned char* SFB_all,
-    float* D_concat, const int* expert_offsets, const int* cumul_m_tiles,
-    int N, int K, int num_experts, int total_tiles, cudaStream_t stream
-) {
-    launch_grouped_gemm_nvfp4<float>(
-        A_concat, B_all, SFA_concat, SFB_all, D_concat,
-        expert_offsets, cumul_m_tiles, N, K, num_experts, total_tiles, stream
-    );
-}
-
 extern "C" void cgemm_nvfp4_grouped_bf16(
     const unsigned char* A_concat, const unsigned char* B_all,
     const unsigned char* SFA_concat, const unsigned char* SFB_all,
