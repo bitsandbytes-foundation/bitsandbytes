@@ -54,30 +54,20 @@ void quantizeBlockwise(
     else if (blocksize == 128)
         kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 64) {
-#if BNB_HIP
         if constexpr (DATA_TYPE > 0) {
-            if (bnb_host_warp_size() == 64) {
-                // CDNA: kQuantizeBlockwiseSmall is compiled with THREADS=64
-                kQuantizeBlockwiseSmall<T, DATA_TYPE>
-                    <<<(num_blocks + 1) / 2, 64>>>(code, A, absmax, out, rand, rand_offset, n);
-            } else {
-                // RDNA: standard kernel (same as CUDA path)
-                kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>
-                    <<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
-            }
+            const int ws = bnb_host_warp_size();
+            const int num_qb = ws / (64 / 2);
+            int grid = (num_blocks + num_qb - 1) / num_qb;
+            kQuantizeBlockwiseSmall<T, 64, DATA_TYPE><<<grid, ws>>>(code, A, absmax, out, rand, rand_offset, n);
         } else {
             kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE><<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
         }
-#else
-        kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE><<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
-#endif
     } else if (blocksize == 32) {
-        // For 4-bit: use specialized kernel that processes 2 blocks per warp
-        // Each CUDA block handles 2 quantization blocks, so divide num_blocks by 2
         if constexpr (DATA_TYPE > 0) {
-            int num_blocks_adjusted = (num_blocks + 1) / 2;
-            kQuantizeBlockwiseSmall<T, DATA_TYPE>
-                <<<num_blocks_adjusted, 32>>>(code, A, absmax, out, rand, rand_offset, n);
+            const int ws = bnb_host_warp_size();
+            const int num_qb = ws / (32 / 2);
+            int grid = (num_blocks + num_qb - 1) / num_qb;
+            kQuantizeBlockwiseSmall<T, 32, DATA_TYPE><<<grid, ws>>>(code, A, absmax, out, rand, rand_offset, n);
         }
     }
 
