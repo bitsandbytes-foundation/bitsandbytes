@@ -1,6 +1,6 @@
 #!/bin/bash
 # Full kernel benchmark: MMA + scalar (ncu) + cuBLAS fp16 (CUDA events).
-# Then computes end-to-end model summary for Qwen3-Coder-Next 70B.
+# Then computes end-to-end model summary for GLM-4.7.
 #
 # Usage:
 #   bash benchmarks/bench_ncu.sh           # default M=1..8
@@ -91,7 +91,7 @@ M_VALS=$ALL_M NUM_EXPERTS=$NUM_EXPERTS python "$SCRIPT_DIR/bench_fp16.py" 2>/dev
 
 # ---- Model-level summary ----
 echo ""
-echo "=== Qwen3-Coder-Next 70B: weight matmul summary ==="
+echo "=== GLM-4.7: weight matmul summary ==="
 python3 "$SCRIPT_DIR/model_summary.py" "$RESULTS_DIR"
 
 echo ""

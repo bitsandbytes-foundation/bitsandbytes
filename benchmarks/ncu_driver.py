@@ -36,19 +36,19 @@ if KERNEL == "scalar":
 # Print actual M values to stderr so shell script knows what to parse
 print(f"ACTUAL_M_VALS={','.join(str(m) for m in m_vals)}", file=sys.stderr)
 
-# Dense/attention shapes
+# Dense/attention shapes (GLM-4.7)
 dense_shapes = [
-    ("gateup", 2048, 5120),
-    ("down", 5120, 2048),
-    ("Q", 2048, 4096),
-    ("O", 4096, 2048),
-    ("KV", 2048, 512),
+    ("sh_gateup", 5120, 24576),
+    ("sh_down", 12288, 5120),
+    ("Q", 5120, 12288),
+    ("O", 12288, 5120),
+    ("KV", 5120, 2048),
 ]
 
-# MoE expert shapes (Qwen3-Coder-Next 70B)
+# MoE expert shapes (GLM-4.7: 160 experts, top-8)
 moe_shapes = [
-    ("moe_gu", 2048, 512),
-    ("moe_dn", 512, 2048),
+    ("moe_gu", 5120, 3072),
+    ("moe_dn", 1536, 5120),
 ]
 
 k_bits_list = [2, 3, 4, 5]

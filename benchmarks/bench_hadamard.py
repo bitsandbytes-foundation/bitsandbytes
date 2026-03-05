@@ -1,8 +1,8 @@
 """Benchmark for Hadamard rotation kernel and kbit M=1 pipeline.
 
 Measures:
-1. Rotation standalone: all block sizes x Qwen3 K values x M=1,4
-2. Full pipeline (rotate + kbit_scalar_gemv_tiled): Qwen3 dense shapes at M=1, k=2..5
+1. Rotation standalone: all block sizes x GLM-4.7 K values x M=1,4
+2. Full pipeline (rotate + kbit_scalar_gemv_tiled): GLM-4.7 dense shapes at M=1, k=2..5
 3. cuBLAS FP16 baseline: same shapes
 4. Speedup table: pipeline vs cuBLAS
 
@@ -123,14 +123,15 @@ def bench_pipeline(inner, outer):
     print(f"{'M':>4} {'K':>6} {'N':>6} {'k':>2} {'Rotate(us)':>11} {'GEMV(us)':>9} {'Total(us)':>10} {'TFLOPS':>7}")
     print("-" * 65)
 
+    # GLM-4.7 shapes
     shapes = [
-        (1, 2048, 5120, "gate/up"),
-        (1, 5120, 2048, "down"),
-        (1, 2048, 4096, "Q proj"),
-        (1, 4096, 2048, "O proj"),
-        (1, 2048, 512, "KV proj"),
-        (4, 2048, 5120, "gate/up M=4"),
-        (4, 5120, 2048, "down M=4"),
+        (1, 5120, 24576, "sh_gate+up"),
+        (1, 12288, 5120, "sh_down"),
+        (1, 5120, 12288, "Q proj"),
+        (1, 12288, 5120, "O proj"),
+        (1, 5120, 2048, "KV proj"),
+        (4, 5120, 24576, "sh_gate+up M=4"),
+        (4, 12288, 5120, "sh_down M=4"),
     ]
 
     for k in [2, 3, 4, 5]:
@@ -175,14 +176,15 @@ def bench_cublas_baseline(inner, outer):
     print(f"{'M':>4} {'K':>6} {'N':>6} {'Time(us)':>9} {'TFLOPS':>7}")
     print("-" * 40)
 
+    # GLM-4.7 shapes
     shapes = [
-        (1, 2048, 5120),
+        (1, 5120, 24576),
+        (1, 12288, 5120),
+        (1, 5120, 12288),
+        (1, 12288, 5120),
         (1, 5120, 2048),
-        (1, 2048, 4096),
-        (1, 4096, 2048),
-        (1, 2048, 512),
-        (4, 2048, 5120),
-        (4, 5120, 2048),
+        (4, 5120, 24576),
+        (4, 12288, 5120),
     ]
 
     for M, K_dim, N in shapes:
@@ -202,13 +204,14 @@ def bench_speedup_table(inner, outer):
     print("4. SPEEDUP TABLE: Rot + kbit GEMV vs cuBLAS FP16")
     print("=" * 70)
 
+    # GLM-4.7 shapes
     shapes = [
-        (1, 2048, 5120, "gate/up"),
-        (1, 5120, 2048, "down"),
-        (1, 2048, 4096, "Q proj"),
-        (1, 4096, 2048, "O proj"),
-        (4, 2048, 5120, "gate/up M=4"),
-        (4, 5120, 2048, "down M=4"),
+        (1, 5120, 24576, "sh_gate+up"),
+        (1, 12288, 5120, "sh_down"),
+        (1, 5120, 12288, "Q proj"),
+        (1, 12288, 5120, "O proj"),
+        (4, 5120, 24576, "sh_gate+up M=4"),
+        (4, 12288, 5120, "sh_down M=4"),
     ]
 
     print(f"{'Shape':>20} {'k':>2} {'Pipeline(us)':>13} {'cuBLAS(us)':>11} {'Speedup':>8}")

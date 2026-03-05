@@ -698,6 +698,13 @@ void vqGemmProd(
     cudaStream_t
 );
 
+// Forward declaration of VQ GEMM FP8 launcher
+template <int P, int IB, typename scalar_t, typename ABSMAX_T>
+void vqGemmProdFP8(
+    const scalar_t*, const unsigned int*, const ABSMAX_T*, const half*, scalar_t*, float*, int*, int, int, int, int,
+    cudaStream_t
+);
+
 // Production GEMM wrappers — uint8 E4M4 absmax
 #define MAKE_KBIT_GEMM_PROD(K)                                                                                         \
     void kbit_gemm_prod_fp16_k##K(                                                                                     \
@@ -773,6 +780,24 @@ MAKE_VQ_GEMM_PROD(3, 8)
 MAKE_VQ_GEMM_PROD(3, 10)
 MAKE_VQ_GEMM_PROD(2, 8)
 MAKE_VQ_GEMM_PROD(2, 10)
+
+// VQ GEMM FP8 MMA wrappers (FP8 tensor core path for benchmarking)
+void vq_gemm_prod_fp8_fp16_p3b8(
+    const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const half* codebook, half* C,
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream
+) {
+    vqGemmProdFP8<3, 8, half, unsigned char>(
+        A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream
+    );
+}
+void vq_gemm_prod_fp8_fp16_p2b8(
+    const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const half* codebook, half* C,
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream
+) {
+    vqGemmProdFP8<2, 8, half, unsigned char>(
+        A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream
+    );
+}
 
 // Backward-compatible aliases for existing p=2 and p=4 (8-bit) callers
 void vq_gemm_prod_fp16_p2(
@@ -2206,6 +2231,20 @@ void cvq_gemm_prod_bf16_p4(
     const __nv_bfloat16* A, const unsigned int* B_packed, const unsigned char* B_absmax, const half* codebook,
     __nv_bfloat16* C, float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream
 ) { cvq_gemm_prod_bf16_p4b8(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream); }
+
+// VQ GEMM FP8 MMA extern C wrappers
+void cvq_gemm_prod_fp8_fp16_p3b8(
+    const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const half* codebook, half* C,
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream
+) {
+    vq_gemm_prod_fp8_fp16_p3b8(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream);
+}
+void cvq_gemm_prod_fp8_fp16_p2b8(
+    const half* A, const unsigned int* B_packed, const unsigned char* B_absmax, const half* codebook, half* C,
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream
+) {
+    vq_gemm_prod_fp8_fp16_p2b8(A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_chunks, stream);
+}
 
 void ctest_mma(const half* A, const half* B, float* C) { testMMA(A, B, C); }
 

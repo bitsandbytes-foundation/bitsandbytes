@@ -1,4 +1,4 @@
-"""Qwen3-Coder-Next 70B weight matmul summary.
+"""GLM-4.7 weight matmul summary.
 
 Reads benchmark results from .bench_results/ and produces one table per M
 value. Each row is a (shape, k) combination. Columns show all kernel timings
@@ -73,8 +73,8 @@ def main():
         print("No benchmark results found. Run bench_ncu.sh first.")
         return
 
-    # All shapes in display order
-    dense_shapes = ["gateup", "down", "Q", "O", "KV"]
+    # All shapes in display order (GLM-4.7)
+    dense_shapes = ["sh_gateup", "sh_down", "Q", "O", "KV"]
     moe_shapes = ["moe_gu", "moe_dn"]
     all_shapes = dense_shapes + moe_shapes
     k_bits = [2, 3, 4, 5]

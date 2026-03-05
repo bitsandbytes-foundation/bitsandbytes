@@ -29,7 +29,7 @@ Best practices, benchmark data, and known architecture-specific issues: `agents/
 Benchmark scripts live in `benchmarks/`. The two kbit-specific ones:
 
 - `bench_hadamard.py` — Hadamard rotation kernel + M=1 pipeline (rotation + scalar GEMV) vs cuBLAS FP16. Quick focused benchmark for the decode path.
-- `bench_kbit_vlm.py` — Comprehensive sweep across all VLM-relevant M values (1 to 1024), all kernel variants (scalar GEMV, MMA, dequant+cuBLAS), all k values (2-5), with and without Hadamard rotation. Qwen3-Coder-Next 70B shapes.
+- `bench_kbit_vlm.py` — Comprehensive sweep across all VLM-relevant M values (1 to 1024), all kernel variants (scalar GEMV, MMA, dequant+cuBLAS), all k values (2-5), with and without Hadamard rotation. GLM-4.7 shapes (see `spec.md` § Target Model for layer dimensions).
 
 ```bash
 # Quick M=1 decode benchmark

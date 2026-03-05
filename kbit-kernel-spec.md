@@ -1,4 +1,4 @@
-# kbit inference kernels for Qwen3-Coder-Next 70B
+# kbit inference kernels for GLM-4.7
 
 RTX 4090 (128 SMs, sm_89), k=2..5, fp16/bf16.
 
@@ -88,23 +88,24 @@ speed. Dequant time scales linearly with element count and k.
 
 ## Target model
 
-Qwen3-Coder-Next 70B is a Mixture-of-Experts model with hidden_dim=2048.
-The inference workload spans four layer types with distinct shapes:
+GLM-4.7 (`zai-org/GLM-4.7`) is a 307B-parameter MoE model with
+hidden_size=5120. See `spec.md` § Target Model for the full config.
 
 | Layer | K | N | Data (k=4) | Notes |
 |-------|----:|-----:|----------:|-------|
-| MoE gate/up (per expert) | 2048 | 512 | 0.5 MB | 512 experts, top-8 routing |
-| MoE down (per expert) | 512 | 2048 | 0.5 MB | |
-| Dense gate/up | 2048 | 5120 | 5.2 MB | Shared across all tokens |
-| Dense down | 5120 | 2048 | 5.2 MB | |
-| Q proj | 2048 | 4096 | 4.2 MB | |
-| KV proj | 2048 | 512 | 0.5 MB | |
-| O proj | 4096 | 2048 | 4.2 MB | |
+| MoE gate+up (per expert) | 5120 | 3072 | 7.9 MB | 160 experts, top-8 routing |
+| MoE down (per expert) | 1536 | 5120 | 3.9 MB | |
+| Shared gate+up | 5120 | 24576 | 63.0 MB | 1 shared expert per MoE layer |
+| Shared down | 12288 | 5120 | 31.5 MB | |
+| Q proj | 5120 | 12288 | 31.5 MB | 96 heads × 128 dim |
+| KV proj | 5120 | 2048 | 5.2 MB | 2 × 8 kv_heads × 128 dim |
+| O proj | 12288 | 5120 | 31.5 MB | |
 
-At inference batch size 32 with top-8 routing, a single forward pass
-invokes ~256 expert GEMMs plus the dense/attention layers. Individual
-expert shapes produce only 4-16 tiles on 128 SMs (3-12% utilization).
-Dense shapes produce 16-80 tiles (12-62%).
+At inference with top-8 routing, each MoE block (layers 3–91) invokes
+8 expert gate+up and 8 expert down GEMMs plus the shared expert and
+attention projections. The first 3 layers are dense (no MoE).
+Individual expert shapes produce 24–40 tiles on 128 SMs (19–31%
+utilization). Dense/shared shapes produce 40–192 tiles (31–100%).
 
 The batch size M seen by each kernel varies:
 - **M=1**: autoregressive token generation (dominant use case)
@@ -342,7 +343,7 @@ but it hides this behind a deeply pipelined compute schedule that our
 MMA dequant kernel cannot match (due to the synchronous dequant
 bottleneck on Ada).
 
-For Qwen3 dense_gateup at M=32, k=4: cuBLAS achieves ~22 us, while
+For GLM-4.7 shared_gateup at M=32, k=4: cuBLAS achieves ~22 us, while
 the MMA dequant kernel takes ~68 us (instruction-limited, only 1.3%
 of execution is MMA). A fused dequant kernel would take ~5 us for
 this shape, so dequant + cuBLAS ~27 us would beat 68 us.
@@ -546,7 +547,7 @@ Implemented optimizations (all behind `#if BNB_DATACENTER_GPU`):
    help more with larger K.
 3. **Higher k_splits targets** — TARGET_BLOCKS_PER_SM increased (TN=64:
    4→6, TN=128: 1→2) for better SM occupancy on H100's 132 SMs. Provides
-   5-16% MMA improvement on Qwen3 70B shapes.
+   5-16% MMA improvement on GLM-4.7 shapes.
 
 Rejected: Scalar GEMV warp count 2→4 (128 threads per block) — harmful
 because K_dim=2048 gives only 64 k-blocks for 128 threads, leaving 50%

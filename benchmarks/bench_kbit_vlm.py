@@ -1,7 +1,7 @@
 """Comprehensive kbit kernel benchmark across VLM-relevant M values.
 
 Compares all kbit kernel variants (with Hadamard rotation) against cuBLAS FP16
-on Qwen3-Coder-Next 70B shapes at M values spanning decode through VLM image
+on GLM-4.7 shapes at M values spanning decode through VLM image
 prefill:
 
   M=1       autoregressive decode (single user)
@@ -42,13 +42,13 @@ from bitsandbytes.functional import (
     quantize_kbit,
 )
 
-# Qwen3-Coder-Next 70B dense layer shapes (K_dim, N, label)
+# GLM-4.7 dense layer shapes (K_dim, N, label)
 SHAPES = [
-    (2048, 5120, "gate_proj"),
-    (5120, 2048, "down_proj"),
-    (2048, 4096, "q_proj"),
-    (4096, 2048, "o_proj"),
-    (2048, 512, "kv_proj"),
+    (5120, 24576, "sh_gate_up"),
+    (12288, 5120, "sh_down"),
+    (5120, 12288, "q_proj"),
+    (12288, 5120, "o_proj"),
+    (5120, 2048, "kv_proj"),
 ]
 
 # VLM-relevant M values

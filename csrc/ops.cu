@@ -882,17 +882,25 @@ __device__ __forceinline__ int vq_extract_index(const unsigned int* words, int i
 }
 
 // cb_lookup: read P_VAL fp16 values from the shared memory codebook.
-// Codebook stored as CB_PLANES planes of half2[CB_ENTRIES]:
-//   p=2: 1 plane  → s_cb[idx] = (val0, val1)
-//   p=3: 2 planes → s_cb[idx] = (val0, val1), s_cb[CB_ENTRIES+idx] = (val2, pad)
-//   p=4: 2 planes → s_cb[idx] = (val0, val1), s_cb[CB_ENTRIES+idx] = (val2, val3)
+// Codebook layout in shared memory (contiguous, padded to 4 bytes or 8 bytes):
+//   p=2: half2[CB_ENTRIES] — 1 read (4 bytes)
+//   p=3: contiguous 8-byte records: (val0,val1,val2,pad) — 1 int2 read (8 bytes)
+//   p=4: contiguous 8-byte records: (val0,val1,val2,val3) — 1 int2 read (8 bytes)
 template <int P_VAL, int CB_ENTRIES>
 __device__ __forceinline__ void vq_cb_lookup(const half2* s_cb, int idx, float* out) {
-    half2 v0 = s_cb[idx];
-    out[0] = __half2float(v0.x);
-    out[1] = __half2float(v0.y);
-    if constexpr (P_VAL >= 3) {
-        half2 v1 = s_cb[CB_ENTRIES + idx];
+    if constexpr (P_VAL == 2) {
+        half2 v0 = s_cb[idx];
+        out[0] = __half2float(v0.x);
+        out[1] = __half2float(v0.y);
+    } else {
+        // p=3/4: single 8-byte read from contiguous padded layout
+        const int2* cb_i2 = reinterpret_cast<const int2*>(s_cb);
+        int2 packed = cb_i2[idx];
+        half2 v0, v1;
+        v0 = *reinterpret_cast<half2*>(&packed.x);
+        v1 = *reinterpret_cast<half2*>(&packed.y);
+        out[0] = __half2float(v0.x);
+        out[1] = __half2float(v0.y);
         out[2] = __half2float(v1.x);
         if constexpr (P_VAL == 4)
             out[3] = __half2float(v1.y);
@@ -900,32 +908,30 @@ __device__ __forceinline__ void vq_cb_lookup(const half2* s_cb, int idx, float* 
 }
 
 // load_codebook: load the codebook from global memory into shared memory.
-// Handles the plane-split layout for p>=3.
+// Contiguous padded layout: each entry is 8 bytes for p>=3 (padded to 4 halves).
 template <int P_VAL, int CB_ENTRIES, int BLOCK_SIZE>
 __device__ __forceinline__ void vq_load_codebook(half2* s_cb, const half* codebook) {
-    const half2* cb_src = reinterpret_cast<const half2*>(codebook);
     if constexpr (P_VAL == 2) {
         // [CB_ENTRIES, 2] fp16 viewed as half2[CB_ENTRIES]
+        const half2* cb_src = reinterpret_cast<const half2*>(codebook);
         for (int i = threadIdx.x; i < CB_ENTRIES; i += BLOCK_SIZE)
             s_cb[i] = cb_src[i];
     } else if constexpr (P_VAL == 3) {
-        // [CB_ENTRIES, 3] fp16: store as half2 plane0 (val0,val1) + half2 plane1 (val2, pad=0)
-        // Source layout: 3 half values per entry → 1.5 half2 per entry.
-        // We read 3 half values manually and pack into 2 half2.
+        // [CB_ENTRIES, 3] fp16 → contiguous 8-byte records: (val0, val1, val2, pad=0)
         const half* cb_half = codebook;
         for (int i = threadIdx.x; i < CB_ENTRIES; i += BLOCK_SIZE) {
             half h0 = cb_half[i * 3 + 0];
             half h1 = cb_half[i * 3 + 1];
             half h2 = cb_half[i * 3 + 2];
-            s_cb[i] = __halves2half2(h0, h1);
-            s_cb[CB_ENTRIES + i] = __halves2half2(h2, __float2half(0.0f));
+            s_cb[i * 2]     = __halves2half2(h0, h1);
+            s_cb[i * 2 + 1] = __halves2half2(h2, __float2half(0.0f));
         }
     } else {
-        // p=4: [CB_ENTRIES, 4] fp16 viewed as half2[CB_ENTRIES*2]
-        // Split into lo[CB_ENTRIES] and hi[CB_ENTRIES]
+        // p=4: [CB_ENTRIES, 4] fp16 → contiguous 8-byte records: (val0, val1, val2, val3)
+        const half2* cb_src = reinterpret_cast<const half2*>(codebook);
         for (int i = threadIdx.x; i < CB_ENTRIES; i += BLOCK_SIZE) {
-            s_cb[i] = cb_src[i * 2];             // cb_lo: values 0,1
-            s_cb[CB_ENTRIES + i] = cb_src[i * 2 + 1]; // cb_hi: values 2,3
+            s_cb[i * 2]     = cb_src[i * 2];
+            s_cb[i * 2 + 1] = cb_src[i * 2 + 1];
         }
     }
 }
@@ -1906,6 +1912,34 @@ __device__ __forceinline__ void mma_m16n8k16(uint32_t (&frag_a)[4], uint32_t (&f
     }
 }
 
+// Helper: FP8 e4m3 MMA instruction (m16n8k32)
+// A: 16x32 (e4m3), B: 32x8 (e4m3), C/D: 16x8 (f32)
+__device__ __forceinline__ void mma_m16n8k32_fp8(uint32_t (&frag_a)[4], uint32_t (&frag_b)[2], float (&frag_c)[4]) {
+    asm volatile("mma.sync.aligned.m16n8k32.row.col.f32.e4m3.e4m3.f32 "
+                 "{%0, %1, %2, %3}, "
+                 "{%4, %5, %6, %7}, "
+                 "{%8, %9}, "
+                 "{%10, %11, %12, %13};\n"
+                 : "=f"(frag_c[0]), "=f"(frag_c[1]), "=f"(frag_c[2]), "=f"(frag_c[3])
+                 : "r"(frag_a[0]), "r"(frag_a[1]), "r"(frag_a[2]), "r"(frag_a[3]),
+                   "r"(frag_b[0]), "r"(frag_b[1]),
+                   "f"(frag_c[0]), "f"(frag_c[1]), "f"(frag_c[2]), "f"(frag_c[3]));
+}
+
+// Convert float to e4m3 byte
+__device__ __forceinline__ unsigned char float_to_e4m3(float val) {
+    __nv_fp8_e4m3 fp8(val);
+    return *reinterpret_cast<unsigned char*>(&fp8);
+}
+
+// Pack 4 float values as e4m3 into a uint32
+__device__ __forceinline__ uint32_t pack_fp8x4(float v0, float v1, float v2, float v3) {
+    return (unsigned int)float_to_e4m3(v0)
+         | ((unsigned int)float_to_e4m3(v1) << 8)
+         | ((unsigned int)float_to_e4m3(v2) << 16)
+         | ((unsigned int)float_to_e4m3(v3) << 24);
+}
+
 // Helper: pack two scalar_t values into a uint32 (for MMA fragment register)
 template <typename scalar_t> __device__ __forceinline__ uint32_t pack_two(scalar_t a, scalar_t b) {
     if constexpr (std::is_same_v<scalar_t, half>) {
@@ -2375,7 +2409,7 @@ void kbitGemmProd(
 // Uses tensor core m16n8k16 MMA instructions.
 // ===========================================================================
 
-template <int P_VAL, int INDEX_BITS, int M_BLOCKS, int TILE_N_VAL = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
+template <int P_VAL, int INDEX_BITS, int M_BLOCKS, int TILE_N_VAL = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char, bool USE_FP8 = false>
 __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64 ? 12 : 1) vq_gemm_prod(
     const scalar_t* __restrict__ A, const unsigned int* __restrict__ B_packed, const ABSMAX_T* __restrict__ B_absmax,
     const half* __restrict__ codebook, scalar_t* __restrict__ C, float* __restrict__ C_workspace,
@@ -2395,6 +2429,10 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
     constexpr int N_BLOCKS = 2;
     constexpr int K_STEPS_PER_BLOCK = BS / 16;
     constexpr int TOTAL_K_STEPS = KB_PER_TILE * K_STEPS_PER_BLOCK;
+
+    // FP8 MMA constants (m16n8k32: process 32 K elements per step)
+    constexpr int FP8_K_STEP = 32;
+    constexpr int FP8_TOTAL_STEPS = TILE_K / FP8_K_STEP;  // 3 for p=3, 2 for p=2/4
 
     // A stride must be padded to next power-of-2 multiple of 8 so that the XOR
     // swizzle (col_group ^ (row % 8)) never exceeds the allocated row width.
@@ -2538,79 +2576,166 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
         };
 
         // Compute tile: VQ dequant via generalized index extraction + codebook lookup
-        // Supports all 5 (P_VAL, INDEX_BITS) configs through VQTraits helpers.
         auto compute_tile = [&](int stage) {
             scalar_t* a_ptr = sh_a(stage);
             unsigned int* b_ptr = sh_b(stage);
             ABSMAX_T* abs_ptr = sh_abs(stage);
 
+          if constexpr (USE_FP8) {
+            // ---- FP8 MMA path: m16n8k32, process 32 K elements per step ----
+            // FP8_TOTAL_STEPS = TILE_K/32 (3 for p=3, 2 for p=2/4).
+            // Each step decodes 8 weight values per thread (2 fragments × 4 FP8 each).
+            // A fragments loaded from shared memory (FP16→FP8 conversion in registers).
 #pragma unroll
-            for (int ks = 0; ks < TOTAL_K_STEPS; ks++) {
-                const int k_block = ks / K_STEPS_PER_BLOCK;
-                const int sub_step = ks % K_STEPS_PER_BLOCK;
-
-                uint32_t frag_a[M_BLOCKS][4];
+            for (int fp8_ks = 0; fp8_ks < FP8_TOTAL_STEPS; fp8_ks++) {
+                // Load A fragments: FP16 from shared memory → convert to FP8 → pack
+                // Thread mapping for m16n8k32 FP8:
+                //   row = gid (0..7), tid (0..3) selects 4 consecutive k positions
+                //   frag[0]: row,   k = fp8_ks*32 + 4*tid + 0..3
+                //   frag[1]: row,   k = fp8_ks*32 + 4*tid + 16..19
+                //   frag[1]: row+8, k = fp8_ks*32 + 4*tid + 0..3
+                //   frag[2]: row,   k = fp8_ks*32 + 4*tid + 16..19
+                //   frag[3]: row+8, k = fp8_ks*32 + 4*tid + 16..19
+                uint32_t frag_a_fp8[M_BLOCKS][4];
 #pragma unroll
                 for (int mb = 0; mb < M_BLOCKS; mb++) {
-                    const int mb_row_offset = mb * 16;
-                    const int matrix_id = lane_id / 8;
-                    const int row_in_matrix = lane_id % 8;
-                    const int a_row = mb_row_offset + row_in_matrix + (matrix_id % 2) * 8;
-                    const int col_start = ks * 16 + (matrix_id / 2) * 8;
-                    const int col_group = col_start / 8;
-                    const int swizzled_group = col_group ^ (a_row % 8);
-                    const int swizzled_col_start = swizzled_group * 8;
+#pragma unroll
+                    for (int frag = 0; frag < 4; frag++) {
+                        int row = mb * 16 + gid + (frag & 1) * 8;
+                        int k_off = 4 * tid + (frag >= 2 ? 16 : 0);
+                        int k_abs = fp8_ks * FP8_K_STEP + k_off;
 
-                    const scalar_t* addr = &a_ptr[a_row * A_STRIDE_K + swizzled_col_start];
-                    uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
+                        int k_group = k_abs / 8;
+                        int k_within = k_abs % 8;
+                        int swizzled_group = k_group ^ (row % 8);
 
-                    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
-                                 : "=r"(frag_a[mb][0]), "=r"(frag_a[mb][1]), "=r"(frag_a[mb][2]), "=r"(frag_a[mb][3])
-                                 : "r"(smem_addr));
+                        const scalar_t* addr = &a_ptr[row * A_STRIDE_K + swizzled_group * 8 + k_within];
+                        float v0 = Ops::to_float(addr[0]);
+                        float v1 = Ops::to_float(addr[1]);
+                        float v2 = Ops::to_float(addr[2]);
+                        float v3 = Ops::to_float(addr[3]);
+                        frag_a_fp8[mb][frag] = pack_fp8x4(v0, v1, v2, v3);
+                    }
                 }
 
+                // Decode B weights and execute FP8 MMA
 #pragma unroll
                 for (int nb = 0; nb < N_BLOCKS; nb++) {
                     int col = warp_n_base + nb * 8 + gid;
 
-                    scalar_t scale = Ops::from_float(load_absmax<ABSMAX_T>(abs_ptr, col * KB_PER_TILE + k_block));
-                    float scale_f = Ops::to_float(scale);
-
-                    // Load all packed words for this column's quantization block
-                    int word_base_addr = col * B_COL_WORDS + k_block * WORDS;
-                    unsigned int words_local[5]; // max WORDS is 5
+                    // Each half of the 32-element step may span a different quant block
+                    uint32_t frag_b_fp8[2];
 #pragma unroll
-                    for (int w = 0; w < WORDS; w++)
-                        words_local[w] = b_ptr[word_base_addr + w];
+                    for (int half_idx = 0; half_idx < 2; half_idx++) {
+                        int k_tile_base = fp8_ks * FP8_K_STEP + half_idx * 16;
+                        int k_block = k_tile_base / BS;
+                        int k_in_block_base = k_tile_base % BS;
 
-                    // Decode 4 weight values for this thread's MMA positions.
-                    // Thread tid (0-3) owns k-positions {2*tid, 2*tid+1, 2*tid+8, 2*tid+9}
-                    // within the 16-element MMA step.
-                    scalar_t vals[4];
+                        float scale_f = Ops::to_float(Ops::from_float(
+                            load_absmax<ABSMAX_T>(abs_ptr, col * KB_PER_TILE + k_block)));
+
+                        // Load packed words for this quantization block
+                        int word_base = col * B_COL_WORDS + k_block * WORDS;
+                        unsigned int words_local[5];
 #pragma unroll
-                    for (int v = 0; v < 4; v++) {
-                        const int pos_off = (v < 2) ? v : (v + 6); // {0, 1, 8, 9}
-                        int k_in_block = sub_step * 16 + 2 * tid + pos_off;
-                        int gi = k_in_block / P_VAL;
-                        int di = k_in_block % P_VAL;
+                        for (int w = 0; w < WORDS; w++)
+                            words_local[w] = b_ptr[word_base + w];
 
-                        int idx = vq_extract_index<INDEX_BITS>(words_local, gi);
-                        float cb_vals[4]; // max P_VAL is 4
-                        vq_cb_lookup<P_VAL, CB_ENTRIES>(cb_shmem, idx, cb_vals);
-                        vals[v] = Ops::from_float(cb_vals[di] * scale_f);
+                        // Decode 4 values at k_in_block_base + 4*tid + 0..3
+                        float vals[4];
+                        float cb_vals[4];
+#pragma unroll
+                        for (int v = 0; v < 4; v++) {
+                            int k_in_block = k_in_block_base + 4 * tid + v;
+                            int gi = k_in_block / P_VAL;
+                            int di = k_in_block % P_VAL;
+
+                            int idx = vq_extract_index<INDEX_BITS>(words_local, gi);
+                            vq_cb_lookup<P_VAL, CB_ENTRIES>(cb_shmem, idx, cb_vals);
+                            vals[v] = cb_vals[di] * scale_f;
+                        }
+
+                        frag_b_fp8[half_idx] = pack_fp8x4(vals[0], vals[1], vals[2], vals[3]);
                     }
-
-
-                    uint32_t frag_b[2];
-                    frag_b[0] = pack_two<scalar_t>(vals[0], vals[1]);
-                    frag_b[1] = pack_two<scalar_t>(vals[2], vals[3]);
 
 #pragma unroll
                     for (int mb = 0; mb < M_BLOCKS; mb++) {
-                        mma_m16n8k16<scalar_t>(frag_a[mb], frag_b, frag_c[mb][nb]);
+                        mma_m16n8k32_fp8(frag_a_fp8[mb], frag_b_fp8, frag_c[mb][nb]);
                     }
                 }
             }
+          } else {
+            // ---- FP16 MMA path: m16n8k16, process 16 K elements per step ----
+            // Nested loop: outer over quant blocks, inner over sub-steps.
+            // For p=2/4 (K_STEPS_PER_BLOCK=2): inner fully unrolled.
+            // For p=3   (K_STEPS_PER_BLOCK=3): inner not unrolled to reduce reg pressure.
+#pragma unroll
+            for (int k_block = 0; k_block < KB_PER_TILE; k_block++) {
+
+#pragma unroll(K_STEPS_PER_BLOCK <= 2 ? K_STEPS_PER_BLOCK : 1)
+                for (int sub_step = 0; sub_step < K_STEPS_PER_BLOCK; sub_step++) {
+                    const int ks = k_block * K_STEPS_PER_BLOCK + sub_step;
+
+                    uint32_t frag_a[M_BLOCKS][4];
+#pragma unroll
+                    for (int mb = 0; mb < M_BLOCKS; mb++) {
+                        const int mb_row_offset = mb * 16;
+                        const int matrix_id = lane_id / 8;
+                        const int row_in_matrix = lane_id % 8;
+                        const int a_row = mb_row_offset + row_in_matrix + (matrix_id % 2) * 8;
+                        const int col_start = ks * 16 + (matrix_id / 2) * 8;
+                        const int col_group = col_start / 8;
+                        const int swizzled_group = col_group ^ (a_row % 8);
+                        const int swizzled_col_start = swizzled_group * 8;
+
+                        const scalar_t* addr = &a_ptr[a_row * A_STRIDE_K + swizzled_col_start];
+                        uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
+
+                        asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
+                                     : "=r"(frag_a[mb][0]), "=r"(frag_a[mb][1]), "=r"(frag_a[mb][2]), "=r"(frag_a[mb][3])
+                                     : "r"(smem_addr));
+                    }
+
+#pragma unroll
+                    for (int nb = 0; nb < N_BLOCKS; nb++) {
+                        int col = warp_n_base + nb * 8 + gid;
+
+                        scalar_t scale = Ops::from_float(load_absmax<ABSMAX_T>(abs_ptr, col * KB_PER_TILE + k_block));
+                        float scale_f = Ops::to_float(scale);
+
+                        int word_base_addr = col * B_COL_WORDS + k_block * WORDS;
+                        unsigned int words_local[5]; // max WORDS is 5
+#pragma unroll
+                        for (int w = 0; w < WORDS; w++)
+                            words_local[w] = b_ptr[word_base_addr + w];
+
+                        // Decode 4 weight values for this thread's MMA positions.
+                        scalar_t vals[4];
+                        float cb_vals[4];
+#pragma unroll
+                        for (int v = 0; v < 4; v++) {
+                            const int pos_off = (v < 2) ? v : (v + 6); // {0, 1, 8, 9}
+                            int k_in_block = sub_step * 16 + 2 * tid + pos_off;
+                            int gi = k_in_block / P_VAL;
+                            int di = k_in_block % P_VAL;
+
+                            int idx = vq_extract_index<INDEX_BITS>(words_local, gi);
+                            vq_cb_lookup<P_VAL, CB_ENTRIES>(cb_shmem, idx, cb_vals);
+                            vals[v] = Ops::from_float(cb_vals[di] * scale_f);
+                        }
+
+                        uint32_t frag_b[2];
+                        frag_b[0] = pack_two<scalar_t>(vals[0], vals[1]);
+                        frag_b[1] = pack_two<scalar_t>(vals[2], vals[3]);
+
+#pragma unroll
+                        for (int mb = 0; mb < M_BLOCKS; mb++) {
+                            mma_m16n8k16<scalar_t>(frag_a[mb], frag_b, frag_c[mb][nb]);
+                        }
+                    }
+                }
+            }
+          } // end USE_FP8
         };
 
         // Pipeline: NUM_STAGES-deep cp.async
@@ -2704,7 +2829,7 @@ __global__ void __launch_bounds__(TILE_N_VAL <= 64 ? 128 : 256, TILE_N_VAL <= 64
 }
 
 // VQ GEMM launcher
-template <int P, int IB, int MB, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char>
+template <int P, int IB, int MB, int TN = 128, typename scalar_t = half, typename ABSMAX_T = unsigned char, bool USE_FP8 = false>
 static void vqGemmProdLaunch(
     const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const half* codebook, scalar_t* C,
     float* C_workspace, int* tile_counters, int M, int K_dim, int N, int num_sms, cudaStream_t stream
@@ -2765,11 +2890,11 @@ static void vqGemmProdLaunch(
 
     if (smem_size > 48 * 1024) {
         cudaFuncSetAttribute(
-            vq_gemm_prod<P, IB, MB, TN, scalar_t, ABSMAX_T>, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
+            vq_gemm_prod<P, IB, MB, TN, scalar_t, ABSMAX_T, USE_FP8>, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size
         );
     }
 
-    vq_gemm_prod<P, IB, MB, TN, scalar_t, ABSMAX_T><<<grid_size, block, smem_size, stream>>>(
+    vq_gemm_prod<P, IB, MB, TN, scalar_t, ABSMAX_T, USE_FP8><<<grid_size, block, smem_size, stream>>>(
         A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, k_splits, total_work
     );
     CUDA_CHECK_RETURN(cudaPeekAtLastError());
@@ -2815,6 +2940,54 @@ void vqGemmProd(
             break;
         default:
             vqGemmProdLaunch<P, IB, 1, 128, scalar_t, ABSMAX_T>(
+                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
+            );
+            break;
+        }
+    }
+}
+
+// VQ GEMM FP8 dispatcher (same as vqGemmProd but with USE_FP8=true)
+template <int P, int IB, typename scalar_t, typename ABSMAX_T = unsigned char>
+void vqGemmProdFP8(
+    const scalar_t* A, const unsigned int* B_packed, const ABSMAX_T* B_absmax, const half* codebook, scalar_t* C,
+    float* C_workspace, int* tile_counters, int M, int K_dim, int N, int k_chunks, cudaStream_t stream
+) {
+    const int num_sms = cachedNumSMs();
+
+    int m_blocks = 1;
+    if (M > 48)
+        m_blocks = 4;
+    else if (M > 32)
+        m_blocks = 3;
+    else if (M > 16)
+        m_blocks = 2;
+
+    const bool use_tn64 = (m_blocks == 1) && (N % 64 == 0);
+
+    if (use_tn64) {
+        vqGemmProdLaunch<P, IB, 1, 64, scalar_t, ABSMAX_T, true>(
+            A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
+        );
+    } else {
+        switch (m_blocks) {
+        case 4:
+            vqGemmProdLaunch<P, IB, 4, 128, scalar_t, ABSMAX_T, true>(
+                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
+            );
+            break;
+        case 3:
+            vqGemmProdLaunch<P, IB, 3, 128, scalar_t, ABSMAX_T, true>(
+                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
+            );
+            break;
+        case 2:
+            vqGemmProdLaunch<P, IB, 2, 128, scalar_t, ABSMAX_T, true>(
+                A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
+            );
+            break;
+        default:
+            vqGemmProdLaunch<P, IB, 1, 128, scalar_t, ABSMAX_T, true>(
                 A, B_packed, B_absmax, codebook, C, C_workspace, tile_counters, M, K_dim, N, num_sms, stream
             );
             break;
@@ -3495,72 +3668,79 @@ __global__ void __launch_bounds__(TN <= 64 ? 128 : 256, TN <= 64 ? 12 : 1) vq_gr
         };
 
         // Compute tile: VQ dequant via generalized index extraction + codebook lookup
+        // Nested loop: outer over quantization blocks (KB_PER_TILE=2),
+        // inner over sub-steps (K_STEPS_PER_BLOCK = BS/16).
+        // For p=2/4 (K_STEPS_PER_BLOCK=2): inner fully unrolled.
+        // For p=3   (K_STEPS_PER_BLOCK=3): inner not unrolled to reduce reg pressure.
         auto compute_tile = [&](int stage) {
             scalar_t* a_ptr = sh_a(stage);
             unsigned int* b_ptr = sh_b(stage);
             ABSMAX_T* abs_ptr = sh_abs(stage);
 
 #pragma unroll
-            for (int ks = 0; ks < TOTAL_K_STEPS; ks++) {
-                const int k_block = ks / K_STEPS_PER_BLOCK;
-                const int sub_step = ks % K_STEPS_PER_BLOCK;
+            for (int k_block = 0; k_block < KB_PER_TILE; k_block++) {
 
-                uint32_t frag_a[M_BLOCKS][4];
-#pragma unroll
-                for (int mb = 0; mb < M_BLOCKS; mb++) {
-                    const int mb_row_offset = mb * 16;
-                    const int matrix_id = lane_id / 8;
-                    const int row_in_matrix = lane_id % 8;
-                    const int a_row = mb_row_offset + row_in_matrix + (matrix_id % 2) * 8;
-                    const int col_start = ks * 16 + (matrix_id / 2) * 8;
-                    const int col_group = col_start / 8;
-                    const int swizzled_group = col_group ^ (a_row % 8);
-                    const int swizzled_col_start = swizzled_group * 8;
+#pragma unroll(K_STEPS_PER_BLOCK <= 2 ? K_STEPS_PER_BLOCK : 1)
+                for (int sub_step = 0; sub_step < K_STEPS_PER_BLOCK; sub_step++) {
+                    const int ks = k_block * K_STEPS_PER_BLOCK + sub_step;
 
-                    const scalar_t* addr = &a_ptr[a_row * A_STRIDE_K + swizzled_col_start];
-                    uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
-
-                    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
-                                 : "=r"(frag_a[mb][0]), "=r"(frag_a[mb][1]), "=r"(frag_a[mb][2]), "=r"(frag_a[mb][3])
-                                 : "r"(smem_addr));
-                }
-
-#pragma unroll
-                for (int nb = 0; nb < N_BLOCKS; nb++) {
-                    int col = warp_n_base + nb * 8 + gid;
-
-                    scalar_t scale = Ops::from_float(load_absmax<ABSMAX_T>(abs_ptr, col * KB_PER_TILE + k_block));
-                    float scale_f = Ops::to_float(scale);
-
-                    // Load all packed words for this column's quantization block
-                    int word_base_addr = col * B_COL_WORDS + k_block * WORDS;
-                    unsigned int words_local[5]; // max WORDS is 5
-#pragma unroll
-                    for (int w = 0; w < WORDS; w++)
-                        words_local[w] = b_ptr[word_base_addr + w];
-
-                    // Decode 4 weight values for this thread's MMA positions
-                    scalar_t vals[4];
-#pragma unroll
-                    for (int v = 0; v < 4; v++) {
-                        const int pos_off = (v < 2) ? v : (v + 6); // {0, 1, 8, 9}
-                        int k_in_block = sub_step * 16 + 2 * tid + pos_off;
-                        int gi = k_in_block / P_VAL;
-                        int di = k_in_block % P_VAL;
-
-                        int idx = vq_extract_index<INDEX_BITS>(words_local, gi);
-                        float cb_vals[4]; // max P_VAL is 4
-                        vq_cb_lookup<P_VAL, CB_ENTRIES>(cb_shmem, idx, cb_vals);
-                        vals[v] = Ops::from_float(cb_vals[di] * scale_f);
-                    }
-
-                    uint32_t frag_b[2];
-                    frag_b[0] = pack_two<scalar_t>(vals[0], vals[1]);
-                    frag_b[1] = pack_two<scalar_t>(vals[2], vals[3]);
-
+                    uint32_t frag_a[M_BLOCKS][4];
 #pragma unroll
                     for (int mb = 0; mb < M_BLOCKS; mb++) {
-                        mma_m16n8k16<scalar_t>(frag_a[mb], frag_b, frag_c[mb][nb]);
+                        const int mb_row_offset = mb * 16;
+                        const int matrix_id = lane_id / 8;
+                        const int row_in_matrix = lane_id % 8;
+                        const int a_row = mb_row_offset + row_in_matrix + (matrix_id % 2) * 8;
+                        const int col_start = ks * 16 + (matrix_id / 2) * 8;
+                        const int col_group = col_start / 8;
+                        const int swizzled_group = col_group ^ (a_row % 8);
+                        const int swizzled_col_start = swizzled_group * 8;
+
+                        const scalar_t* addr = &a_ptr[a_row * A_STRIDE_K + swizzled_col_start];
+                        uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(addr));
+
+                        asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
+                                     : "=r"(frag_a[mb][0]), "=r"(frag_a[mb][1]), "=r"(frag_a[mb][2]), "=r"(frag_a[mb][3])
+                                     : "r"(smem_addr));
+                    }
+
+#pragma unroll
+                    for (int nb = 0; nb < N_BLOCKS; nb++) {
+                        int col = warp_n_base + nb * 8 + gid;
+
+                        scalar_t scale = Ops::from_float(load_absmax<ABSMAX_T>(abs_ptr, col * KB_PER_TILE + k_block));
+                        float scale_f = Ops::to_float(scale);
+
+                        int word_base_addr = col * B_COL_WORDS + k_block * WORDS;
+                        unsigned int words_local[5]; // max WORDS is 5
+#pragma unroll
+                        for (int w = 0; w < WORDS; w++)
+                            words_local[w] = b_ptr[word_base_addr + w];
+
+                        // cb_vals declared outside v-loop to prevent compiler from
+                        // keeping 4 copies alive during unrolled iterations.
+                        scalar_t vals[4];
+                        float cb_vals[4]; // reused across v iterations
+#pragma unroll
+                        for (int v = 0; v < 4; v++) {
+                            const int pos_off = (v < 2) ? v : (v + 6);
+                            int k_in_block = sub_step * 16 + 2 * tid + pos_off;
+                            int gi = k_in_block / P_VAL;
+                            int di = k_in_block % P_VAL;
+
+                            int idx = vq_extract_index<INDEX_BITS>(words_local, gi);
+                            vq_cb_lookup<P_VAL, CB_ENTRIES>(cb_shmem, idx, cb_vals);
+                            vals[v] = Ops::from_float(cb_vals[di] * scale_f);
+                        }
+
+                        uint32_t frag_b[2];
+                        frag_b[0] = pack_two<scalar_t>(vals[0], vals[1]);
+                        frag_b[1] = pack_two<scalar_t>(vals[2], vals[3]);
+
+#pragma unroll
+                        for (int mb = 0; mb < M_BLOCKS; mb++) {
+                            mma_m16n8k16<scalar_t>(frag_a[mb], frag_b, frag_c[mb][nb]);
+                        }
                     }
                 }
             }
@@ -3928,27 +4108,166 @@ __global__ void __launch_bounds__(64, M_VAL <= 2 ? 24 : 16) vq_grouped_scalar_ge
 
         const int k_base = block_idx * BS;
 
-        // Dequant + FMA: iterate over GROUPS indices in this block
-#pragma unroll
-        for (int g = 0; g < GROUPS; g++) {
-            // Extract index and lookup codebook
-            int idx = vq_extract_index<INDEX_BITS>(words, g);
-            float wt[P_VAL];
-            vq_cb_lookup<P_VAL, CB_ENTRIES>(s_cb, idx, wt);
+        // Dequant + FMA with vectorized A loads.
+        // 8-bit indices: iterate by word (4 indices/word), pre-load A as int4/uint2.
+        // 10-bit indices: fall back to group-based loop (indices cross word boundaries).
+        if constexpr (INDEX_BITS == 8) {
+            constexpr int INDICES_PER_WORD = 4;
+            constexpr int ELEMS_PER_WORD = INDICES_PER_WORD * P_VAL;
+            // WORDS_PER_BLOCK = GROUPS / 4
+            constexpr int WORDS_PER_BLOCK = GROUPS / INDICES_PER_WORD;
 
-            // Scale by absmax
 #pragma unroll
-            for (int e = 0; e < P_VAL; e++)
-                wt[e] *= amax;
+            for (int w = 0; w < WORDS_PER_BLOCK; w++) {
+                if constexpr (P_VAL == 2) {
+                    // 8 elements per word → 1 int4 load (16 bytes = 8 fp16)
+                    int4 av[M_VAL];
+#pragma unroll
+                    for (int m = 0; m < M_VAL; m++) {
+                        if (valid)
+                            av[m] = *reinterpret_cast<const int4*>(
+                                &A[m * K_dim + k_base + w * ELEMS_PER_WORD]);
+                    }
+#pragma unroll
+                    for (int b = 0; b < INDICES_PER_WORD; b++) {
+                        int idx = (words[w] >> (b * 8)) & 0xFF;
+                        float cb[P_VAL];
+                        vq_cb_lookup<P_VAL, CB_ENTRIES>(s_cb, idx, cb);
+                        float w0 = cb[0] * amax;
+                        float w1 = cb[1] * amax;
+#pragma unroll
+                        for (int m = 0; m < M_VAL; m++) {
+                            if (valid) {
+                                const scalar_t* ap = reinterpret_cast<const scalar_t*>(&av[m]);
+                                acc[m] += w0 * ScalarOps<scalar_t>::to_float(ap[b * 2])
+                                        + w1 * ScalarOps<scalar_t>::to_float(ap[b * 2 + 1]);
+                            }
+                        }
+                    }
+                } else if constexpr (P_VAL == 4) {
+                    // 16 elements per word → 2 int4 loads (32 bytes = 16 fp16)
+                    int4 av0[M_VAL], av1[M_VAL];
+#pragma unroll
+                    for (int m = 0; m < M_VAL; m++) {
+                        if (valid) {
+                            av0[m] = *reinterpret_cast<const int4*>(
+                                &A[m * K_dim + k_base + w * ELEMS_PER_WORD]);
+                            av1[m] = *reinterpret_cast<const int4*>(
+                                &A[m * K_dim + k_base + w * ELEMS_PER_WORD + 8]);
+                        }
+                    }
+#pragma unroll
+                    for (int b = 0; b < INDICES_PER_WORD; b++) {
+                        int idx = (words[w] >> (b * 8)) & 0xFF;
+                        float cb[P_VAL];
+                        vq_cb_lookup<P_VAL, CB_ENTRIES>(s_cb, idx, cb);
+                        float w0 = cb[0] * amax;
+                        float w1 = cb[1] * amax;
+                        float w2 = cb[2] * amax;
+                        float w3 = cb[3] * amax;
+                        int elem_in_word = b * 4;
+#pragma unroll
+                        for (int m = 0; m < M_VAL; m++) {
+                            if (valid) {
+                                const scalar_t* ap;
+                                int off;
+                                if (elem_in_word < 8) {
+                                    ap = reinterpret_cast<const scalar_t*>(&av0[m]);
+                                    off = elem_in_word;
+                                } else {
+                                    ap = reinterpret_cast<const scalar_t*>(&av1[m]);
+                                    off = elem_in_word - 8;
+                                }
+                                acc[m] += w0 * ScalarOps<scalar_t>::to_float(ap[off])
+                                        + w1 * ScalarOps<scalar_t>::to_float(ap[off + 1])
+                                        + w2 * ScalarOps<scalar_t>::to_float(ap[off + 2])
+                                        + w3 * ScalarOps<scalar_t>::to_float(ap[off + 3]);
+                            }
+                        }
+                    }
+                } else {
+                    // P_VAL == 3: 12 elements per word → 3 uint2 loads (24 bytes = 12 fp16)
+                    uint2 av0[M_VAL], av1[M_VAL], av2[M_VAL];
+#pragma unroll
+                    for (int m = 0; m < M_VAL; m++) {
+                        if (valid) {
+                            const uint2* base = reinterpret_cast<const uint2*>(
+                                &A[m * K_dim + k_base + w * ELEMS_PER_WORD]);
+                            av0[m] = base[0];  // elements 0-3
+                            av1[m] = base[1];  // elements 4-7
+                            av2[m] = base[2];  // elements 8-11
+                        }
+                    }
+#pragma unroll
+                    for (int b = 0; b < INDICES_PER_WORD; b++) {
+                        int idx = (words[w] >> (b * 8)) & 0xFF;
+                        float cb[P_VAL];
+                        vq_cb_lookup<P_VAL, CB_ENTRIES>(s_cb, idx, cb);
+                        float w0 = cb[0] * amax;
+                        float w1 = cb[1] * amax;
+                        float w2 = cb[2] * amax;
+                        // Element offset within the 12-element word
+                        int elem = b * 3;
+                        // Map element to (vector_idx, offset_in_vector):
+                        //   b=0: elem=0  → av0, off=0
+                        //   b=1: elem=3  → av0, off=3 (w0); av1, off=0 (w1,w2)
+                        //   b=2: elem=6  → av1, off=2
+                        //   b=3: elem=9  → av2, off=1
+#pragma unroll
+                        for (int m = 0; m < M_VAL; m++) {
+                            if (valid) {
+                                // Select the right vector and offset for each of the 3 elements
+                                const scalar_t* v0_ptr = reinterpret_cast<const scalar_t*>(&av0[m]);
+                                const scalar_t* v1_ptr = reinterpret_cast<const scalar_t*>(&av1[m]);
+                                const scalar_t* v2_ptr = reinterpret_cast<const scalar_t*>(&av2[m]);
 
-            // FMA across M rows
-            const int k_elem = k_base + g * P_VAL;
+                                // Use a flat 12-element view: elem 0-3 in av0, 4-7 in av1, 8-11 in av2
+                                float a0, a1, a2;
+                                if (elem < 4) {
+                                    a0 = ScalarOps<scalar_t>::to_float(v0_ptr[elem]);
+                                } else if (elem < 8) {
+                                    a0 = ScalarOps<scalar_t>::to_float(v1_ptr[elem - 4]);
+                                } else {
+                                    a0 = ScalarOps<scalar_t>::to_float(v2_ptr[elem - 8]);
+                                }
+                                if (elem + 1 < 4) {
+                                    a1 = ScalarOps<scalar_t>::to_float(v0_ptr[elem + 1]);
+                                } else if (elem + 1 < 8) {
+                                    a1 = ScalarOps<scalar_t>::to_float(v1_ptr[elem + 1 - 4]);
+                                } else {
+                                    a1 = ScalarOps<scalar_t>::to_float(v2_ptr[elem + 1 - 8]);
+                                }
+                                if (elem + 2 < 4) {
+                                    a2 = ScalarOps<scalar_t>::to_float(v0_ptr[elem + 2]);
+                                } else if (elem + 2 < 8) {
+                                    a2 = ScalarOps<scalar_t>::to_float(v1_ptr[elem + 2 - 4]);
+                                } else {
+                                    a2 = ScalarOps<scalar_t>::to_float(v2_ptr[elem + 2 - 8]);
+                                }
+                                acc[m] += w0 * a0 + w1 * a1 + w2 * a2;
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // 10-bit indices: group-based loop (indices cross word boundaries)
 #pragma unroll
-            for (int m = 0; m < M_VAL; m++) {
-                if (valid) {
+            for (int g = 0; g < GROUPS; g++) {
+                int idx = vq_extract_index<INDEX_BITS>(words, g);
+                float wt[P_VAL];
+                vq_cb_lookup<P_VAL, CB_ENTRIES>(s_cb, idx, wt);
 #pragma unroll
-                    for (int e = 0; e < P_VAL; e++) {
-                        acc[m] += wt[e] * ScalarOps<scalar_t>::to_float(A[m * K_dim + k_elem + e]);
+                for (int e = 0; e < P_VAL; e++)
+                    wt[e] *= amax;
+                const int k_elem = k_base + g * P_VAL;
+#pragma unroll
+                for (int m = 0; m < M_VAL; m++) {
+                    if (valid) {
+#pragma unroll
+                        for (int e = 0; e < P_VAL; e++) {
+                            acc[m] += wt[e] * ScalarOps<scalar_t>::to_float(A[m * K_dim + k_elem + e]);
+                        }
                     }
                 }
             }
@@ -4434,28 +4753,156 @@ __global__ void __launch_bounds__(64, VQGemvLaunchBounds<P_VAL, INDEX_BITS, M_VA
 
         const int k_base = block_idx * BS;
 
-        // Generalized inner loop: iterate over index groups.
-        // Each index maps to P_VAL weight values via codebook lookup.
-#pragma unroll
-        for (int gi = 0; gi < GROUPS; gi++) {
-            const int wpos = gi * P_VAL; // weight position in block
+        // Dequant + FMA with vectorized A loads.
+        // 8-bit indices: iterate by word (4 indices/word), pre-load A as int4/uint2.
+        // 10-bit indices: fall back to group-based loop (indices cross word boundaries).
+        if constexpr (INDEX_BITS == 8) {
+            constexpr int INDICES_PER_WORD = 4;
+            constexpr int ELEMS_PER_WORD = INDICES_PER_WORD * P_VAL;
+            constexpr int WORDS_PER_BLOCK = GROUPS / INDICES_PER_WORD;
 
-            // Extract index using generalized helper
-            int idx = vq_extract_index<INDEX_BITS>(words, gi);
-
-            // Codebook lookup
-            float cb[P_VAL];
-            vq_cb_lookup<P_VAL, CB_ENTRIES>(s_cb, idx, cb);
-
-            // Accumulate: load activations per element to minimize register pressure
 #pragma unroll
-            for (int d = 0; d < P_VAL; d++) {
-                float w = cb[d] * amax;
+            for (int w = 0; w < WORDS_PER_BLOCK; w++) {
+                if constexpr (P_VAL == 2) {
+                    // 8 elements per word → 1 int4 load (16 bytes = 8 fp16)
+                    int4 av[M_VAL];
 #pragma unroll
-                for (int m = 0; m < M_VAL; m++) {
-                    if (valid) {
-                        float a = ScalarOps<scalar_t>::to_float(A[m * K_dim + k_base + wpos + d]);
-                        acc[m] += w * a;
+                    for (int m = 0; m < M_VAL; m++) {
+                        if (valid)
+                            av[m] = *reinterpret_cast<const int4*>(
+                                &A[m * K_dim + k_base + w * ELEMS_PER_WORD]);
+                    }
+#pragma unroll
+                    for (int b = 0; b < INDICES_PER_WORD; b++) {
+                        int idx = (words[w] >> (b * 8)) & 0xFF;
+                        float cb[P_VAL];
+                        vq_cb_lookup<P_VAL, CB_ENTRIES>(s_cb, idx, cb);
+                        float w0 = cb[0] * amax;
+                        float w1 = cb[1] * amax;
+#pragma unroll
+                        for (int m = 0; m < M_VAL; m++) {
+                            if (valid) {
+                                const scalar_t* ap = reinterpret_cast<const scalar_t*>(&av[m]);
+                                acc[m] += w0 * ScalarOps<scalar_t>::to_float(ap[b * 2])
+                                        + w1 * ScalarOps<scalar_t>::to_float(ap[b * 2 + 1]);
+                            }
+                        }
+                    }
+                } else if constexpr (P_VAL == 4) {
+                    // 16 elements per word → 2 int4 loads (32 bytes = 16 fp16)
+                    int4 av0[M_VAL], av1[M_VAL];
+#pragma unroll
+                    for (int m = 0; m < M_VAL; m++) {
+                        if (valid) {
+                            av0[m] = *reinterpret_cast<const int4*>(
+                                &A[m * K_dim + k_base + w * ELEMS_PER_WORD]);
+                            av1[m] = *reinterpret_cast<const int4*>(
+                                &A[m * K_dim + k_base + w * ELEMS_PER_WORD + 8]);
+                        }
+                    }
+#pragma unroll
+                    for (int b = 0; b < INDICES_PER_WORD; b++) {
+                        int idx = (words[w] >> (b * 8)) & 0xFF;
+                        float cb[P_VAL];
+                        vq_cb_lookup<P_VAL, CB_ENTRIES>(s_cb, idx, cb);
+                        float w0 = cb[0] * amax;
+                        float w1 = cb[1] * amax;
+                        float w2 = cb[2] * amax;
+                        float w3 = cb[3] * amax;
+                        int elem_in_word = b * 4;
+#pragma unroll
+                        for (int m = 0; m < M_VAL; m++) {
+                            if (valid) {
+                                const scalar_t* ap;
+                                int off;
+                                if (elem_in_word < 8) {
+                                    ap = reinterpret_cast<const scalar_t*>(&av0[m]);
+                                    off = elem_in_word;
+                                } else {
+                                    ap = reinterpret_cast<const scalar_t*>(&av1[m]);
+                                    off = elem_in_word - 8;
+                                }
+                                acc[m] += w0 * ScalarOps<scalar_t>::to_float(ap[off])
+                                        + w1 * ScalarOps<scalar_t>::to_float(ap[off + 1])
+                                        + w2 * ScalarOps<scalar_t>::to_float(ap[off + 2])
+                                        + w3 * ScalarOps<scalar_t>::to_float(ap[off + 3]);
+                            }
+                        }
+                    }
+                } else {
+                    // P_VAL == 3: 12 elements per word → 3 uint2 loads (24 bytes = 12 fp16)
+                    uint2 av0[M_VAL], av1[M_VAL], av2[M_VAL];
+#pragma unroll
+                    for (int m = 0; m < M_VAL; m++) {
+                        if (valid) {
+                            const uint2* base = reinterpret_cast<const uint2*>(
+                                &A[m * K_dim + k_base + w * ELEMS_PER_WORD]);
+                            av0[m] = base[0];  // elements 0-3
+                            av1[m] = base[1];  // elements 4-7
+                            av2[m] = base[2];  // elements 8-11
+                        }
+                    }
+#pragma unroll
+                    for (int b = 0; b < INDICES_PER_WORD; b++) {
+                        int idx = (words[w] >> (b * 8)) & 0xFF;
+                        float cb[P_VAL];
+                        vq_cb_lookup<P_VAL, CB_ENTRIES>(s_cb, idx, cb);
+                        float w0 = cb[0] * amax;
+                        float w1 = cb[1] * amax;
+                        float w2 = cb[2] * amax;
+                        int elem = b * 3;
+#pragma unroll
+                        for (int m = 0; m < M_VAL; m++) {
+                            if (valid) {
+                                const scalar_t* v0_ptr = reinterpret_cast<const scalar_t*>(&av0[m]);
+                                const scalar_t* v1_ptr = reinterpret_cast<const scalar_t*>(&av1[m]);
+                                const scalar_t* v2_ptr = reinterpret_cast<const scalar_t*>(&av2[m]);
+
+                                float a0, a1, a2;
+                                if (elem < 4) {
+                                    a0 = ScalarOps<scalar_t>::to_float(v0_ptr[elem]);
+                                } else if (elem < 8) {
+                                    a0 = ScalarOps<scalar_t>::to_float(v1_ptr[elem - 4]);
+                                } else {
+                                    a0 = ScalarOps<scalar_t>::to_float(v2_ptr[elem - 8]);
+                                }
+                                if (elem + 1 < 4) {
+                                    a1 = ScalarOps<scalar_t>::to_float(v0_ptr[elem + 1]);
+                                } else if (elem + 1 < 8) {
+                                    a1 = ScalarOps<scalar_t>::to_float(v1_ptr[elem + 1 - 4]);
+                                } else {
+                                    a1 = ScalarOps<scalar_t>::to_float(v2_ptr[elem + 1 - 8]);
+                                }
+                                if (elem + 2 < 4) {
+                                    a2 = ScalarOps<scalar_t>::to_float(v0_ptr[elem + 2]);
+                                } else if (elem + 2 < 8) {
+                                    a2 = ScalarOps<scalar_t>::to_float(v1_ptr[elem + 2 - 4]);
+                                } else {
+                                    a2 = ScalarOps<scalar_t>::to_float(v2_ptr[elem + 2 - 8]);
+                                }
+                                acc[m] += w0 * a0 + w1 * a1 + w2 * a2;
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // 10-bit indices: group-based loop (indices cross word boundaries)
+#pragma unroll
+            for (int gi = 0; gi < GROUPS; gi++) {
+                const int wpos = gi * P_VAL;
+                int idx = vq_extract_index<INDEX_BITS>(words, gi);
+                float cb[P_VAL];
+                vq_cb_lookup<P_VAL, CB_ENTRIES>(s_cb, idx, cb);
+#pragma unroll
+                for (int d = 0; d < P_VAL; d++) {
+                    float w = cb[d] * amax;
+#pragma unroll
+                    for (int m = 0; m < M_VAL; m++) {
+                        if (valid) {
+                            float a = ScalarOps<scalar_t>::to_float(A[m * K_dim + k_base + wpos + d]);
+                            acc[m] += w * a;
+                        }
                     }
                 }
             }
@@ -5031,6 +5478,15 @@ INSTANTIATE_VQ_GEMM_PROD_U8(3, 8)
 INSTANTIATE_VQ_GEMM_PROD_U8(3, 10)
 INSTANTIATE_VQ_GEMM_PROD_U8(2, 8)
 INSTANTIATE_VQ_GEMM_PROD_U8(2, 10)
+
+// VQ GEMM FP8 MMA prod instantiations
+#define INSTANTIATE_VQ_GEMM_PROD_FP8_U8(P, IB)                                                                       \
+    template void vqGemmProdFP8<P, IB, half, unsigned char>(                                                          \
+        const half*, const unsigned int*, const unsigned char*, const half*, half*, float*, int*, int, int, int, int,  \
+        cudaStream_t                                                                                                   \
+    );
+INSTANTIATE_VQ_GEMM_PROD_FP8_U8(3, 8)
+INSTANTIATE_VQ_GEMM_PROD_FP8_U8(2, 8)
 
 // Grouped expert GEMM instantiations — uint8 E4M4 absmax (default)
 #define INSTANTIATE_KBIT_GROUPED_GEMM_PROD_U8(K)                                                                       \
