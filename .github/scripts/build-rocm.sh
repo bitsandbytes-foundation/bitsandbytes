@@ -4,10 +4,10 @@ declare build_os
 declare rocm_version
 
 set -xeuo pipefail
-bnb_rocm_arch="gfx90a;gfx942;gfx1100;gfx1101"
+bnb_rocm_arch="gfx90a;gfx942;gfx1100;gfx1101;gfx1102;gfx1103"
 
-# ROCm 6.4+ - Add gfx1150/gfx1151/gfx1200/gfx1201. Note we assume >=6.4.4.
-[[ "${rocm_version}" == 6.4.* || "${rocm_version}" == 7.* ]] && bnb_rocm_arch="${bnb_rocm_arch};gfx1150;gfx1151;gfx1200;gfx1201"
+# ROCm 6.4+ - Add RDNA4 and RDNA3.5 targets. Note we assume >=6.4.4.
+[[ "${rocm_version}" == 6.4.* || "${rocm_version}" == 7.* ]] && bnb_rocm_arch="${bnb_rocm_arch};gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
 
 # ROCm 7.0+ - Add gfx950
 [[ "${rocm_version}" == 7.* ]] && bnb_rocm_arch="${bnb_rocm_arch};gfx950"
