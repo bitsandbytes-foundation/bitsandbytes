@@ -11,18 +11,20 @@
 #define ERR_NOT_IMPLEMENTED 100
 
 #if BNB_HIP
+#include <atomic>
 #include <hip/hip_runtime.h>
 
+// NOTE: This queries device 0 once and caches the result. On mixed RDNA+CDNA
+// systems (warp size 32 vs 64) this will return the wrong value for whichever
+// device doesn't match device 0.
 static int bnb_host_warp_size() {
-    constexpr int MAX_DEVICES = 32;
-    static int cache[MAX_DEVICES] = {};
-    int dev;
-    (void)hipGetDevice(&dev);
-    if (dev < 0 || dev >= MAX_DEVICES)
-        return 64;
-    if (cache[dev] == 0)
-        (void)hipDeviceGetAttribute(&cache[dev], hipDeviceAttributeWarpSize, dev);
-    return cache[dev];
+    static std::atomic<int> warp_size{0};
+    int ws = warp_size.load(std::memory_order_relaxed);
+    if (ws == 0) {
+        (void)hipDeviceGetAttribute(&ws, hipDeviceAttributeWarpSize, 0);
+        warp_size.store(ws, std::memory_order_relaxed);
+    }
+    return ws;
 }
 #else
 static constexpr int bnb_host_warp_size() { return 32; }
