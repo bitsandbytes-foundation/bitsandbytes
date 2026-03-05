@@ -965,39 +965,7 @@ def _(scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
 # Uses mma.sync.aligned.block_scale instructions for small-M decode.
 # Expects flat (non-swizzled) row-major scales.
 # Uses automatic split-K when tile count is low relative to SM count.
-#
-# Output variants:
-#   _gemm_nvfp4_hw_raw      — FP32 output (cgemm_nvfp4)
-#   _gemm_nvfp4_hw_bf16_raw — BF16 output (cgemm_nvfp4_bf16), needs FP32 workspace for split-K
-def _gemm_nvfp4_hw_raw(
-    A_packed: torch.Tensor,
-    B_packed: torch.Tensor,
-    A_scales: torch.Tensor,
-    B_scales: torch.Tensor,
-    D_out: torch.Tensor,
-    M: int,
-    N: int,
-    K: int,
-) -> None:
-    """Raw hand-written NVFP4 GEMM (FP32 output) — zero allocations, CUDA-graph-safe.
-
-    All buffers must be pre-allocated. D_out must be FP32 of shape (M, N).
-    Scales are flat row-major (not swizzled). Uses auto split-K internally
-    with cudaMemsetAsync (graph-capturable).
-    """
-    lib.cgemm_nvfp4(
-        get_ptr(A_packed),
-        get_ptr(B_packed),
-        get_ptr(A_scales),
-        get_ptr(B_scales),
-        get_ptr(D_out),
-        ct.c_int(M),
-        ct.c_int(N),
-        ct.c_int(K),
-        _get_tensor_stream(A_packed),
-    )
-
-
+# BF16 output variant needs FP32 workspace for split-K accumulation.
 def _gemm_nvfp4_hw_bf16_raw(
     A_packed: torch.Tensor,
     B_packed: torch.Tensor,
@@ -1025,32 +993,6 @@ def _gemm_nvfp4_hw_bf16_raw(
         ct.c_int(M),
         ct.c_int(N),
         ct.c_int(K),
-        _get_tensor_stream(A_packed),
-    )
-
-
-def _gemm_nvfp4_hw_splitk_raw(
-    A_packed: torch.Tensor,
-    B_packed: torch.Tensor,
-    A_scales: torch.Tensor,
-    B_scales: torch.Tensor,
-    D_out: torch.Tensor,
-    M: int,
-    N: int,
-    K: int,
-    split_k: int,
-) -> None:
-    """Raw hand-written NVFP4 GEMM with explicit split-K (FP32 output)."""
-    lib.cgemm_nvfp4_splitk(
-        get_ptr(A_packed),
-        get_ptr(B_packed),
-        get_ptr(A_scales),
-        get_ptr(B_scales),
-        get_ptr(D_out),
-        ct.c_int(M),
-        ct.c_int(N),
-        ct.c_int(K),
-        ct.c_int(split_k),
         _get_tensor_stream(A_packed),
     )
 
