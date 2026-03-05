@@ -23,29 +23,12 @@ def get_lib():
 
 
 def cuda_quantize_nvfp4(x, tensor_scale=None):
-    """Quantize using the CUDA kernel (same as test_nvfp4.py)."""
-    lib = get_lib()
-    n = x.numel()
-    assert n % 16 == 0
-    if tensor_scale is None:
-        tensor_scale = x.abs().max().item()
-    packed = torch.zeros(n // 2, dtype=torch.uint8, device=x.device)
-    block_scales = torch.zeros(n // 16, dtype=torch.uint8, device=x.device)
-    if x.dtype == torch.float16:
-        func = lib.cquantize_nvfp4_fp16
-    elif x.dtype == torch.bfloat16:
-        func = lib.cquantize_nvfp4_bf16
-    else:
-        func = lib.cquantize_nvfp4_fp32
-    func(
-        ctypes.c_void_p(x.data_ptr()),
-        ctypes.c_void_p(packed.data_ptr()),
-        ctypes.c_void_p(block_scales.data_ptr()),
-        ctypes.c_float(tensor_scale),
-        ctypes.c_int(n),
-    )
-    torch.cuda.synchronize()
-    return packed, block_scales, tensor_scale
+    """Quantize to NVFP4 using the CUTLASS fused quantize path."""
+    from bitsandbytes.functional import quantize_nvfp4
+
+    x_2d = x.reshape(1, -1) if x.dim() == 1 else x
+    packed, state = quantize_nvfp4(x_2d.to(torch.bfloat16), tensor_scale=tensor_scale)
+    return state.packed_data, state.block_scales, state.tensor_scale
 
 
 def cuda_dequantize_nvfp4(packed, block_scales, tensor_scale, n, dtype=torch.float32):

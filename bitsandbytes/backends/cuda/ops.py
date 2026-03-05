@@ -774,41 +774,6 @@ register_kernel("bitsandbytes::optimizer_update_8bit_blockwise", "cuda")(_optimi
 register_kernel("bitsandbytes::optimizer_update_32bit", "cuda")(_optimizer_update_32bit_impl)
 
 
-# NVFP4 quantization
-@register_kernel("bitsandbytes::quantize_nvfp4", "cuda")
-def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    A = A.contiguous()
-    n = A.numel()
-    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
-    torch._check(
-        A.dtype in [torch.float16, torch.bfloat16, torch.float32],
-        lambda: f"NVFP4 quantization requires float16/bfloat16/float32, got {A.dtype}",
-    )
-
-    if tensor_scale is None:
-        tensor_scale = A.abs().max().item()
-
-    packed = torch.zeros(n // 2, dtype=torch.uint8, device=A.device)
-    block_scales = torch.zeros(n // 16, dtype=torch.uint8, device=A.device)
-
-    with _cuda_device_of(A):
-        if A.dtype == torch.float16:
-            lib.cquantize_nvfp4_fp16(
-                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
-            )
-        elif A.dtype == torch.bfloat16:
-            lib.cquantize_nvfp4_bf16(
-                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
-            )
-        else:
-            lib.cquantize_nvfp4_fp32(
-                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
-            )
-
-    ts_out = torch.tensor([tensor_scale], dtype=torch.float32, device=A.device)
-    return packed, block_scales, ts_out
-
-
 # NVFP4 dequantization
 @register_kernel("bitsandbytes::dequantize_nvfp4", "cuda")
 def _(
@@ -850,57 +815,6 @@ def _(
     return output
 
 
-# NVFP4 Hadamard rotation (in-place)
-@register_kernel("bitsandbytes::hadamard_rotate_nvfp4", "cuda")
-def _(A: torch.Tensor) -> None:
-    A_contig = A.contiguous()
-    n = A_contig.numel()
-    torch._check(n % 16 == 0, lambda: f"Hadamard rotation requires numel divisible by 16, got {n}")
-
-    with _cuda_device_of(A_contig):
-        if A_contig.dtype == torch.float16:
-            lib.chadamard_rotate16_fp16(get_ptr(A_contig), ct.c_int(n))
-        elif A_contig.dtype == torch.bfloat16:
-            lib.chadamard_rotate16_bf16(get_ptr(A_contig), ct.c_int(n))
-        else:
-            lib.chadamard_rotate16_fp32(get_ptr(A_contig), ct.c_int(n))
-
-    if not A.is_contiguous():
-        A.copy_(A_contig)
-
-
-# Fused Hadamard rotation + NVFP4 quantize
-@register_kernel("bitsandbytes::fused_hadamard_quantize_nvfp4", "cuda")
-def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    A = A.contiguous()
-    n = A.numel()
-    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
-
-    if tensor_scale is None:
-        # Compute scale on rotated data
-        A_copy = A.clone()
-        torch.ops.bitsandbytes.hadamard_rotate_nvfp4(A_copy)
-        tensor_scale = A_copy.abs().max().item()
-
-    packed = torch.zeros(n // 2, dtype=torch.uint8, device=A.device)
-    block_scales = torch.zeros(n // 16, dtype=torch.uint8, device=A.device)
-
-    with _cuda_device_of(A):
-        if A.dtype == torch.float16:
-            lib.cfused_hadamard_quantize_nvfp4_fp16(
-                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
-            )
-        elif A.dtype == torch.bfloat16:
-            lib.cfused_hadamard_quantize_nvfp4_bf16(
-                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
-            )
-        else:
-            lib.cfused_hadamard_quantize_nvfp4_fp32(
-                get_ptr(A), get_ptr(packed), get_ptr(block_scales), ct.c_float(tensor_scale), ct.c_int(n)
-            )
-
-    ts_out = torch.tensor([tensor_scale], dtype=torch.float32, device=A.device)
-    return packed, block_scales, ts_out
 
 
 # CUTLASS-based fused quantize for NVFP4 (SM_120+)

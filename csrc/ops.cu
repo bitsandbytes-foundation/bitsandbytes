@@ -86,19 +86,6 @@ void dequantizeBlockwise(
 // ============================================================================
 
 template <typename T>
-void quantizeNVFP4(
-    const T* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n
-) {
-    // Each thread handles 2 elements, so we need n/2 threads
-    const int threads_per_block = 256;
-    const int num_threads = (n + 1) / 2;
-    const int num_blocks = (num_threads + threads_per_block - 1) / threads_per_block;
-
-    kQuantizeNVFP4<T><<<num_blocks, threads_per_block>>>(input, output, block_scales, tensor_scale, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-template <typename T>
 void dequantizeNVFP4(
     const unsigned char* input, const unsigned char* block_scales, float tensor_scale, T* output, const int n,
     cudaStream_t stream
@@ -112,15 +99,6 @@ void dequantizeNVFP4(
 }
 
 // NVFP4 template instantiations
-template void quantizeNVFP4<half>(
-    const half* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n
-);
-template void quantizeNVFP4<__nv_bfloat16>(
-    const __nv_bfloat16* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n
-);
-template void quantizeNVFP4<float>(
-    const float* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n
-);
 template void dequantizeNVFP4<half>(
     const unsigned char* input, const unsigned char* block_scales, float tensor_scale, half* output, const int n,
     cudaStream_t stream
@@ -132,37 +110,6 @@ template void dequantizeNVFP4<__nv_bfloat16>(
 template void dequantizeNVFP4<float>(
     const unsigned char* input, const unsigned char* block_scales, float tensor_scale, float* output, const int n,
     cudaStream_t stream
-);
-
-template <typename T> void hadamardRotate16(T* data, const int n) {
-    const int threads_per_block = 256;
-    const int num_blocks = (n + threads_per_block - 1) / threads_per_block;
-    kHadamardRotate16<T><<<num_blocks, threads_per_block>>>(data, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-template <typename T>
-void fusedHadamardQuantizeNVFP4(
-    const T* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n
-) {
-    const int threads_per_block = 256;
-    const int num_blocks = (n + threads_per_block - 1) / threads_per_block;
-    kFusedHadamardQuantizeNVFP4<T><<<num_blocks, threads_per_block>>>(input, output, block_scales, tensor_scale, n);
-    CUDA_CHECK_RETURN(cudaPeekAtLastError());
-}
-
-// Hadamard and fused kernel instantiations
-template void hadamardRotate16<half>(half* data, const int n);
-template void hadamardRotate16<__nv_bfloat16>(__nv_bfloat16* data, const int n);
-template void hadamardRotate16<float>(float* data, const int n);
-template void fusedHadamardQuantizeNVFP4<half>(
-    const half* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n
-);
-template void fusedHadamardQuantizeNVFP4<__nv_bfloat16>(
-    const __nv_bfloat16* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n
-);
-template void fusedHadamardQuantizeNVFP4<float>(
-    const float* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n
 );
 
 template <typename T, int OPTIMIZER>

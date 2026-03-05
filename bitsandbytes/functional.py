@@ -1149,22 +1149,14 @@ class NVFP4QuantState:
         )
 
 
-def _has_cutlass_fused_quantize() -> bool:
-    """Check if CUTLASS fused quantize is available (SM_120+ builds only)."""
-    from bitsandbytes.cextension import lib
-
-    return hasattr(lib, "cfused_quantize_nvfp4_absmax")
-
-
 def quantize_nvfp4(
     A: torch.Tensor,
     tensor_scale: Optional[float] = None,
 ) -> tuple[torch.Tensor, NVFP4QuantState]:
     """Quantize a tensor to NVFP4 (E2M1) format with Hadamard rotation.
 
-    Always applies a randomized 16x16 Hadamard rotation before quantization.
-    When CUTLASS is available (SM_120+), the rotation is fused into the
-    quantize kernel at zero cost. Otherwise, falls back to hand-written kernels.
+    Applies a randomized 16x16 Hadamard rotation fused into the CUTLASS
+    quantize kernel at zero cost. Requires SM_120+ (Blackwell).
 
     Args:
         A: Input tensor (float16, bfloat16, or float32). Must have numel divisible by 16.
@@ -1177,21 +1169,13 @@ def quantize_nvfp4(
     input_dtype = A.dtype
     A_flat = A.reshape(-1).contiguous()
 
-    # Use CUTLASS fused quantize when available (7-9x faster, rotation is free)
-    use_cutlass = _has_cutlass_fused_quantize() and A.is_cuda
-    if use_cutlass:
-        # CUTLASS fused quantize requires BF16 input
-        A_bf16 = A_flat.to(torch.bfloat16) if A_flat.dtype != torch.bfloat16 else A_flat
+    # CUTLASS fused quantize requires BF16 input
+    A_bf16 = A_flat.to(torch.bfloat16) if A_flat.dtype != torch.bfloat16 else A_flat
 
-        if tensor_scale is None:
-            tensor_scale = A_bf16.abs().max().item()
+    if tensor_scale is None:
+        tensor_scale = A_bf16.abs().max().item()
 
-        packed, block_scales, ts = torch.ops.bitsandbytes.cutlass_fused_quantize_nvfp4(A_bf16, tensor_scale)
-    else:
-        # Fallback: hand-written fused Hadamard + NVFP4 quantize kernel.
-        # Note: uses plain (non-randomized) Had16. Dequantize inverse rotation
-        # will be slightly off but this path is only for non-SM_120+ development.
-        packed, block_scales, ts = torch.ops.bitsandbytes.fused_hadamard_quantize_nvfp4(A_flat, tensor_scale)
+    packed, block_scales, ts = torch.ops.bitsandbytes.cutlass_fused_quantize_nvfp4(A_bf16, tensor_scale)
 
     # Pre-compute CUTLASS block-scaled layout for GEMM. The 2D scale shape is
     # (rows, K//16) where rows is the product of all dims except the last.

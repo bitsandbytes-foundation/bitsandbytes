@@ -433,23 +433,6 @@ def _(
         )
 
 
-# NVFP4 quantization (E2M1 with two-level scaling: E4M3 block scales + FP32 tensor scale)
-torch.library.define(
-    "bitsandbytes::quantize_nvfp4",
-    "(Tensor A, float? tensor_scale) -> (Tensor, Tensor, Tensor)",
-)
-
-
-@register_fake("bitsandbytes::quantize_nvfp4")
-def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    n = A.numel()
-    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
-    packed = torch.empty(n // 2, dtype=torch.uint8, device=A.device)
-    block_scales = torch.empty(n // 16, dtype=torch.uint8, device=A.device)
-    ts_out = torch.empty(1, dtype=torch.float32, device=A.device)
-    return packed, block_scales, ts_out
-
-
 # NVFP4 dequantization
 torch.library.define(
     "bitsandbytes::dequantize_nvfp4",
@@ -462,36 +445,6 @@ def _(
     packed: torch.Tensor, block_scales: torch.Tensor, tensor_scale: float, numel: int, dtype: torch.dtype
 ) -> torch.Tensor:
     return torch.empty(numel, dtype=dtype, device=packed.device)
-
-
-# NVFP4 Hadamard rotation (in-place)
-torch.library.define(
-    "bitsandbytes::hadamard_rotate_nvfp4",
-    "(Tensor(a!) A) -> ()",
-)
-
-
-@register_fake("bitsandbytes::hadamard_rotate_nvfp4")
-def _(A: torch.Tensor) -> None:
-    n = A.numel()
-    torch._check(n % 16 == 0, lambda: f"Hadamard rotation requires numel divisible by 16, got {n}")
-
-
-# Fused Hadamard rotation + NVFP4 quantize
-torch.library.define(
-    "bitsandbytes::fused_hadamard_quantize_nvfp4",
-    "(Tensor A, float? tensor_scale) -> (Tensor, Tensor, Tensor)",
-)
-
-
-@register_fake("bitsandbytes::fused_hadamard_quantize_nvfp4")
-def _(A: torch.Tensor, tensor_scale: Optional[float] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    n = A.numel()
-    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
-    packed = torch.empty(n // 2, dtype=torch.uint8, device=A.device)
-    block_scales = torch.empty(n // 16, dtype=torch.uint8, device=A.device)
-    ts_out = torch.empty(1, dtype=torch.float32, device=A.device)
-    return packed, block_scales, ts_out
 
 
 # CUTLASS-based fused quantize for NVFP4 (SM_120+)
