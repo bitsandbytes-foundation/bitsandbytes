@@ -11,8 +11,8 @@
 #define ERR_NOT_IMPLEMENTED 100
 
 #if BNB_HIP
-#include <hip/hip_runtime.h>
 #include <atomic>
+#include <hip/hip_runtime.h>
 
 // NOTE: This queries device 0 once and caches the result. On mixed RDNA+CDNA
 // systems (warp size 32 vs 64) this will return the wrong value for whichever
