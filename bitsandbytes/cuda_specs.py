@@ -26,12 +26,18 @@ def get_compute_capabilities() -> list[tuple[int, int]]:
 
 @lru_cache(None)
 def get_cuda_version_tuple() -> Optional[tuple[int, int]]:
-    """Get CUDA/HIP version as a tuple of (major, minor)."""
+    """Get CUDA/ROCm version as a tuple of (major, minor).
+
+    For ROCm, prefers ``torch.version.rocm`` (the actual ROCm version)
+    over ``torch.version.hip`` (the HIP SDK version) because the two
+    version lines diverged starting with ROCm 7.x. Falls back to
+    ``torch.version.hip`` when the attribute is not yet available.
+    """
     try:
         if torch.version.cuda:
             version_str = torch.version.cuda
         elif torch.version.hip:
-            version_str = torch.version.hip
+            version_str = getattr(torch.version, "rocm", None) or torch.version.hip
         else:
             return None
 
@@ -44,7 +50,7 @@ def get_cuda_version_tuple() -> Optional[tuple[int, int]]:
 
 
 def get_cuda_version_string() -> Optional[str]:
-    """Get CUDA/HIP version as a string."""
+    """Get CUDA/ROCm version as a compact string (e.g. ``"120"`` or ``"71"``)."""
     version_tuple = get_cuda_version_tuple()
     if version_tuple is None:
         return None

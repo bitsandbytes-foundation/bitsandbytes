@@ -7,7 +7,8 @@
 #include <cuda_runtime_api.h>
 #include <ops.cuh>
 #endif
-#if BUILD_HIP
+#if BUILD_ROCM
+#include <hip/hip_runtime.h>
 #include <ops.cuh>
 #endif
 #if BUILD_MPS
@@ -19,7 +20,7 @@
 #include <cpu_ops.h>
 
 // Compatibility between HIP/CUDA APIs
-#if BUILD_HIP
+#if BUILD_ROCM
 #define cudaStream_t hipStream_t
 #define __nv_bfloat16 hip_bfloat16
 #define cublasLtHandle_t hipblasLtHandle_t
@@ -38,7 +39,7 @@
 //                               UNMANGLED CALLS
 //===================================================================================
 
-#if BUILD_CUDA || BUILD_HIP
+#if BUILD_CUDA || BUILD_ROCM
 
 void gemm_4bit_inference_naive_fp16(
     int m, int n, int k, half* A, unsigned char* B, float* absmax, float* datatype, half* out, int lda, int ldb,
@@ -334,7 +335,7 @@ void gemv_4bit_inference_fp32(
 #endif
 
 extern "C" {
-#if BUILD_CUDA || BUILD_HIP
+#if BUILD_CUDA || BUILD_ROCM
 
 void cdequantize_blockwise_fp16_fp4(
     float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, cudaStream_t stream
