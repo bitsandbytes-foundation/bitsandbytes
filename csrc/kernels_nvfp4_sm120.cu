@@ -7,8 +7,8 @@
 // Computes: D = A * B^T (NVFP4 inputs with block scales, FP32 output)
 // A: M x K (row-major packed FP4, 2 values per byte)
 // B: N x K (row-major packed FP4, i.e. B^T stored as N rows of K)
-// SFA: M x (K/16) UE4M3 block scales for A
-// SFB: N x (K/16) UE4M3 block scales for B
+// SFA: CUTLASS block-scaled layout (swizzled) for A, logical shape M x (K/16)
+// SFB: CUTLASS block-scaled layout (swizzled) for B, logical shape N x (K/16)
 // D: M x N FP32 output
 
 #include <cstdint>
@@ -61,6 +61,26 @@ __device__ __forceinline__ uint32_t
         }
     }
     return result;
+}
+
+// ============================================================================
+// Swizzled scale index computation
+//
+// Converts (row, col) in the logical scale matrix to a byte offset in the
+// CUTLASS block-scaled layout.  The swizzle pattern within each 128×4 block
+// maps: (r, c) → (r%32)*16 + (r/32)*4 + c  in a 32×16 output block.
+// Blocks are stored row-major: block_row * n_col_blocks + block_col.
+//
+// For 4 consecutive columns (same block_col), the swizzled offsets are
+// contiguous, so a uint32_t load is still valid from the returned address.
+// ============================================================================
+__device__ __forceinline__ int swizzled_scale_offset(int row, int col, int n_col_blocks) {
+    int block_row = row >> 7;         // row / 128
+    int block_col = col >> 2;         // col / 4
+    int r = row & 127;               // row % 128
+    int c = col & 3;                 // col % 4
+    int block_idx = block_row * n_col_blocks + block_col;
+    return block_idx * 512 + (r & 31) * 16 + (r >> 5) * 4 + c;
 }
 
 // ============================================================================
@@ -163,6 +183,7 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
     const int t1 = lane_id / 4;
     const int half_K = K / 2;
     const int scale_K = K / 16;
+    const int scale_n_col_blocks = (scale_K + 3) / 4;
 
     // Accumulators
     float acc[N_TILES_PER_WARP][4];
@@ -230,12 +251,12 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
         } else {                                                                                                       \
             (REG_B) = make_uint4(0, 0, 0, 0);                                                                          \
         }                                                                                                              \
-        /* SFA: 1 × uint32 (first 32 threads) */                                                                       \
+        /* SFA: 1 × uint32 (first 32 threads) — swizzled scale layout */                                                 \
         (REG_SFA) = 0;                                                                                                 \
         if (tid < BLOCK_M_DIM) {                                                                                       \
             int _gm = block_m + tid;                                                                                   \
             if (_gm < M) {                                                                                             \
-                int _bs = _gm * scale_K + (K_SCALE);                                                                   \
+                int _bs = swizzled_scale_offset(_gm, (K_SCALE), scale_n_col_blocks);                                   \
                 if ((K_SCALE) + 3 < scale_K)                                                                           \
                     (REG_SFA) = *(const uint32_t*)(SFA + _bs);                                                         \
                 else                                                                                                   \
@@ -244,12 +265,12 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGemmNVFP4_smem(
                             (REG_SFA) |= ((uint32_t)SFA[_bs + _b]) << (_b * 8);                                        \
             }                                                                                                          \
         }                                                                                                              \
-        /* SFB: 1 × uint32 (first 128 threads) */                                                                      \
+        /* SFB: 1 × uint32 (first 128 threads) — swizzled scale layout */                                              \
         (REG_SFB) = 0;                                                                                                 \
         if (tid < BLOCK_N_DIM) {                                                                                       \
             int _gn = block_n + tid;                                                                                   \
             if (_gn < N) {                                                                                             \
-                int _bs = _gn * scale_K + (K_SCALE);                                                                   \
+                int _bs = swizzled_scale_offset(_gn, (K_SCALE), scale_n_col_blocks);                                   \
                 if ((K_SCALE) + 3 < scale_K)                                                                           \
                     (REG_SFB) = *(const uint32_t*)(SFB + _bs);                                                         \
                 else                                                                                                   \
