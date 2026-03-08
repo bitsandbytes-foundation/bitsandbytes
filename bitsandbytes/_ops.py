@@ -515,8 +515,8 @@ def _(
 # Fuses all expert GEMMs into a single kernel launch.
 # A_concat:      [total_tokens, K/2]     packed activations (all experts concatenated)
 # B_all:         [num_experts * N, K/2]  packed weights (per-expert, stacked)
-# SFA_concat:    [total_tokens, K/16]    activation scales (flat, concatenated)
-# SFB_all:       [num_experts * N, K/16] weight scales (flat, stacked)
+# SFA_concat:    swizzled activation scales (CUTLASS block-scaled layout, total_tokens rows)
+# SFB_all:       swizzled weight scales (CUTLASS block-scaled layout, num_experts*N rows)
 # expert_offsets: [num_experts + 1]       cumulative token offsets (int32)
 # cumul_m_tiles:  [num_experts + 1]       cumulative m-tile counts (int32)
 torch.library.define(

@@ -537,12 +537,12 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGroupedGemmNVFP4_sme
     int row_offset = expert_offsets[expert];
     int half_K = K / 2;
     int scale_K = K / 16;
+    int scale_n_col_blocks = (scale_K + 3) / 4;
 
-    // Point to this expert's data
+    // Point to this expert's data (packed FP4 uses flat per-expert offsets,
+    // scales use swizzled layout with absolute row indices)
     const unsigned char* A   = A_concat   + (size_t)row_offset * half_K;
-    const unsigned char* SFA = SFA_concat + (size_t)row_offset * scale_K;
     const unsigned char* B   = B_all      + (size_t)expert * N * half_K;
-    const unsigned char* SFB = SFB_all    + (size_t)expert * N * scale_K;
     OutT*                D   = D_concat   + (size_t)row_offset * N;
     int M = expert_M;
 
@@ -630,26 +630,26 @@ __global__ __launch_bounds__(WARPS_PER_BLOCK * 32, 4) void kGroupedGemmNVFP4_sme
         if (tid < BLOCK_M_DIM) {
             int gm = block_m + tid;
             if (gm < M) {
-                int bs = gm * scale_K + k_scale;
+                int bs = swizzled_scale_offset(row_offset + gm, k_scale, scale_n_col_blocks);
                 if (k_scale + 3 < scale_K)
-                    pipe_sfa = *(const uint32_t*)(SFA + bs);
+                    pipe_sfa = *(const uint32_t*)(SFA_concat + bs);
                 else
                     for (int i = 0; i < 4; i++)
                         if (k_scale + i < scale_K)
-                            pipe_sfa |= ((uint32_t)SFA[bs + i]) << (i * 8);
+                            pipe_sfa |= ((uint32_t)SFA_concat[bs + i]) << (i * 8);
             }
         }
         pipe_sfb = 0;
         if (tid < BLOCK_N_DIM) {
             int gn = block_n + tid;
             if (gn < N) {
-                int bs = gn * scale_K + k_scale;
+                int bs = swizzled_scale_offset(expert * N + gn, k_scale, scale_n_col_blocks);
                 if (k_scale + 3 < scale_K)
-                    pipe_sfb = *(const uint32_t*)(SFB + bs);
+                    pipe_sfb = *(const uint32_t*)(SFB_all + bs);
                 else
                     for (int i = 0; i < 4; i++)
                         if (k_scale + i < scale_K)
-                            pipe_sfb |= ((uint32_t)SFB[bs + i]) << (i * 8);
+                            pipe_sfb |= ((uint32_t)SFB_all[bs + i]) << (i * 8);
             }
         }
     };

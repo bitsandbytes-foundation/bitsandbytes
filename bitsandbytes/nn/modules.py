@@ -828,9 +828,15 @@ class LinearNVFP4MoE(nn.Module):
             all_scales.append(state.block_scales)
             tensor_scales.append(state.tensor_scale)
 
-        # Stack into contiguous buffers: [num_experts * N, K/2] and [num_experts * N, K/16]
+        # Stack into contiguous buffers: [num_experts * N, K/2] packed data
         self.weight_packed = torch.cat(all_packed, dim=0).contiguous()
-        self.weight_scales = torch.cat(all_scales, dim=0).contiguous()
+
+        # Swizzle the concatenated weight scales to CUTLASS block-scaled layout.
+        # The kernel indexes with absolute row (expert * N + local_n).
+        weight_scales_flat = torch.cat(all_scales, dim=0).contiguous()
+        self.weight_scales = torch.ops.bitsandbytes.scale_to_blocked(
+            weight_scales_flat, self.num_experts * N, K // 16,
+        )
         self.weight_tensor_scale = max(tensor_scales)
 
         self._quantized = True

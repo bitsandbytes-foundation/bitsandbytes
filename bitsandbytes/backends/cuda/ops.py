@@ -1081,7 +1081,7 @@ def _(
 # Grouped NVFP4 GEMM for MoE inference (SM_120+)
 #
 # Fuses all expert GEMMs into a single kernel launch using expert-offset
-# work decomposition with binary search. Uses flat (non-swizzled) scales.
+# work decomposition with binary search. Uses swizzled (block-scaled) scales.
 # CUDA-graph-safe: no dynamic allocations.
 def _gemm_nvfp4_grouped_raw(
     A_concat: torch.Tensor,

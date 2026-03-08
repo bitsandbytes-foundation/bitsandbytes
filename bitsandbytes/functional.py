@@ -1371,7 +1371,7 @@ def gemm_nvfp4_grouped(
         A_data: Packed FP4 activations, concatenated across experts [total_tokens * K/2].
         A_state: Quantization state for activations (total_tokens x K).
         B_data_all: Packed FP4 weights for all experts [num_experts * N * K/2].
-        B_scales_all: Flat block scales for all experts [num_experts * N * K/16].
+        B_scales_all: Swizzled block scales for all experts (CUTLASS block-scaled layout).
         B_tensor_scale: Shared tensor scale for all expert weights.
         expert_offsets: Cumulative token offsets [num_experts + 1], int32.
         N: Output dimension per expert.
@@ -1393,7 +1393,7 @@ def gemm_nvfp4_grouped(
     return torch.ops.bitsandbytes.gemm_nvfp4_grouped(
         A_data,
         B_data_all,
-        A_state.block_scales,
+        A_state.block_scales_blocked,
         B_scales_all,
         expert_offsets,
         cumul_m_tiles,
