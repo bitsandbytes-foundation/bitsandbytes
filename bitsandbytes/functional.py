@@ -1115,9 +1115,7 @@ class NVFP4QuantState:
             shape=self.shape,
             dtype=self.dtype,
             rotated=self.rotated,
-            block_scales_blocked=self.block_scales_blocked.to(device)
-            if self.block_scales_blocked is not None
-            else None,
+            block_scales_blocked=self.block_scales_blocked.to(device),
         )
 
     def state_dict(self) -> dict:
@@ -1139,13 +1137,23 @@ class NVFP4QuantState:
             "torch.bfloat16": torch.bfloat16,
             "torch.float32": torch.float32,
         }
+        shape = tuple(d["shape"])
+        block_scales = d["block_scales"].to(device)
+
+        # Recompute CUTLASS block-scaled layout for GEMM dispatch.
+        K = shape[-1]
+        rows = block_scales.numel() // (K // 16)
+        scale_w = K // 16
+        block_scales_blocked = torch.ops.bitsandbytes.scale_to_blocked(block_scales, rows, scale_w)
+
         return cls(
             packed_data=d["packed_data"].to(device),
-            block_scales=d["block_scales"].to(device),
+            block_scales=block_scales,
             tensor_scale=float(d["tensor_scale"]),
-            shape=tuple(d["shape"]),
+            shape=shape,
             dtype=dtype_map.get(d["dtype"], torch.float16),
             rotated=bool(d["rotated"]),
+            block_scales_blocked=block_scales_blocked,
         )
 
 
@@ -1269,16 +1277,13 @@ def gemm_nvfp4(
         # Hand-written kernel: swizzled (block-scaled) layout, BF16 output
         from bitsandbytes.backends.cuda.ops import _gemm_nvfp4_hw_bf16_raw
 
-        A_scales = A_state.block_scales_blocked if A_state.block_scales_blocked is not None else A_state.block_scales
-        B_scales = B_state.block_scales_blocked if B_state.block_scales_blocked is not None else B_state.block_scales
-
         D_out = torch.empty(M, N, dtype=torch.bfloat16, device=A_data.device)
         workspace = torch.empty(M, N, dtype=torch.float32, device=A_data.device)
         _gemm_nvfp4_hw_bf16_raw(
             A_data,
             B_data,
-            A_scales,
-            B_scales,
+            A_state.block_scales_blocked,
+            B_state.block_scales_blocked,
             D_out,
             workspace,
             M,
@@ -1288,15 +1293,12 @@ def gemm_nvfp4(
         # Apply tensor scales and convert to FP32 for API compatibility
         return D_out.float() * (A_state.tensor_scale * B_state.tensor_scale)
 
-    # CUTLASS: pre-swizzled scales, BF16 output
-    A_scales = A_state.block_scales_blocked if A_state.block_scales_blocked is not None else A_state.block_scales
-    B_scales = B_state.block_scales_blocked if B_state.block_scales_blocked is not None else B_state.block_scales
-
+    # CUTLASS: swizzled (block-scaled) layout, BF16 output
     return torch.ops.bitsandbytes.gemm_nvfp4(
         A_data,
         B_data,
-        A_scales,
-        B_scales,
+        A_state.block_scales_blocked,
+        B_state.block_scales_blocked,
         A_state.tensor_scale,
         B_state.tensor_scale,
         M,
