@@ -22,6 +22,7 @@ StatementMacros:
   - 'MAKE_OptimizerStatic8bit1StateBlockwise'
   - 'MAKE_OptimizerStatic8bit2StateBlockwise'
   - 'MAKE_kQuantizeBlockwise'
+  - 'MAKE_kQuantizeBlockwiseSmall'
   - 'MAKE_BLOCKWISE8'
   - 'MAKE_ELEMENTWISE_FUNC'
   - 'CMAKE_ELEMENTWISE_FUNC'
