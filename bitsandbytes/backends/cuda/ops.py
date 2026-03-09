@@ -1153,17 +1153,18 @@ def _gemm_nvfp4_grouped_raw(
 # Cached state for grouped SM_100 GEMM
 _grouped_restype_set = False
 
-# Cached buffers for the fused C dispatch (keyed by (offsets_tuple, N, K))
+# Cached buffers for the fused C dispatch (keyed by (N, K, num_experts),
+# sized for worst-case routing so the cache always hits after first call)
 _grouped_fused_cache: Optional[dict] = None
 
 
 def _get_fused_buffers(
-    offsets_host: tuple[int, ...], N: int, K: int, num_experts: int, device: torch.device,
+    total_tokens: int, N: int, K: int, num_experts: int, device: torch.device,
 ) -> dict:
-    """Pre-allocate and cache device buffers for the fused C dispatch.
+    """Get or grow cached device buffers for the fused C dispatch.
 
-    All metadata computation and pointer building happens in C.
-    Python just allocates buffers sized for the given (offsets, N, K).
+    Buffers are sized for worst-case token routing (all tokens to one expert),
+    keyed on (N, K, num_experts). Grows if total_tokens exceeds the cached size.
     """
     global _grouped_fused_cache, _grouped_restype_set
 
@@ -1172,51 +1173,43 @@ def _get_fused_buffers(
         lib.cgemm_nvfp4_grouped_sm100_workspace_size.restype = ct.c_size_t
         _grouped_restype_set = True
 
-    cache_key = (offsets_host, N, K, num_experts)
-    if _grouped_fused_cache is not None and _grouped_fused_cache.get("key") == cache_key:
+    if (_grouped_fused_cache is not None
+            and _grouped_fused_cache["N"] == N
+            and _grouped_fused_cache["K"] == K
+            and _grouped_fused_cache["num_experts"] == num_experts
+            and _grouped_fused_cache["max_tokens"] >= total_tokens):
         return _grouped_fused_cache
 
     scale_W = K // 16
     n_col_blocks = (scale_W + 3) // 4
-    total_tokens = offsets_host[-1]
 
-    # Compute SFA swizzle output size and M_per_expert for workspace query
-    expert_M_h = []
-    sfa_out_bytes = 0
-    for e in range(num_experts):
-        M_e = offsets_host[e + 1] - offsets_host[e]
-        expert_M_h.append(M_e)
-        n_row_blocks_e = (M_e + 127) // 128 if M_e > 0 else 0
-        sfa_out_bytes += n_row_blocks_e * n_col_blocks * 512
+    # Worst-case SFA output: each expert adds at most 1 extra 128-row block
+    max_row_blocks = (total_tokens + 127) // 128 + num_experts
+    sfa_out_bytes = max_row_blocks * n_col_blocks * 512
 
-    # Pre-allocate device buffers
     sfa_swizzle_out = torch.empty(max(sfa_out_bytes, 1), dtype=torch.uint8, device=device)
     sfa_swizzle_meta = torch.empty(3 * num_experts * 4, dtype=torch.uint8, device=device)
 
     meta_size = lib.cgemm_nvfp4_grouped_sm100_meta_size(ct.c_int(num_experts))
     gemm_meta_buf = torch.empty(meta_size, dtype=torch.uint8, device=device)
 
-    M_arr = (ct.c_int * num_experts)(*expert_M_h)
+    # Worst-case workspace: all tokens routed to a single expert
+    M_arr = (ct.c_int * num_experts)(*([0] * num_experts))
+    M_arr[0] = total_tokens
     ws_size = lib.cgemm_nvfp4_grouped_sm100_workspace_size(
         M_arr, ct.c_int(N), ct.c_int(K), ct.c_int(num_experts),
     )
     workspace_buf = torch.empty(max(ws_size, 1), dtype=torch.uint8, device=device)
 
-    # Pre-build host offsets ctypes array
-    host_offsets_arr = (ct.c_int * (num_experts + 1))(*offsets_host)
-
-    buf = {
-        "key": cache_key,
-        "total_tokens": total_tokens,
+    _grouped_fused_cache = {
+        "N": N, "K": K, "num_experts": num_experts, "max_tokens": total_tokens,
         "sfa_swizzle_out": sfa_swizzle_out,
         "sfa_swizzle_meta": sfa_swizzle_meta,
         "gemm_meta_buf": gemm_meta_buf,
         "workspace_buf": workspace_buf,
         "ws_size": ws_size,
-        "host_offsets_arr": host_offsets_arr,
     }
-    _grouped_fused_cache = buf
-    return buf
+    return _grouped_fused_cache
 
 
 def _gemm_nvfp4_grouped_sm100(
@@ -1244,12 +1237,17 @@ def _gemm_nvfp4_grouped_sm100(
     offsets_host: host-side tuple of cumulative token offsets (num_experts + 1 ints).
     """
     device = A_concat.device
+    total_tokens = offsets_host[-1]
 
-    # Get or build cached buffers
-    buf = _get_fused_buffers(offsets_host, N, K, num_experts, device)
+    # Get or grow cached buffers (keyed on N, K, num_experts — always hits
+    # after first call unless total_tokens grows)
+    buf = _get_fused_buffers(total_tokens, N, K, num_experts, device)
 
     # Output (BF16 — CUTLASS accumulates in FP32, epilogue outputs BF16)
-    D_concat = torch.empty(buf["total_tokens"], N, dtype=torch.bfloat16, device=device)
+    D_concat = torch.empty(total_tokens, N, dtype=torch.bfloat16, device=device)
+
+    # Build host offsets ctypes array (per-call, ~1μs for 9 ints)
+    host_offsets_arr = (ct.c_int * (num_experts + 1))(*offsets_host)
 
     # Single fused C call: SFA swizzle + metadata build + GEMM launch
     # SFB_all is passed directly — already per-expert swizzled from quantize_nvfp4
@@ -1259,7 +1257,7 @@ def _gemm_nvfp4_grouped_sm100(
         get_ptr(SFA_rowmajor),
         get_ptr(SFB_all),
         get_ptr(D_concat),
-        buf["host_offsets_arr"],
+        host_offsets_arr,
         ct.c_int(N),
         ct.c_int(K),
         ct.c_int(num_experts),
