@@ -592,3 +592,76 @@ def _(
     torch._check_is_size(K)
     torch._check_is_size(num_experts)
     return torch.empty(num_experts * max_M, N, dtype=torch.bfloat16, device=A_batched.device)
+
+
+# MoE scatter: concatenated FP4/uint8 → padded per-expert batched layout
+# Reusable for both packed FP4 activations and scale factors.
+torch.library.define(
+    "bitsandbytes::moe_scatter_nvfp4",
+    "(Tensor packed_concat, Tensor expert_offsets, int max_M, int K, int num_experts) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::moe_scatter_nvfp4")
+def _(
+    packed_concat: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    max_M: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    torch._check_is_size(max_M)
+    torch._check_is_size(K)
+    torch._check_is_size(num_experts)
+    row_bytes = K // 2
+    return torch.empty(num_experts * max_M * row_bytes, dtype=torch.uint8, device=packed_concat.device)
+
+
+# MoE gather: padded per-expert BF16 → concatenated BF16 (plain copy, no weighting)
+torch.library.define(
+    "bitsandbytes::moe_gather_bf16",
+    "(Tensor D_batched, Tensor expert_offsets, int max_M, int N, int num_experts, int total_tokens) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::moe_gather_bf16")
+def _(
+    D_batched: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    max_M: int,
+    N: int,
+    num_experts: int,
+    total_tokens: int,
+) -> torch.Tensor:
+    torch._check_is_size(max_M)
+    torch._check_is_size(N)
+    torch._check_is_size(num_experts)
+    torch._check_is_size(total_tokens)
+    return torch.empty(total_tokens, N, dtype=torch.bfloat16, device=D_batched.device)
+
+
+# MoE weighted gather: fused gather + scale by gating weight + FP32 accumulate + BF16 convert.
+# Two-phase: atomicAdd into FP32 workspace, then convert to BF16.
+# workspace_fp32 is a caller-managed scratch buffer (persistent for CUDA graphs).
+torch.library.define(
+    "bitsandbytes::moe_weighted_gather_bf16",
+    "(Tensor D_batched, Tensor output_bf16, Tensor workspace_fp32, "
+    "Tensor token_ids, Tensor expert_ids, Tensor slot_ids, Tensor weights, "
+    "int num_tokens, int max_M, int N) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::moe_weighted_gather_bf16")
+def _(
+    D_batched: torch.Tensor,
+    output_bf16: torch.Tensor,
+    workspace_fp32: torch.Tensor,
+    token_ids: torch.Tensor,
+    expert_ids: torch.Tensor,
+    slot_ids: torch.Tensor,
+    weights: torch.Tensor,
+    num_tokens: int,
+    max_M: int,
+    N: int,
+) -> torch.Tensor:
+    return output_bf16

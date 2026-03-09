@@ -1396,3 +1396,96 @@ def _(
             max_M, N, K, num_experts,
         )
     return D_out
+
+
+# =========================================================================
+# MoE scatter/gather kernels
+# =========================================================================
+
+@register_kernel("bitsandbytes::moe_scatter_nvfp4", "cuda")
+def _(
+    packed_concat: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    max_M: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    """Scatter concatenated FP4 data to padded per-expert batched layout."""
+    row_bytes = K // 2
+    out = torch.empty(
+        num_experts * max_M * row_bytes, dtype=torch.uint8, device=packed_concat.device,
+    )
+    with _cuda_device_of(packed_concat):
+        lib.cmoe_scatter_nvfp4(
+            get_ptr(packed_concat),
+            get_ptr(out),
+            get_ptr(expert_offsets),
+            ct.c_int(max_M),
+            ct.c_int(K),
+            ct.c_int(num_experts),
+            _get_tensor_stream(packed_concat),
+        )
+    return out
+
+
+@register_kernel("bitsandbytes::moe_gather_bf16", "cuda")
+def _(
+    D_batched: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    max_M: int,
+    N: int,
+    num_experts: int,
+    total_tokens: int,
+) -> torch.Tensor:
+    """Gather BF16 results from padded per-expert layout to concatenated output."""
+    out = torch.empty(
+        total_tokens, N, dtype=torch.bfloat16, device=D_batched.device,
+    )
+    with _cuda_device_of(D_batched):
+        lib.cmoe_gather_bf16(
+            get_ptr(D_batched),
+            get_ptr(out),
+            get_ptr(expert_offsets),
+            ct.c_int(max_M),
+            ct.c_int(N),
+            ct.c_int(num_experts),
+            _get_tensor_stream(D_batched),
+        )
+    return out
+
+
+@register_kernel("bitsandbytes::moe_weighted_gather_bf16", "cuda")
+def _(
+    D_batched: torch.Tensor,
+    output_bf16: torch.Tensor,
+    workspace_fp32: torch.Tensor,
+    token_ids: torch.Tensor,
+    expert_ids: torch.Tensor,
+    slot_ids: torch.Tensor,
+    weights: torch.Tensor,
+    num_tokens: int,
+    max_M: int,
+    N: int,
+) -> torch.Tensor:
+    """Fused gather + weight + FP32 accumulate + BF16 convert.
+
+    Internally launches: memset(workspace) → atomicAdd gather → FP32→BF16 convert.
+    All three operations on the same stream, capturable in a CUDA graph.
+    """
+    total_assignments = token_ids.shape[0]
+    with _cuda_device_of(D_batched):
+        lib.cmoe_weighted_gather_bf16(
+            get_ptr(D_batched),
+            get_ptr(output_bf16),
+            get_ptr(workspace_fp32),
+            get_ptr(token_ids),
+            get_ptr(expert_ids),
+            get_ptr(slot_ids),
+            get_ptr(weights),
+            ct.c_int(total_assignments),
+            ct.c_int(num_tokens),
+            ct.c_int(max_M),
+            ct.c_int(N),
+            _get_tensor_stream(D_batched),
+        )
+    return output_bf16
