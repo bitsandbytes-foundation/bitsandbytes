@@ -485,6 +485,18 @@ def _(scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
     return torch.empty(out_size, dtype=torch.uint8, device=scales.device)
 
 
+# Inverse scale reordering: CUTLASS block-scaled layout → row-major
+torch.library.define(
+    "bitsandbytes::scale_from_blocked",
+    "(Tensor blocked_scales, int H, int W) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::scale_from_blocked")
+def _(blocked_scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
+    return torch.empty(H * W, dtype=torch.uint8, device=blocked_scales.device)
+
+
 # NVFP4 GEMM (A @ B^T with block-scaled FP4 inputs)
 torch.library.define(
     "bitsandbytes::gemm_nvfp4",

@@ -103,8 +103,103 @@ __global__ void kScaleFromBlocked(
 }
 
 // =========================================================================
+// Batched per-expert to_blocked: row-major scales → per-expert swizzled
+// =========================================================================
+// For grouped/MoE GEMM: takes a concatenated row-major scale tensor
+// and expert offsets, produces independently-swizzled per-expert outputs
+// in a single kernel launch.
+//
+// Grid: (max_row_blocks, n_col_blocks, num_experts)
+// Each block handles one 128×4 tile for one expert.
+// Output: contiguous buffer with per-expert swizzled blocks at precomputed offsets.
+__global__ void kScaleToBlockedBatched(
+    const uint8_t* __restrict__ input,          // (total_rows, W) row-major
+    uint8_t* __restrict__ output,               // contiguous output for all experts
+    const int* __restrict__ expert_row_offsets,  // [num_experts] start row per expert
+    const int* __restrict__ expert_M,            // [num_experts] rows per expert
+    const int* __restrict__ expert_out_offsets,  // [num_experts] byte offset in output per expert
+    int W,                                       // scale columns (K/16)
+    int num_experts
+) {
+    int expert = blockIdx.z;
+    if (expert >= num_experts) return;
+
+    int M_e = expert_M[expert];
+    if (M_e <= 0) return;
+
+    int block_row = blockIdx.x;  // which 128-row block within this expert
+    int block_col = blockIdx.y;  // which 4-col block
+
+    int n_row_blocks_e = (M_e + 127) / 128;
+    if (block_row >= n_row_blocks_e) return;
+
+    int n_col_blocks = (W + 3) / 4;
+
+    // Thread within the 128×4 block
+    int local_idx = threadIdx.x;  // 0..511
+    int r = local_idx / 4;        // row within block [0..127]
+    int c = local_idx % 4;        // col within block [0..3]
+
+    // Global coordinates in the concatenated input
+    int row_offset = expert_row_offsets[expert];
+    int global_r = row_offset + block_row * 128 + r;
+    int global_c = block_col * 4 + c;
+
+    // Local row within expert (for bounds checking)
+    int local_r = block_row * 128 + r;
+
+    // Load input (zero if out of bounds)
+    uint8_t val = 0;
+    if (local_r < M_e && global_c < W) {
+        val = input[global_r * W + global_c];
+    }
+
+    // Swizzle: same pattern as kScaleToBlocked
+    int r_mod_32 = r % 32;
+    int r_div_32 = r / 32;
+    int dest_in_block = r_mod_32 * 16 + r_div_32 * 4 + c;
+
+    // Output offset: expert's base + block index within expert
+    int block_idx = block_row * n_col_blocks + block_col;
+    int block_size = 128 * 4;  // 512 bytes per block
+    int out_base = expert_out_offsets[expert];
+    int output_idx = out_base + block_idx * block_size + dest_in_block;
+
+    output[output_idx] = val;
+}
+
+
+// =========================================================================
 // extern "C" launchers
 // =========================================================================
+
+extern "C" void cscale_to_blocked_batched(
+    const void* input,                   // (total_rows, W) row-major uint8 scales
+    void* output,                        // contiguous output buffer for all experts
+    const int* expert_row_offsets,        // [num_experts] start row per expert (device)
+    const int* expert_M,                 // [num_experts] rows per expert (device)
+    const int* expert_out_offsets,        // [num_experts] byte offset in output (device)
+    int W,                               // scale columns
+    int num_experts,
+    int max_row_blocks,                  // max ceil(M_e/128) across all experts
+    cudaStream_t stream
+) {
+    int n_col_blocks = (W + 3) / 4;
+
+    dim3 grid(max_row_blocks, n_col_blocks, num_experts);
+    dim3 block(512);
+
+    kScaleToBlockedBatched<<<grid, block, 0, stream>>>(
+        static_cast<const uint8_t*>(input),
+        static_cast<uint8_t*>(output),
+        expert_row_offsets,
+        expert_M,
+        expert_out_offsets,
+        W,
+        num_experts
+    );
+}
+
 
 extern "C" void cscale_to_blocked(
     const void* input, // (H, W) row-major uint8 scales

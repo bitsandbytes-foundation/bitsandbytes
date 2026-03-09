@@ -1243,9 +1243,17 @@ def dequantize_nvfp4(
 _GEMM_HW_M_THRESHOLD = 64
 
 
-def _has_hw_gemm() -> bool:
-    """Check if hand-written NVFP4 GEMM is available (SM_120+ builds only)."""
-    return hasattr(lib, "cgemm_nvfp4_bf16")
+def _has_hw_gemm(device=None) -> bool:
+    """Check if hand-written NVFP4 GEMM is available (SM_120 only, not SM_100)."""
+    if not hasattr(lib, "cgemm_nvfp4_bf16"):
+        return False
+    # Hand-written kernel uses SM_120 PTX (mma.sync.aligned.block_scale),
+    # which is not available on datacenter Blackwell (SM_100/101/103).
+    if device is not None:
+        major, _ = torch.cuda.get_device_capability(device)
+        if major == 10:
+            return False
+    return True
 
 
 def gemm_nvfp4(
@@ -1256,9 +1264,10 @@ def gemm_nvfp4(
 ) -> torch.Tensor:
     """NVFP4 GEMM: compute A @ B^T using block-scaled FP4 inputs.
 
-    Dispatches between two kernels based on M:
-    - M < 64: hand-written kernel (mma.sync + auto split-K, BF16 output)
-    - M >= 64: CUTLASS SM_120 GEMM (BF16 output)
+    Dispatches between kernels based on M and GPU architecture:
+    - SM_120 + M < 64: hand-written kernel (mma.sync + auto split-K, BF16 output)
+    - SM_120 + M >= 64: CUTLASS SM_120 GEMM (BF16 output)
+    - SM_100 (B200/B100): CUTLASS SM_100 GEMM (BF16 output) for all M
 
     Args:
         A_data: Packed FP4 data for A (M*K/2 bytes).
@@ -1273,7 +1282,7 @@ def gemm_nvfp4(
     K = A_state.shape[1]
     N = B_state.shape[0]
 
-    if M < _GEMM_HW_M_THRESHOLD and _has_hw_gemm() and A_data.is_cuda:
+    if M < _GEMM_HW_M_THRESHOLD and _has_hw_gemm(A_data.device) and A_data.is_cuda:
         # Hand-written kernel: swizzled (block-scaled) layout, BF16 output
         from bitsandbytes.backends.cuda.ops import _gemm_nvfp4_hw_bf16_raw
 
@@ -1393,7 +1402,7 @@ def gemm_nvfp4_grouped(
     return torch.ops.bitsandbytes.gemm_nvfp4_grouped(
         A_data,
         B_data_all,
-        A_state.block_scales_blocked,
+        A_state.block_scales,  # row-major scales (not swizzled)
         B_scales_all,
         expert_offsets,
         cumul_m_tiles,

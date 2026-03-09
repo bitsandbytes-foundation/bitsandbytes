@@ -960,6 +960,21 @@ def _(scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
     return out
 
 
+@register_kernel("bitsandbytes::scale_from_blocked", "cuda")
+def _(blocked_scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
+    """Reverse CUTLASS block-scaled layout back to flat row-major scales."""
+    out = torch.empty(H * W, dtype=torch.uint8, device=blocked_scales.device)
+    with _cuda_device_of(blocked_scales):
+        lib.cscale_from_blocked(
+            get_ptr(blocked_scales),
+            get_ptr(out),
+            ct.c_int(H),
+            ct.c_int(W),
+            _get_tensor_stream(blocked_scales),
+        )
+    return out
+
+
 # Hand-written NVFP4 GEMM (SM_120+)
 #
 # Uses mma.sync.aligned.block_scale instructions for small-M decode.
@@ -1018,19 +1033,37 @@ def _gemm_nvfp4_raw(
 
     All buffers must be pre-allocated by the caller. The alpha buffer must
     contain ``A_tensor_scale * B_tensor_scale``.
+
+    Dispatches to SM_100 (B200/B100) or SM_120 (RTX 5090) kernel based on
+    the current GPU's compute capability.
     """
-    lib.cgemm_nvfp4_cutlass(
-        get_ptr(A_packed),
-        get_ptr(B_packed),
-        get_ptr(A_scales),
-        get_ptr(B_scales),
-        get_ptr(D_out),
-        ct.c_int(M),
-        ct.c_int(N),
-        ct.c_int(K),
-        get_ptr(alpha),
-        _get_tensor_stream(A_packed),
-    )
+    major, _ = torch.cuda.get_device_capability(A_packed.device)
+    if major == 10 and hasattr(lib, "cgemm_nvfp4_cutlass_sm100"):
+        lib.cgemm_nvfp4_cutlass_sm100(
+            get_ptr(A_packed),
+            get_ptr(B_packed),
+            get_ptr(A_scales),
+            get_ptr(B_scales),
+            get_ptr(D_out),
+            ct.c_int(M),
+            ct.c_int(N),
+            ct.c_int(K),
+            get_ptr(alpha),
+            _get_tensor_stream(A_packed),
+        )
+    else:
+        lib.cgemm_nvfp4_cutlass(
+            get_ptr(A_packed),
+            get_ptr(B_packed),
+            get_ptr(A_scales),
+            get_ptr(B_scales),
+            get_ptr(D_out),
+            ct.c_int(M),
+            ct.c_int(N),
+            ct.c_int(K),
+            get_ptr(alpha),
+            _get_tensor_stream(A_packed),
+        )
 
 
 def _gemm_nvfp4_impl(
@@ -1117,11 +1150,195 @@ def _gemm_nvfp4_grouped_raw(
     )
 
 
+# Cached state for grouped SM_100 GEMM
+_grouped_sfb_cache: Optional[tuple[int, torch.Tensor]] = None  # (data_ptr, per-expert swizzled)
+_grouped_restype_set = False
+
+# Cached buffers for the fused C dispatch (keyed by (offsets_tuple, N, K))
+_grouped_fused_cache: Optional[dict] = None
+
+
+def _prepare_per_expert_sfb(
+    SFB_all: torch.Tensor, N: int, K: int, num_experts: int,
+) -> torch.Tensor:
+    """Convert globally-swizzled SFB to per-expert independently-swizzled format.
+
+    Cached by SFB_all.data_ptr() — only runs once per set of weights.
+    Returns a contiguous buffer with each expert's SFB independently swizzled.
+    """
+    global _grouped_sfb_cache
+    sfb_ptr = SFB_all.data_ptr()
+    if _grouped_sfb_cache is not None and _grouped_sfb_cache[0] == sfb_ptr:
+        return _grouped_sfb_cache[1]
+
+    scale_W = K // 16
+    device = SFB_all.device
+    n_col_blocks = (scale_W + 3) // 4
+    n_sfb_row_blocks = (N + 127) // 128
+    sfb_per_expert_bytes = n_sfb_row_blocks * n_col_blocks * 512
+
+    # Un-swizzle globally-swizzled SFB to row-major (1 launch)
+    sfb_total_rows = num_experts * N
+    sfb_rowmajor = torch.ops.bitsandbytes.scale_from_blocked(SFB_all, sfb_total_rows, scale_W)
+    sfb_rowmajor = sfb_rowmajor.view(sfb_total_rows, scale_W)
+
+    # Batched per-expert re-swizzle using the batched kernel (1 launch)
+    import numpy as np
+    expert_row_offsets_h = [e * N for e in range(num_experts)]
+    expert_M_h = [N] * num_experts
+    expert_out_offsets_h = [e * sfb_per_expert_bytes for e in range(num_experts)]
+
+    meta_host = np.empty(3 * num_experts, dtype=np.int32)
+    meta_host[0:num_experts] = expert_row_offsets_h
+    meta_host[num_experts:2*num_experts] = expert_M_h
+    meta_host[2*num_experts:3*num_experts] = expert_out_offsets_h
+
+    meta_dev = torch.from_numpy(meta_host).to(device=device)
+    meta_base = meta_dev.data_ptr()
+
+    total_sfb_out_bytes = num_experts * sfb_per_expert_bytes
+    sfb_out = torch.empty(total_sfb_out_bytes, dtype=torch.uint8, device=device)
+
+    max_row_blocks = n_sfb_row_blocks
+    stream = _get_tensor_stream(SFB_all)
+
+    lib.cscale_to_blocked_batched(
+        get_ptr(sfb_rowmajor),
+        get_ptr(sfb_out),
+        ct.c_void_p(meta_base),
+        ct.c_void_p(meta_base + num_experts * 4),
+        ct.c_void_p(meta_base + 2 * num_experts * 4),
+        ct.c_int(scale_W),
+        ct.c_int(num_experts),
+        ct.c_int(max_row_blocks),
+        stream,
+    )
+
+    _grouped_sfb_cache = (sfb_ptr, sfb_out)
+    return sfb_out
+
+
+def _get_fused_buffers(
+    offsets_host: tuple[int, ...], N: int, K: int, num_experts: int, device: torch.device,
+) -> dict:
+    """Pre-allocate and cache device buffers for the fused C dispatch.
+
+    All metadata computation and pointer building happens in C.
+    Python just allocates buffers sized for the given (offsets, N, K).
+    """
+    global _grouped_fused_cache, _grouped_restype_set
+
+    if not _grouped_restype_set:
+        lib.cgemm_nvfp4_grouped_sm100_meta_size.restype = ct.c_size_t
+        lib.cgemm_nvfp4_grouped_sm100_workspace_size.restype = ct.c_size_t
+        _grouped_restype_set = True
+
+    cache_key = (offsets_host, N, K, num_experts)
+    if _grouped_fused_cache is not None and _grouped_fused_cache.get("key") == cache_key:
+        return _grouped_fused_cache
+
+    scale_W = K // 16
+    n_col_blocks = (scale_W + 3) // 4
+    total_tokens = offsets_host[-1]
+
+    # Compute SFA swizzle output size and M_per_expert for workspace query
+    expert_M_h = []
+    sfa_out_bytes = 0
+    for e in range(num_experts):
+        M_e = offsets_host[e + 1] - offsets_host[e]
+        expert_M_h.append(M_e)
+        n_row_blocks_e = (M_e + 127) // 128 if M_e > 0 else 0
+        sfa_out_bytes += n_row_blocks_e * n_col_blocks * 512
+
+    # Pre-allocate device buffers
+    sfa_swizzle_out = torch.empty(max(sfa_out_bytes, 1), dtype=torch.uint8, device=device)
+    sfa_swizzle_meta = torch.empty(3 * num_experts * 4, dtype=torch.uint8, device=device)
+
+    meta_size = lib.cgemm_nvfp4_grouped_sm100_meta_size(ct.c_int(num_experts))
+    gemm_meta_buf = torch.empty(meta_size, dtype=torch.uint8, device=device)
+
+    M_arr = (ct.c_int * num_experts)(*expert_M_h)
+    ws_size = lib.cgemm_nvfp4_grouped_sm100_workspace_size(
+        M_arr, ct.c_int(N), ct.c_int(K), ct.c_int(num_experts),
+    )
+    workspace_buf = torch.empty(max(ws_size, 1), dtype=torch.uint8, device=device)
+
+    # Pre-build host offsets ctypes array
+    host_offsets_arr = (ct.c_int * (num_experts + 1))(*offsets_host)
+
+    buf = {
+        "key": cache_key,
+        "total_tokens": total_tokens,
+        "sfa_swizzle_out": sfa_swizzle_out,
+        "sfa_swizzle_meta": sfa_swizzle_meta,
+        "gemm_meta_buf": gemm_meta_buf,
+        "workspace_buf": workspace_buf,
+        "ws_size": ws_size,
+        "host_offsets_arr": host_offsets_arr,
+    }
+    _grouped_fused_cache = buf
+    return buf
+
+
+def _gemm_nvfp4_grouped_sm100(
+    A_concat: torch.Tensor,
+    B_all: torch.Tensor,
+    SFA_rowmajor: torch.Tensor,
+    SFB_all: torch.Tensor,
+    offsets_host: tuple[int, ...],
+    A_tensor_scale: float,
+    B_tensor_scale: float,
+    N: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    """SM_100 grouped NVFP4 GEMM using fused C dispatch.
+
+    Single ctypes call handles SFA swizzle + CUTLASS grouped GEMM.
+    All metadata computation and pointer building happens in C.
+    Python only allocates output and passes pre-cached buffers.
+
+    offsets_host: host-side tuple of cumulative token offsets (num_experts + 1 ints).
+    """
+    device = A_concat.device
+
+    # Get or build cached buffers
+    buf = _get_fused_buffers(offsets_host, N, K, num_experts, device)
+
+    # SFB: per-expert swizzle (cached by weight data_ptr)
+    SFB_per_expert = _prepare_per_expert_sfb(SFB_all, N, K, num_experts)
+
+    # Output
+    D_concat = torch.empty(buf["total_tokens"], N, dtype=torch.bfloat16, device=device)
+
+    # Single fused C call: SFA swizzle + metadata build + GEMM launch
+    lib.cgemm_nvfp4_grouped_sm100_fused(
+        get_ptr(A_concat),
+        get_ptr(B_all),
+        get_ptr(SFA_rowmajor),
+        get_ptr(SFB_per_expert),
+        get_ptr(D_concat),
+        buf["host_offsets_arr"],
+        ct.c_int(N),
+        ct.c_int(K),
+        ct.c_int(num_experts),
+        ct.c_float(A_tensor_scale * B_tensor_scale),
+        get_ptr(buf["sfa_swizzle_out"]),
+        get_ptr(buf["sfa_swizzle_meta"]),
+        get_ptr(buf["gemm_meta_buf"]),
+        get_ptr(buf["workspace_buf"]),
+        ct.c_size_t(buf["ws_size"]),
+        _get_tensor_stream(A_concat),
+    )
+
+    return D_concat.float()
+
+
 @register_kernel("bitsandbytes::gemm_nvfp4_grouped", "cuda")
 def _(
     A_concat: torch.Tensor,
     B_all: torch.Tensor,
-    SFA_concat: torch.Tensor,
+    SFA_rowmajor: torch.Tensor,
     SFB_all: torch.Tensor,
     expert_offsets: torch.Tensor,
     cumul_m_tiles: torch.Tensor,
@@ -1131,10 +1348,28 @@ def _(
     K: int,
     num_experts: int,
 ) -> torch.Tensor:
-    """Grouped NVFP4 GEMM for MoE: fuse all expert GEMMs into one launch."""
-    total_tokens = A_concat.numel() // (K // 2)
+    """Grouped NVFP4 GEMM for MoE: fuse all expert GEMMs into one launch.
 
-    # Kernel tile dimensions: BLOCK_M_DIM=32, BLOCK_N_DIM=128
+    SFA_rowmajor: row-major activation scales (NOT swizzled).
+    SFB_all: globally-swizzled weight scales (SM_100 converts to per-expert internally).
+    """
+    # SM_100 (datacenter Blackwell): use CUTLASS grouped GEMM
+    major, _ = torch.cuda.get_device_capability(A_concat.device)
+    if major == 10 and hasattr(lib, "cgemm_nvfp4_grouped_cutlass_sm100"):
+        # Convert device offsets to host tuple (cheap for small arrays,
+        # but callers should migrate to passing host offsets directly)
+        offsets_host = tuple(expert_offsets.tolist())
+        return _gemm_nvfp4_grouped_sm100(
+            A_concat, B_all, SFA_rowmajor, SFB_all, offsets_host,
+            A_tensor_scale, B_tensor_scale, N, K, num_experts,
+        )
+
+    # SM_120 (consumer Blackwell): use hand-written grouped kernel
+    # SM_120 expects globally-swizzled SFA, so swizzle the row-major input
+    total_tokens = A_concat.numel() // (K // 2)
+    scale_W = K // 16
+    SFA_blocked = torch.ops.bitsandbytes.scale_to_blocked(SFA_rowmajor, total_tokens, scale_W)
+
     num_n_tiles = (N + 127) // 128
 
     with _cuda_device_of(A_concat):
@@ -1142,7 +1377,7 @@ def _(
         total_tiles = cumul_m_tiles[-1].item() * num_n_tiles
 
         _gemm_nvfp4_grouped_raw(
-            A_concat, B_all, SFA_concat, SFB_all, D_concat,
+            A_concat, B_all, SFA_blocked, SFB_all, D_concat,
             expert_offsets, cumul_m_tiles, N, K, num_experts, total_tiles,
         )
 
