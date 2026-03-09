@@ -1363,7 +1363,12 @@ def _batched_moe_sm100_init_if_needed(
     global _moe_batched_sm100_cache
     _ensure_moe_batched_restype()
 
-    cache_key = (N, K, max_M, num_experts)
+    cache_key = (
+        N, K, max_M, num_experts,
+        A_batched.data_ptr(), B_all.data_ptr(),
+        SFA_batched.data_ptr(), SFB_all.data_ptr(),
+        D_out.data_ptr(), alpha.data_ptr(),
+    )
 
     if (_moe_batched_sm100_cache is not None
             and _moe_batched_sm100_cache["key"] == cache_key):
