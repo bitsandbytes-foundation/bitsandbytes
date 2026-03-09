@@ -51,6 +51,19 @@ def _make_expert_offsets(tokens_per_expert):
     return torch.tensor(offsets, dtype=torch.int32, device="cuda")
 
 
+def _make_moe_layer(num_experts, input_features, output_features, bias=False):
+    """Create a LinearNVFP4MoE layer with random weight initialization.
+
+    torch.empty() on a fresh GPU returns zeroed memory, so we must
+    explicitly initialize weights to non-zero values for meaningful tests.
+    """
+    from bitsandbytes.nn.modules import LinearNVFP4MoE
+
+    layer = LinearNVFP4MoE(num_experts, input_features, output_features, bias=bias)
+    torch.nn.init.normal_(layer.weight.data, std=0.02)
+    return layer.cuda()
+
+
 class TestBuildVerification:
     """Verify that SM_100 CUTLASS kernels are compiled and loadable."""
 
@@ -250,16 +263,13 @@ class TestFullPipeline:
 
     def test_pipeline_output_shape(self, small_moe_config):
         """Full pipeline should produce correct output shape."""
-        from bitsandbytes.nn.modules import LinearNVFP4MoE
-
         K = small_moe_config["input_features"]
         N = small_moe_config["output_features"]
         num_experts = small_moe_config["num_experts"]
         tpe = small_moe_config["tokens_per_expert"]
         total_tokens = sum(tpe)
 
-        layer = LinearNVFP4MoE(num_experts, K, N, bias=False)
-        layer = layer.cuda()
+        layer = _make_moe_layer(num_experts, K, N, bias=False)
 
         x = torch.randn(total_tokens, K, dtype=torch.bfloat16, device="cuda")
         expert_offsets = _make_expert_offsets(tpe)
@@ -272,16 +282,13 @@ class TestFullPipeline:
 
     def test_pipeline_with_bias(self, small_moe_config):
         """Full pipeline with bias should produce correct output shape."""
-        from bitsandbytes.nn.modules import LinearNVFP4MoE
-
         K = small_moe_config["input_features"]
         N = small_moe_config["output_features"]
         num_experts = small_moe_config["num_experts"]
         tpe = small_moe_config["tokens_per_expert"]
         total_tokens = sum(tpe)
 
-        layer = LinearNVFP4MoE(num_experts, K, N, bias=True)
-        layer = layer.cuda()
+        layer = _make_moe_layer(num_experts, K, N, bias=True)
 
         x = torch.randn(total_tokens, K, dtype=torch.bfloat16, device="cuda")
         expert_offsets = _make_expert_offsets(tpe)
@@ -297,7 +304,6 @@ class TestFullPipeline:
             quantize_nvfp4_raw, moe_scatter_nvfp4, scale_to_blocked_batched,
             gemm_nvfp4_moe, moe_gather_bf16,
         )
-        from bitsandbytes.nn.modules import LinearNVFP4MoE
 
         K = small_moe_config["input_features"]
         N = small_moe_config["output_features"]
@@ -305,8 +311,7 @@ class TestFullPipeline:
         tpe = small_moe_config["tokens_per_expert"]
         total_tokens = sum(tpe)
 
-        layer = LinearNVFP4MoE(num_experts, K, N, bias=False)
-        layer = layer.cuda()
+        layer = _make_moe_layer(num_experts, K, N, bias=False)
 
         x = torch.randn(total_tokens, K, dtype=torch.bfloat16, device="cuda")
         expert_offsets = _make_expert_offsets(tpe)
@@ -383,18 +388,19 @@ class TestFullPipeline:
         assert nan_D == 0, \
             f"GEMM output has {nan_D}/{D.numel()} NaN elements"
 
+        # Verify output is non-zero (weights should be non-zero after init)
+        assert D.abs().max().item() > 0, \
+            f"GEMM output is all zeros despite non-zero weights"
+
     def test_pipeline_deterministic(self, small_moe_config):
         """Same input should produce approximately same output."""
-        from bitsandbytes.nn.modules import LinearNVFP4MoE
-
         K = small_moe_config["input_features"]
         N = small_moe_config["output_features"]
         num_experts = small_moe_config["num_experts"]
         tpe = small_moe_config["tokens_per_expert"]
         total_tokens = sum(tpe)
 
-        layer = LinearNVFP4MoE(num_experts, K, N, bias=False)
-        layer = layer.cuda()
+        layer = _make_moe_layer(num_experts, K, N, bias=False)
 
         x = torch.randn(total_tokens, K, dtype=torch.bfloat16, device="cuda")
         expert_offsets = _make_expert_offsets(tpe)
@@ -420,7 +426,6 @@ class TestFullPipeline:
     def test_pipeline_larger_config(self, moe_config):
         """Test with a larger, more realistic MoE configuration."""
         import ctypes as ct
-        from bitsandbytes.nn.modules import LinearNVFP4MoE
         from bitsandbytes.cextension import lib
 
         K = moe_config["input_features"]
@@ -441,8 +446,7 @@ class TestFullPipeline:
         print(f"\n  SFB sizes: batched={sfb_batched}, concat={sfb_concat}, "
               f"per_expert={sfb_per_expert}, match={sfb_batched == sfb_concat}")
 
-        layer = LinearNVFP4MoE(num_experts, K, N, bias=False)
-        layer = layer.cuda()
+        layer = _make_moe_layer(num_experts, K, N, bias=False)
 
         x = torch.randn(total_tokens, K, dtype=torch.bfloat16, device="cuda")
         expert_offsets = _make_expert_offsets(tpe)
@@ -522,8 +526,7 @@ class TestKernelLaunchCount:
         tpe = small_moe_config["tokens_per_expert"]
         total_tokens = sum(tpe)
 
-        layer = LinearNVFP4MoE(num_experts, K, N, bias=False)
-        layer = layer.cuda()
+        layer = _make_moe_layer(num_experts, K, N, bias=False)
 
         x = torch.randn(total_tokens, K, dtype=torch.bfloat16, device="cuda")
         expert_offsets = _make_expert_offsets(tpe)
