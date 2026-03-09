@@ -300,7 +300,6 @@ if(BUILD_CUDA)
         if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8" AND EXISTS "${CMAKE_SOURCE_DIR}/third_party/cutlass/include")
             set(_NVFP4_SM100_SOURCES
                 csrc/qutlass/gemm_nvfp4_sm100.cu
-                csrc/qutlass/gemm_nvfp4_grouped_sm100.cu
                 csrc/qutlass/gemm_nvfp4_moe_sm100.cu
             )
 
