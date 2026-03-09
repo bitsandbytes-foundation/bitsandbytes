@@ -343,6 +343,7 @@ if(BUILD_CUDA)
         add_library(nvfp4_common OBJECT
             csrc/qutlass/scale_reorder.cu
             csrc/qutlass/fused_quantize_nv.cu
+            csrc/qutlass/moe_scatter_gather.cu
         )
         set_target_properties(nvfp4_common PROPERTIES
             CUDA_ARCHITECTURES "${_NVFP4_COMMON_ARCHS}"

@@ -540,6 +540,44 @@ def _(blocked_scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
     return torch.empty(H * W, dtype=torch.uint8, device=blocked_scales.device)
 
 
+# MoE scatter: concatenated FP4 → padded per-expert batched FP4
+torch.library.define(
+    "bitsandbytes::moe_scatter_nvfp4",
+    "(Tensor packed_concat, Tensor expert_offsets, int max_M, int K, int num_experts) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::moe_scatter_nvfp4")
+def _(
+    packed_concat: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    max_M: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    row_bytes = K // 2
+    return torch.empty(num_experts * max_M * row_bytes, dtype=torch.uint8, device=packed_concat.device)
+
+
+# MoE gather: padded per-expert BF16 → concatenated BF16
+torch.library.define(
+    "bitsandbytes::moe_gather_bf16",
+    "(Tensor D_batched, Tensor expert_offsets, int max_M, int N, int num_experts, int total_tokens) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::moe_gather_bf16")
+def _(
+    D_batched: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    max_M: int,
+    N: int,
+    num_experts: int,
+    total_tokens: int,
+) -> torch.Tensor:
+    return torch.empty(total_tokens * N, dtype=torch.bfloat16, device=D_batched.device)
+
+
 # NVFP4 GEMM (A @ B^T with block-scaled FP4 inputs)
 torch.library.define(
     "bitsandbytes::gemm_nvfp4",

@@ -1280,6 +1280,56 @@ def scale_to_blocked_batched(
     )
 
 
+def moe_scatter_nvfp4(
+    packed_concat: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    max_M: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    """Scatter concatenated FP4 data to padded per-expert batched layout.
+
+    Args:
+        packed_concat: Packed FP4 data [total_tokens * K/2] (uint8).
+        expert_offsets: Cumulative token offsets [num_experts + 1] (int32, device).
+        max_M: Padded max tokens per expert (128-aligned).
+        K: Hidden dimension.
+        num_experts: Number of experts.
+
+    Returns:
+        Padded batched FP4 data [num_experts * max_M * K/2] (uint8, zero-padded).
+    """
+    return torch.ops.bitsandbytes.moe_scatter_nvfp4(
+        packed_concat, expert_offsets, max_M, K, num_experts,
+    )
+
+
+def moe_gather_bf16(
+    D_batched: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    max_M: int,
+    N: int,
+    num_experts: int,
+    total_tokens: int,
+) -> torch.Tensor:
+    """Gather BF16 results from padded per-expert layout to concatenated.
+
+    Args:
+        D_batched: Batched BF16 output [num_experts * max_M * N] (bf16).
+        expert_offsets: Cumulative token offsets [num_experts + 1] (int32, device).
+        max_M: Padded max tokens per expert.
+        N: Output dimension.
+        num_experts: Number of experts.
+        total_tokens: Total tokens across all experts.
+
+    Returns:
+        Concatenated BF16 output [total_tokens * N].
+    """
+    return torch.ops.bitsandbytes.moe_gather_bf16(
+        D_batched, expert_offsets, max_M, N, num_experts, total_tokens,
+    )
+
+
 def dequantize_nvfp4(
     packed_data: torch.Tensor,
     quant_state: NVFP4QuantState,

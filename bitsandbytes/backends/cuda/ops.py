@@ -1055,6 +1055,58 @@ def _(
     return out
 
 
+@register_kernel("bitsandbytes::moe_scatter_nvfp4", "cuda")
+def _(
+    packed_concat: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    max_M: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    """Scatter concatenated FP4 data to padded per-expert batched layout."""
+    row_bytes = K // 2
+    out = torch.empty(
+        num_experts * max_M * row_bytes, dtype=torch.uint8, device=packed_concat.device,
+    )
+    with _cuda_device_of(packed_concat):
+        lib.cmoe_scatter_nvfp4(
+            get_ptr(packed_concat),
+            get_ptr(out),
+            get_ptr(expert_offsets),
+            ct.c_int(max_M),
+            ct.c_int(K),
+            ct.c_int(num_experts),
+            _get_tensor_stream(packed_concat),
+        )
+    return out
+
+
+@register_kernel("bitsandbytes::moe_gather_bf16", "cuda")
+def _(
+    D_batched: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    max_M: int,
+    N: int,
+    num_experts: int,
+    total_tokens: int,
+) -> torch.Tensor:
+    """Gather BF16 results from padded per-expert layout to concatenated output."""
+    out = torch.empty(
+        total_tokens * N, dtype=torch.bfloat16, device=D_batched.device,
+    )
+    with _cuda_device_of(D_batched):
+        lib.cmoe_gather_bf16(
+            get_ptr(D_batched),
+            get_ptr(out),
+            get_ptr(expert_offsets),
+            ct.c_int(max_M),
+            ct.c_int(N),
+            ct.c_int(num_experts),
+            _get_tensor_stream(D_batched),
+        )
+    return out
+
+
 # Hand-written NVFP4 GEMM (SM_120+)
 #
 # Uses mma.sync.aligned.block_scale instructions for small-M decode.
