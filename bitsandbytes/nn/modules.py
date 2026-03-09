@@ -910,10 +910,21 @@ class LinearNVFP4MoE(nn.Module):
     def _forward_batched(self, x: torch.Tensor, expert_offsets: torch.Tensor) -> torch.Tensor:
         """Batched GEMM path (SM_100 datacenter Blackwell).
 
-        Scatters tokens into padded (num_experts, max_M, K) layout, quantizes
-        per-expert, runs a single batched GEMM kernel, then gathers results.
+        6-kernel pipeline with zero .item() in the compute path:
+          1. abs().max()  — PyTorch reduction, stays on GPU
+          2. quantize_nvfp4_raw  — quantize all tokens in one launch
+          3. moe_scatter_nvfp4  — FP4 concat → padded per-expert
+          4. scale_to_blocked_batched  — row-major → swizzled per-expert
+          5. gemm_nvfp4_moe  — batched GEMM with device-side alpha
+          6. moe_gather_bf16  — padded per-expert → concat
         """
-        from bitsandbytes.functional import gemm_nvfp4_moe, quantize_nvfp4
+        from bitsandbytes.functional import (
+            gemm_nvfp4_moe,
+            moe_gather_bf16,
+            moe_scatter_nvfp4,
+            quantize_nvfp4_raw,
+            scale_to_blocked_batched,
+        )
 
         inp_dtype = x.dtype
         N, K = self.output_features, self.input_features
@@ -921,55 +932,44 @@ class LinearNVFP4MoE(nn.Module):
 
         expert_offsets_i32 = expert_offsets.to(torch.int32)
         tokens_per_expert = expert_offsets_i32[1:] - expert_offsets_i32[:-1]
+        # .item() for shape computation — needed for tensor allocation
         raw_max_M = tokens_per_expert.max().item()
-        # Pad to multiple of 128 for CUTLASS tile efficiency
         max_M = ((raw_max_M + 127) // 128) * 128
+        total_tokens = expert_offsets_i32[-1].item()
 
         x_2d = x.reshape(-1, K).to(torch.bfloat16).contiguous()
 
-        # Shared tensor scale across all experts (matches grouped GEMM behavior)
-        act_tensor_scale = x_2d.abs().max().item()
+        # 1. Compute tensor scale on GPU (no .item(), stays as device tensor)
+        act_tensor_scale_dev = x_2d.abs().max()
+        global_scale_dev = (1.0 / act_tensor_scale_dev).to(torch.float32)
 
-        # Quantize per-expert with shared tensor scale
-        all_act_packed = []
-        all_act_scales = []
+        # 2. Quantize ALL concatenated tokens in one launch
+        packed_all, scales_all = quantize_nvfp4_raw(x_2d, global_scale_dev)
 
-        for i in range(num_experts):
-            start = expert_offsets_i32[i].item()
-            end = expert_offsets_i32[i + 1].item()
-            n_tok = end - start
-
-            act_padded = torch.zeros(max_M, K, dtype=torch.bfloat16, device=x.device)
-            if n_tok > 0:
-                act_padded[:n_tok] = x_2d[start:end]
-
-            act_packed, act_state = quantize_nvfp4(act_padded, tensor_scale=act_tensor_scale)
-            all_act_packed.append(act_packed)
-            all_act_scales.append(act_state.block_scales_blocked)
-
-        A_batched = torch.cat(all_act_packed)
-        SFA_batched = torch.cat(all_act_scales)
-
-        # Run batched GEMM (alpha is a device tensor for graph safety)
-        alpha_dev = torch.tensor(
-            [act_tensor_scale * self.weight_tensor_scale],
-            dtype=torch.float32, device=x.device,
+        # 3. Scatter: FP4 data from concatenated to padded per-expert layout
+        packed_batched = moe_scatter_nvfp4(
+            packed_all, expert_offsets_i32, max_M, K, num_experts,
         )
+
+        # 4. Swizzle scales: row-major → per-expert batched CUTLASS layout
+        sfa_batched = scale_to_blocked_batched(
+            scales_all, expert_offsets_i32, max_M, K, num_experts,
+        )
+
+        # 5. Batched GEMM with device-side alpha (no .item() sync)
+        alpha_dev = (act_tensor_scale_dev * self.weight_tensor_scale).to(torch.float32)
         D = gemm_nvfp4_moe(
-            A_batched, SFA_batched, alpha_dev,
+            packed_batched, sfa_batched, alpha_dev,
             self.weight_packed, self.weight_scales_batched,
             max_M, N, K, num_experts,
         )
 
-        # Gather results: D is (num_experts, max_M, N)
-        total_tokens = expert_offsets_i32[-1].item()
-        out = torch.empty(total_tokens, N, dtype=torch.bfloat16, device=x.device)
-        for i in range(num_experts):
-            start = expert_offsets_i32[i].item()
-            end = expert_offsets_i32[i + 1].item()
-            n_tok = end - start
-            if n_tok > 0:
-                out[start:end] = D[i, :n_tok]
+        # 6. Gather: padded per-expert BF16 → concatenated output
+        D_flat = D.view(-1).contiguous()
+        out = moe_gather_bf16(
+            D_flat, expert_offsets_i32, max_M, N, num_experts, total_tokens,
+        )
+        out = out.view(total_tokens, N)
 
         if self.bias is not None:
             for i in range(num_experts):
