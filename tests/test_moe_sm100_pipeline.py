@@ -296,6 +296,7 @@ class TestFullPipeline:
 
         Note: CUTLASS SM_100 block-scaled GEMM may have non-deterministic
         accumulation order across tiles, so we use approximate comparison.
+        NaN in output indicates a GEMM state issue (tracked separately).
         """
         from bitsandbytes.nn.modules import LinearNVFP4MoE
 
@@ -312,7 +313,13 @@ class TestFullPipeline:
         expert_offsets = _make_expert_offsets(tpe)
 
         out1 = layer(x, expert_offsets)
+        has_nan1 = torch.isnan(out1).any().item()
+        assert not has_nan1, f"First call produced NaN (abs_max={out1.abs().max().item()})"
+
         out2 = layer(x, expert_offsets)
+        has_nan2 = torch.isnan(out2).any().item()
+        assert not has_nan2, \
+            f"Second call produced NaN (first call abs_max={out1.abs().max().item()})"
 
         # Allow small numerical differences from non-deterministic accumulation
         if not torch.equal(out1, out2):
@@ -348,14 +355,17 @@ class TestFullPipeline:
         layer = LinearNVFP4MoE(num_experts, K, N, bias=False)
         layer = layer.cuda()
 
-        # Diagnostic: check weight_scales_batched size
-        actual_sfb = layer.weight_scales_batched.numel()
-        print(f"  weight_scales_batched size: {actual_sfb} bytes, expected batched: {sfb_batched}")
-
         x = torch.randn(total_tokens, K, dtype=torch.bfloat16, device="cuda")
         expert_offsets = _make_expert_offsets(tpe)
 
         out = layer(x, expert_offsets)
+
+        # Diagnostic: check weight_scales_batched size (after forward triggers quantization)
+        if layer.weight_scales_batched is not None:
+            actual_sfb = layer.weight_scales_batched.numel()
+            print(f"  weight_scales_batched size: {actual_sfb} bytes, expected batched: {sfb_batched}")
+        else:
+            print("  WARNING: weight_scales_batched is None after forward")
 
         assert out.shape == (total_tokens, N)
         assert out.dtype == torch.bfloat16
