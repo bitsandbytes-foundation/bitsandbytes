@@ -280,7 +280,7 @@ extern "C" int cgemm_nvfp4_moe_sm100_init(
 
     // Initialize the persistent Gemm object: triggers cudaFuncSetAttribute
     // (one-time, not graph-safe) and fills internal params_ with dummy pointers.
-    status = st.gemm.initialize(arguments, st.workspace_dev, stream);
+    status = st.gemm.initialize(arguments, st.workspace_dev, nullptr);
     if (status != cutlass::Status::kSuccess) {
         fprintf(stderr, "MoE GEMM initial initialize failed: %d\n", (int)status);
         return -2;
