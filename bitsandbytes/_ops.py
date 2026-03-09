@@ -672,3 +672,30 @@ def _(
     torch._check_is_size(K)
     torch._check_is_size(num_experts)
     return torch.empty(num_experts, max_M, N, dtype=torch.bfloat16, device=A_batched.device)
+
+
+# MoE weighted gather: fused gather + scale by gating weight + FP32 accumulate + BF16 convert.
+# Two-phase: atomicAdd into FP32 workspace, then convert to BF16.
+# workspace_fp32 is a caller-managed scratch buffer (persistent for CUDA graphs).
+torch.library.define(
+    "bitsandbytes::moe_weighted_gather_bf16",
+    "(Tensor D_batched, Tensor output_bf16, Tensor workspace_fp32, "
+    "Tensor token_ids, Tensor expert_ids, Tensor slot_ids, Tensor weights, "
+    "int num_tokens, int max_M, int N) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::moe_weighted_gather_bf16")
+def _(
+    D_batched: torch.Tensor,
+    output_bf16: torch.Tensor,
+    workspace_fp32: torch.Tensor,
+    token_ids: torch.Tensor,
+    expert_ids: torch.Tensor,
+    slot_ids: torch.Tensor,
+    weights: torch.Tensor,
+    num_tokens: int,
+    max_M: int,
+    N: int,
+) -> torch.Tensor:
+    return output_bf16

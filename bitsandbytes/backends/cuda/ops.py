@@ -1330,7 +1330,7 @@ def _(
 
 # Cached state for batched SM_100 MoE GEMM
 _moe_batched_restype_set = False
-_moe_batched_cache: Optional[dict] = None
+_moe_batched_sm100_cache: Optional[dict] = None
 
 
 def _ensure_moe_batched_restype():
@@ -1346,6 +1346,77 @@ def _ensure_moe_batched_restype():
         _moe_batched_restype_set = True
 
 
+def _batched_moe_sm100_init_if_needed(
+    A_batched: torch.Tensor,
+    B_all: torch.Tensor,
+    SFA_batched: torch.Tensor,
+    SFB_all: torch.Tensor,
+    D_out: torch.Tensor,
+    alpha: torch.Tensor,
+    max_M: int,
+    N: int,
+    K: int,
+    num_experts: int,
+    stream: int,
+) -> None:
+    """Call cgemm_nvfp4_moe_sm100_init if the configuration changed, else skip."""
+    global _moe_batched_sm100_cache
+    _ensure_moe_batched_restype()
+
+    cache_key = (N, K, max_M, num_experts)
+
+    if (_moe_batched_sm100_cache is not None
+            and _moe_batched_sm100_cache["key"] == cache_key):
+        return
+
+    ws_size = lib.cgemm_nvfp4_moe_sm100_workspace_size(
+        ct.c_int(N), ct.c_int(max_M), ct.c_int(K), ct.c_int(num_experts),
+    )
+    workspace = torch.empty(max(ws_size, 1), dtype=torch.uint8, device=A_batched.device)
+
+    ret = lib.cgemm_nvfp4_moe_sm100_init(
+        ct.c_int(N), ct.c_int(max_M), ct.c_int(K), ct.c_int(num_experts),
+        get_ptr(A_batched), get_ptr(B_all),
+        get_ptr(SFA_batched), get_ptr(SFB_all),
+        get_ptr(D_out), get_ptr(alpha),
+        get_ptr(workspace), ct.c_size_t(ws_size), stream,
+    )
+    if ret != 0:
+        raise RuntimeError(f"cgemm_nvfp4_moe_sm100_init failed with code {ret}")
+
+    _moe_batched_sm100_cache = {
+        "key": cache_key,
+        "workspace": workspace,  # prevent GC
+    }
+
+
+def _gemm_nvfp4_batched_moe_sm100_raw(
+    A_batched: torch.Tensor,
+    B_all: torch.Tensor,
+    SFA_batched: torch.Tensor,
+    SFB_all: torch.Tensor,
+    D_out: torch.Tensor,
+    alpha: torch.Tensor,
+    max_M: int,
+    N: int,
+    K: int,
+    num_experts: int,
+) -> None:
+    """Raw batched MoE NVFP4 GEMM — init-if-needed then run.
+
+    All buffers must be pre-allocated. D_out must be BF16 of shape (num_experts * max_M, N).
+    alpha must be a float32 device tensor of shape (1,) containing A_scale * B_scale.
+    """
+    stream = _get_tensor_stream(A_batched)
+    _batched_moe_sm100_init_if_needed(
+        A_batched, B_all, SFA_batched, SFB_all, D_out, alpha,
+        max_M, N, K, num_experts, stream,
+    )
+    ret = lib.cgemm_nvfp4_moe_sm100_run(stream)
+    if ret != 0:
+        raise RuntimeError(f"cgemm_nvfp4_moe_sm100_run failed with code {ret}")
+
+
 @register_kernel("bitsandbytes::gemm_nvfp4_moe", "cuda")
 def _(
     A_batched: torch.Tensor,
@@ -1358,38 +1429,47 @@ def _(
     K: int,
     num_experts: int,
 ) -> torch.Tensor:
-    global _moe_batched_cache
-    _ensure_moe_batched_restype()
-
-    key = (max_M, N, K, num_experts)
-    if _moe_batched_cache is None or _moe_batched_cache["key"] != key:
-        ws_size = lib.cgemm_nvfp4_moe_sm100_workspace_size(
-            ct.c_int(N), ct.c_int(max_M), ct.c_int(K), ct.c_int(num_experts),
+    with _cuda_device_of(A_batched):
+        D_out = torch.empty(num_experts * max_M, N, dtype=torch.bfloat16, device=A_batched.device)
+        _gemm_nvfp4_batched_moe_sm100_raw(
+            A_batched, B_batched, SFA, SFB, D_out, alpha,
+            max_M, N, K, num_experts,
         )
-        workspace = torch.empty(max(ws_size, 1), dtype=torch.uint8, device=A_batched.device)
-
-        ret = lib.cgemm_nvfp4_moe_sm100_init(
-            ct.c_int(N), ct.c_int(max_M), ct.c_int(K), ct.c_int(num_experts),
-            get_ptr(workspace), ct.c_size_t(ws_size),
-        )
-        if ret != 0:
-            raise RuntimeError(f"cgemm_nvfp4_moe_sm100_init failed: {ret}")
-
-        _moe_batched_cache = {"key": key, "workspace": workspace}
-
-    # Ensure alpha is a float32 device tensor
-    alpha_dev = alpha.to(dtype=torch.float32, device=A_batched.device).contiguous()
-
-    D_out = torch.empty(num_experts * max_M * N, dtype=torch.bfloat16, device=A_batched.device)
-
-    ret = lib.cgemm_nvfp4_moe_sm100_run(
-        get_ptr(A_batched), get_ptr(B_batched),
-        get_ptr(SFA), get_ptr(SFB),
-        get_ptr(D_out),
-        get_ptr(alpha_dev),
-        _get_tensor_stream(A_batched),
-    )
-    if ret != 0:
-        raise RuntimeError(f"cgemm_nvfp4_moe_sm100_run failed: {ret}")
-
     return D_out.view(num_experts, max_M, N)
+
+
+@register_kernel("bitsandbytes::moe_weighted_gather_bf16", "cuda")
+def _(
+    D_batched: torch.Tensor,
+    output_bf16: torch.Tensor,
+    workspace_fp32: torch.Tensor,
+    token_ids: torch.Tensor,
+    expert_ids: torch.Tensor,
+    slot_ids: torch.Tensor,
+    weights: torch.Tensor,
+    num_tokens: int,
+    max_M: int,
+    N: int,
+) -> torch.Tensor:
+    """Fused gather + weight + FP32 accumulate + BF16 convert.
+
+    Internally launches: memset(workspace) -> atomicAdd gather -> FP32->BF16 convert.
+    All three operations on the same stream, capturable in a CUDA graph.
+    """
+    total_assignments = token_ids.shape[0]
+    with _cuda_device_of(D_batched):
+        lib.cmoe_weighted_gather_bf16(
+            get_ptr(D_batched),
+            get_ptr(output_bf16),
+            get_ptr(workspace_fp32),
+            get_ptr(token_ids),
+            get_ptr(expert_ids),
+            get_ptr(slot_ids),
+            get_ptr(weights),
+            ct.c_int(total_assignments),
+            ct.c_int(num_tokens),
+            ct.c_int(max_M),
+            ct.c_int(N),
+            _get_tensor_stream(D_batched),
+        )
+    return output_bf16
