@@ -910,18 +910,25 @@ class LinearNVFP4MoE(nn.Module):
     def _forward_batched(self, x: torch.Tensor, expert_offsets: torch.Tensor) -> torch.Tensor:
         """Batched GEMM path (SM_100 datacenter Blackwell).
 
-        6-kernel pipeline with zero .item() in the compute path:
-          1. abs().max()  — PyTorch reduction, stays on GPU
-          2. quantize_nvfp4_raw  — quantize all tokens in one launch
-          3. moe_scatter_nvfp4  — FP4 concat → padded per-expert
-          4. scale_to_blocked_batched  — row-major → swizzled per-expert
-          5. gemm_nvfp4_moe  — batched GEMM with device-side alpha
-          6. moe_gather_bf16  — padded per-expert → concat
+        Pipeline with init/run split for CUDA graph compatibility:
+          1. abs().max()            — compute tensor scale (device-side)
+          2. quantize_nvfp4_raw     — quantize all tokens in one launch
+          3. cmoe_scatter_nvfp4     — FP4 data → persistent padded buffer
+          4. scale_to_blocked_batched — scales → persistent swizzled buffer
+          5. batched GEMM run()     — init-if-needed, then just run(stream)
+          6. moe_gather_bf16        — padded per-expert → concatenated output
+
+        All persistent buffers (A, SFA, D, alpha) are cached in the module
+        so their addresses are stable for the CUTLASS init/run split.
         """
+        import ctypes as ct
+
+        from bitsandbytes.backends.cuda.ops import _gemm_nvfp4_batched_moe_sm100_raw
+        from bitsandbytes.cextension import lib
         from bitsandbytes.functional import (
-            gemm_nvfp4_moe,
+            _get_tensor_stream,
+            get_ptr,
             moe_gather_bf16,
-            moe_scatter_nvfp4,
             quantize_nvfp4_raw,
             scale_to_blocked_batched,
         )
@@ -946,28 +953,84 @@ class LinearNVFP4MoE(nn.Module):
         # 2. Quantize ALL concatenated tokens in one launch
         packed_all, scales_all = quantize_nvfp4_raw(x_2d, global_scale_dev)
 
-        # 3. Scatter: FP4 data from concatenated to padded per-expert layout
-        packed_batched = moe_scatter_nvfp4(
-            packed_all, expert_offsets_i32, max_M, K, num_experts,
+        # 3. Ensure persistent cached buffers exist (stable pointers for init/run)
+        cache_key = (max_M, N, K, num_experts)
+        if not hasattr(self, "_batched_cache") or self._batched_cache.get("key") != cache_key:
+            dev = x.device
+            W = K // 16
+            n_col_blocks = (W + 3) // 4
+            n_row_blocks = (max_M + 127) // 128
+            sfa_per_expert = n_row_blocks * n_col_blocks * 512
+            sfa_total = num_experts * sfa_per_expert
+
+            self._batched_cache = {
+                "key": cache_key,
+                "A_batched": torch.empty(num_experts * max_M * (K // 2), dtype=torch.uint8, device=dev),
+                "SFA_batched": torch.zeros(sfa_total, dtype=torch.uint8, device=dev),
+                "D_out": torch.empty(num_experts * max_M, N, dtype=torch.bfloat16, device=dev),
+                "alpha_dev": torch.empty(1, dtype=torch.float32, device=dev),
+            }
+        cache = self._batched_cache
+
+        stream = _get_tensor_stream(x_2d)
+
+        # 4. Scatter FP4 data into persistent buffer
+        lib.cmoe_scatter_nvfp4(
+            get_ptr(packed_all),
+            get_ptr(cache["A_batched"]),
+            get_ptr(expert_offsets_i32),
+            ct.c_int(max_M),
+            ct.c_int(K),
+            ct.c_int(num_experts),
+            stream,
         )
 
-        # 4. Swizzle scales: row-major → per-expert batched CUTLASS layout
-        sfa_batched = scale_to_blocked_batched(
-            scales_all, expert_offsets_i32, max_M, K, num_experts,
+        # 5. Swizzle scales per-expert into persistent buffer
+        W = K // 16
+        n_col_blocks = (W + 3) // 4
+        n_row_blocks = (max_M + 127) // 128
+        sfa_per_expert = n_row_blocks * n_col_blocks * 512
+        sfa_total = num_experts * sfa_per_expert
+
+        expert_row_offsets = expert_offsets_i32[:-1]
+        expert_M_dev = tokens_per_expert.to(torch.int32)
+        expert_out_offsets = torch.arange(
+            num_experts, dtype=torch.int32, device=x.device,
+        ) * sfa_per_expert
+
+        # Zero persistent SFA buffer, then swizzle into it
+        cache["SFA_batched"].zero_()
+        lib.cscale_to_blocked_batched(
+            get_ptr(scales_all),
+            get_ptr(cache["SFA_batched"]),
+            get_ptr(expert_row_offsets),
+            get_ptr(expert_M_dev),
+            get_ptr(expert_out_offsets),
+            ct.c_int(W),
+            ct.c_int(num_experts),
+            ct.c_int(n_row_blocks),
+            stream,
         )
 
-        # 5. Batched GEMM with device-side alpha (no .item() sync)
-        alpha_dev = (act_tensor_scale_dev * self.weight_tensor_scale).to(torch.float32)
-        D = gemm_nvfp4_moe(
-            packed_batched, sfa_batched, alpha_dev,
-            self.weight_packed, self.weight_scales_batched,
+        # 6. Set alpha (device-side, no .item() sync)
+        cache["alpha_dev"].copy_(
+            (act_tensor_scale_dev * self.weight_tensor_scale).to(torch.float32).reshape(1)
+        )
+
+        # 7. Batched GEMM (init-if-needed, then just run(stream))
+        _gemm_nvfp4_batched_moe_sm100_raw(
+            cache["A_batched"],
+            self.weight_packed,
+            cache["SFA_batched"],
+            self.weight_scales_batched,
+            cache["D_out"],
+            cache["alpha_dev"],
             max_M, N, K, num_experts,
         )
 
-        # 6. Gather: padded per-expert BF16 → concatenated output
-        D_flat = D.view(-1).contiguous()
+        # 8. Gather: padded per-expert BF16 → concatenated output
         out = moe_gather_bf16(
-            D_flat, expert_offsets_i32, max_M, N, num_experts, total_tokens,
+            cache["D_out"].view(-1), expert_offsets_i32, max_M, N, num_experts, total_tokens,
         )
         out = out.view(total_tokens, N)
 
