@@ -1231,6 +1231,55 @@ def quantize_nvfp4_raw(
     return packed, block_scales
 
 
+def scale_to_blocked_batched(
+    scales_rowmajor: torch.Tensor,
+    expert_offsets: torch.Tensor,
+    max_M: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    """Swizzle concatenated row-major scales into per-expert CUTLASS layout.
+
+    Args:
+        scales_rowmajor: Concatenated row-major block scales [total_tokens * K/16] (uint8).
+        expert_offsets: Cumulative token offsets [num_experts + 1] (int32, device).
+        max_M: Max tokens per expert (padded to 128 alignment).
+        K: Hidden dimension.
+        num_experts: Number of experts.
+
+    Returns:
+        Contiguous buffer with per-expert swizzled scales for batched GEMM.
+    """
+    W = K // 16  # scale columns
+    n_col_blocks = (W + 3) // 4
+
+    # Compute per-expert metadata on device
+    tokens_per_expert = expert_offsets[1:] - expert_offsets[:-1]
+    # Scale rows = tokens * (K / 16) / W = tokens (each token has K/16 scale values)
+    # Actually: scales are [total_tokens, W] in row-major, so expert_row_offsets = expert_offsets * W / W = expert_offsets
+    # Wait — the quantize output is flat: total_tokens * (K/16) bytes.
+    # For scale_to_blocked_batched, input is [total_rows, W] where total_rows = total_tokens
+    # expert_row_offsets[i] = expert_offsets[i] (token offset IS the row offset)
+    expert_row_offsets = expert_offsets[:-1].to(torch.int32)
+    expert_M_dev = tokens_per_expert.to(torch.int32)
+
+    # Output offsets: each expert gets n_row_blocks_e * n_col_blocks * 512 bytes
+    # For uniform max_M: all experts get the same size
+    n_row_blocks_per = (max_M + 127) // 128
+    per_expert_bytes = n_row_blocks_per * n_col_blocks * 512
+    expert_out_offsets = torch.arange(
+        num_experts, dtype=torch.int32, device=scales_rowmajor.device,
+    ) * per_expert_bytes
+
+    max_row_blocks = n_row_blocks_per
+    total_out_bytes = num_experts * per_expert_bytes
+
+    return torch.ops.bitsandbytes.scale_to_blocked_batched(
+        scales_rowmajor, expert_row_offsets, expert_M_dev, expert_out_offsets,
+        W, num_experts, max_row_blocks, total_out_bytes,
+    )
+
+
 def dequantize_nvfp4(
     packed_data: torch.Tensor,
     quant_state: NVFP4QuantState,

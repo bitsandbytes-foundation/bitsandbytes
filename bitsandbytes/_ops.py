@@ -505,6 +505,29 @@ def _(scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
     return torch.empty(out_size, dtype=torch.uint8, device=scales.device)
 
 
+# Batched scale reordering for MoE: row-major → per-expert swizzled
+torch.library.define(
+    "bitsandbytes::scale_to_blocked_batched",
+    "(Tensor scales_rowmajor, Tensor expert_row_offsets, Tensor expert_M, "
+    "Tensor expert_out_offsets, int W, int num_experts, int max_row_blocks, "
+    "int total_out_bytes) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::scale_to_blocked_batched")
+def _(
+    scales_rowmajor: torch.Tensor,
+    expert_row_offsets: torch.Tensor,
+    expert_M: torch.Tensor,
+    expert_out_offsets: torch.Tensor,
+    W: int,
+    num_experts: int,
+    max_row_blocks: int,
+    total_out_bytes: int,
+) -> torch.Tensor:
+    return torch.empty(total_out_bytes, dtype=torch.uint8, device=scales_rowmajor.device)
+
+
 # Inverse scale reordering: CUTLASS block-scaled layout → row-major
 torch.library.define(
     "bitsandbytes::scale_from_blocked",

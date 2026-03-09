@@ -1023,6 +1023,38 @@ def _(blocked_scales: torch.Tensor, H: int, W: int) -> torch.Tensor:
     return out
 
 
+@register_kernel("bitsandbytes::scale_to_blocked_batched", "cuda")
+def _(
+    scales_rowmajor: torch.Tensor,
+    expert_row_offsets: torch.Tensor,
+    expert_M: torch.Tensor,
+    expert_out_offsets: torch.Tensor,
+    W: int,
+    num_experts: int,
+    max_row_blocks: int,
+    total_out_bytes: int,
+) -> torch.Tensor:
+    """Batched scale swizzle: row-major → per-expert CUTLASS block-scaled layout.
+
+    Input: concatenated row-major scales from quantize_nvfp4_raw.
+    Output: contiguous buffer with independently swizzled per-expert blocks.
+    """
+    out = torch.zeros(total_out_bytes, dtype=torch.uint8, device=scales_rowmajor.device)
+    with _cuda_device_of(scales_rowmajor):
+        lib.cscale_to_blocked_batched(
+            get_ptr(scales_rowmajor),
+            get_ptr(out),
+            get_ptr(expert_row_offsets),
+            get_ptr(expert_M),
+            get_ptr(expert_out_offsets),
+            ct.c_int(W),
+            ct.c_int(num_experts),
+            ct.c_int(max_row_blocks),
+            _get_tensor_stream(scales_rowmajor),
+        )
+    return out
+
+
 # Hand-written NVFP4 GEMM (SM_120+)
 #
 # Uses mma.sync.aligned.block_scale instructions for small-M decode.
