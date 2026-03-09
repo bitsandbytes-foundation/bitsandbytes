@@ -651,7 +651,7 @@ def _(
 torch.library.define(
     "bitsandbytes::gemm_nvfp4_moe",
     "(Tensor A_batched, Tensor B_batched, Tensor SFA, Tensor SFB, "
-    "float alpha, int max_M, int N, int K, int num_experts) -> Tensor",
+    "Tensor alpha, int max_M, int N, int K, int num_experts) -> Tensor",
 )
 
 
@@ -661,7 +661,7 @@ def _(
     B_batched: torch.Tensor,
     SFA: torch.Tensor,
     SFB: torch.Tensor,
-    alpha: float,
+    alpha: torch.Tensor,
     max_M: int,
     N: int,
     K: int,

@@ -121,12 +121,14 @@ def bench_batched_nvfp4(lib, max_M, N, K, num_experts):
 
     lib.cgemm_nvfp4_moe_sm100_run.restype = ct.c_int
 
+    alpha_dev = torch.tensor([1.0], dtype=torch.float32, device=device)
+
     def run_kernel():
         lib.cgemm_nvfp4_moe_sm100_run(
             get_ptr(A_batched), get_ptr(B_batched),
             get_ptr(SFA), get_ptr(SFB),
             get_ptr(D_out),
-            ct.c_float(1.0), stream_ptr)
+            get_ptr(alpha_dev), stream_ptr)
 
     # Warmup
     for _ in range(WARMUP):

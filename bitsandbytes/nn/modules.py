@@ -950,10 +950,14 @@ class LinearNVFP4MoE(nn.Module):
         A_batched = torch.cat(all_act_packed)
         SFA_batched = torch.cat(all_act_scales)
 
-        # Run batched GEMM
+        # Run batched GEMM (alpha is a device tensor for graph safety)
+        alpha_dev = torch.tensor(
+            [act_tensor_scale * self.weight_tensor_scale],
+            dtype=torch.float32, device=x.device,
+        )
         D = gemm_nvfp4_moe(
-            A_batched, SFA_batched, act_tensor_scale,
-            self.weight_packed, self.weight_scales_batched, self.weight_tensor_scale,
+            A_batched, SFA_batched, alpha_dev,
+            self.weight_packed, self.weight_scales_batched,
             max_M, N, K, num_experts,
         )
 

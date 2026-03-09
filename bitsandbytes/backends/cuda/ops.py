@@ -1352,7 +1352,7 @@ def _(
     B_batched: torch.Tensor,
     SFA: torch.Tensor,
     SFB: torch.Tensor,
-    alpha: float,
+    alpha: torch.Tensor,
     max_M: int,
     N: int,
     K: int,
@@ -1377,13 +1377,16 @@ def _(
 
         _moe_batched_cache = {"key": key, "workspace": workspace}
 
+    # Ensure alpha is a float32 device tensor
+    alpha_dev = alpha.to(dtype=torch.float32, device=A_batched.device).contiguous()
+
     D_out = torch.empty(num_experts * max_M * N, dtype=torch.bfloat16, device=A_batched.device)
 
     ret = lib.cgemm_nvfp4_moe_sm100_run(
         get_ptr(A_batched), get_ptr(B_batched),
         get_ptr(SFA), get_ptr(SFB),
         get_ptr(D_out),
-        ct.c_float(alpha),
+        get_ptr(alpha_dev),
         ct.c_void_p(_get_tensor_stream(A_batched)),
     )
     if ret != 0:

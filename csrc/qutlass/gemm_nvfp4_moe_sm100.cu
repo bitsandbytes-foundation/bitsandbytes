@@ -151,6 +151,11 @@ struct MoeGemmState {
     // Workspace
     void* workspace_dev = nullptr;
     size_t workspace_size = 0;
+
+    // Persistent GEMM object: avoids stack allocation per call, keeps
+    // params_ alive for CUDA graph replay.  init() triggers the one-time
+    // cudaFuncSetAttribute call; run() reuses the object.
+    Gemm gemm;
 };
 
 static MoeGemmState s_state;
@@ -267,11 +272,18 @@ extern "C" int cgemm_nvfp4_moe_sm100_init(
     arguments.epilogue.thread.alpha = 1.0f;
     arguments.epilogue.thread.beta = 0.0f;
 
-    Gemm gemm;
-    auto status = gemm.can_implement(arguments);
+    auto status = st.gemm.can_implement(arguments);
     if (status != cutlass::Status::kSuccess) {
         fprintf(stderr, "MoE GEMM can_implement failed: %d\n", (int)status);
         return -1;
+    }
+
+    // Initialize the persistent Gemm object: triggers cudaFuncSetAttribute
+    // (one-time, not graph-safe) and fills internal params_ with dummy pointers.
+    status = st.gemm.initialize(arguments, st.workspace_dev, stream);
+    if (status != cutlass::Status::kSuccess) {
+        fprintf(stderr, "MoE GEMM initial initialize failed: %d\n", (int)status);
+        return -2;
     }
 
     st.initialized = true;
@@ -324,13 +336,17 @@ extern "C" size_t cgemm_nvfp4_moe_sm100_workspace_size(
 // SFA_dev: activation scale factors (batched swizzled layout)
 // SFB_dev: weight scale factors (batched swizzled layout)
 // D_dev: output (num_experts, max_M, N_output) BF16, row-major per expert
+// alpha_dev: device pointer to float alpha (= act_scale * weight_scale)
+//
+// Graph-safe: only host-side param building + kernel launch.
+// cudaFuncSetAttribute was already called during _init.
 extern "C" int cgemm_nvfp4_moe_sm100_run(
     const void* A_dev,        // activations (packed FP4)
     const void* B_dev,        // weights (packed FP4)
     const void* SFA_dev,      // activation scale factors
     const void* SFB_dev,      // weight scale factors
     void* D_dev,              // output (BF16)
-    float alpha,
+    const float* alpha_dev,   // device pointer to alpha scalar
     cudaStream_t stream
 ) {
 #if defined(CUTLASS_ARCH_MMA_SM100_SUPPORTED)
@@ -363,18 +379,23 @@ extern "C" int cgemm_nvfp4_moe_sm100_run(
          static_cast<ElementD*>(D_dev), st.stride_D},
         st.hw_info
     };
-    arguments.epilogue.thread.alpha = alpha;
+    // Device-side alpha: if alpha_dev is non-null, kernel reads from device ptr.
+    // alpha_ptr takes precedence over the scalar alpha value.
+    arguments.epilogue.thread.alpha = 1.0f;  // fallback (ignored when alpha_ptr set)
+    arguments.epilogue.thread.alpha_ptr = alpha_dev;
     arguments.epilogue.thread.beta = 0.0f;
 
-    Gemm gemm;
-
-    auto status = gemm.initialize(arguments, st.workspace_dev, stream);
+    // Rebuild params from arguments (host-side only, no CUDA API calls).
+    // cudaFuncSetAttribute was already called during _init on the persistent
+    // gemm object, so we call initialize() which is idempotent for the
+    // attribute and only updates params_.
+    auto status = st.gemm.initialize(arguments, st.workspace_dev, stream);
     if (status != cutlass::Status::kSuccess) {
         fprintf(stderr, "MoE GEMM initialize failed: %d\n", (int)status);
         return -2;
     }
 
-    status = gemm.run(stream);
+    status = st.gemm.run(stream);
     if (status != cutlass::Status::kSuccess) {
         fprintf(stderr, "MoE GEMM run failed: %d\n", (int)status);
         return -3;

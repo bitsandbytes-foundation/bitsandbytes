@@ -1543,10 +1543,9 @@ def gemm_nvfp4_grouped(
 def gemm_nvfp4_moe(
     A_batched: torch.Tensor,
     SFA_batched: torch.Tensor,
-    A_tensor_scale: float,
+    alpha: torch.Tensor,
     B_batched: torch.Tensor,
     SFB_batched: torch.Tensor,
-    B_tensor_scale: float,
     max_M: int,
     N: int,
     K: int,
@@ -1561,10 +1560,9 @@ def gemm_nvfp4_moe(
     Args:
         A_batched: Packed FP4 activations, batched (num_experts * max_M * K // 2,).
         SFA_batched: Per-expert swizzled activation scales (concatenated).
-        A_tensor_scale: Shared tensor scale for activations.
+        alpha: Device tensor (float32, 0-dim or 1-element) = act_scale * weight_scale.
         B_batched: Packed FP4 weights, batched (num_experts * N * K // 2,).
         SFB_batched: Per-expert swizzled weight scales (concatenated).
-        B_tensor_scale: Shared tensor scale for weights.
         max_M: Max tokens per expert (all experts padded to this).
         N: Output dimension per expert.
         K: Input dimension per expert.
@@ -1572,9 +1570,8 @@ def gemm_nvfp4_moe(
 
     Returns:
         Output tensor (num_experts, max_M, N) in bfloat16 with tensor scales
-        applied via the CUTLASS epilogue alpha.
+        applied via the CUTLASS epilogue alpha (device-side).
     """
-    alpha = A_tensor_scale * B_tensor_scale
     return torch.ops.bitsandbytes.gemm_nvfp4_moe(
         A_batched, B_batched, SFA_batched, SFB_batched,
         alpha, max_M, N, K, num_experts,
