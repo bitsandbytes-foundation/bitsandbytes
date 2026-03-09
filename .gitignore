@@ -158,4 +158,5 @@ cuda_build
 output/
 cuda-spec.md
 cuda-spec-additions.md
+spec.md
 agents/*_issues.json
