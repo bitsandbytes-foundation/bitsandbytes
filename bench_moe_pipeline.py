@@ -99,34 +99,81 @@ def main():
     print(f"Compute capability: {torch.cuda.get_device_capability(0)}")
     print()
 
+    # GLM-4.7 (352B MoE) shapes from benchmarks/bench_moe_gemm_sm100.py
+    # gate_up: K=4096, N=13696
+    # down:    K=13696, N=4096
     configs = [
+        # --- GLM-4.7 gate_up (K=4096, N=13696) ---
         {
-            "name": "Small (Mixtral-like, few tokens)",
+            "name": "GLM4.7 gate_up 8e×8tok",
             "num_experts": 8,
             "K": 4096,
-            "N": 14336,
-            "tokens_per_expert": [4, 8, 2, 6, 4, 8, 2, 6],
+            "N": 13696,
+            "tokens_per_expert": [8] * 8,
         },
         {
-            "name": "Medium (Mixtral-like, moderate tokens)",
+            "name": "GLM4.7 gate_up 8e×32tok",
             "num_experts": 8,
             "K": 4096,
-            "N": 14336,
-            "tokens_per_expert": [32, 48, 16, 64, 24, 40, 56, 8],
+            "N": 13696,
+            "tokens_per_expert": [32] * 8,
         },
         {
-            "name": "Large (Mixtral-like, many tokens)",
+            "name": "GLM4.7 gate_up 8e×64tok",
             "num_experts": 8,
             "K": 4096,
-            "N": 14336,
-            "tokens_per_expert": [128, 128, 128, 128, 128, 128, 128, 128],
+            "N": 13696,
+            "tokens_per_expert": [64] * 8,
         },
         {
-            "name": "DeepSeek-like (more experts, smaller)",
-            "num_experts": 16,
-            "K": 2048,
-            "N": 5632,
-            "tokens_per_expert": [8] * 16,
+            "name": "GLM4.7 gate_up 8e×128tok",
+            "num_experts": 8,
+            "K": 4096,
+            "N": 13696,
+            "tokens_per_expert": [128] * 8,
+        },
+        {
+            "name": "GLM4.7 gate_up 8e skewed",
+            "num_experts": 8,
+            "K": 4096,
+            "N": 13696,
+            "tokens_per_expert": [128, 64, 32, 16, 8, 4, 2, 1],
+        },
+        # --- GLM-4.7 down (K=13696, N=4096) ---
+        {
+            "name": "GLM4.7 down 8e×8tok",
+            "num_experts": 8,
+            "K": 13696,
+            "N": 4096,
+            "tokens_per_expert": [8] * 8,
+        },
+        {
+            "name": "GLM4.7 down 8e×32tok",
+            "num_experts": 8,
+            "K": 13696,
+            "N": 4096,
+            "tokens_per_expert": [32] * 8,
+        },
+        {
+            "name": "GLM4.7 down 8e×64tok",
+            "num_experts": 8,
+            "K": 13696,
+            "N": 4096,
+            "tokens_per_expert": [64] * 8,
+        },
+        {
+            "name": "GLM4.7 down 8e×128tok",
+            "num_experts": 8,
+            "K": 13696,
+            "N": 4096,
+            "tokens_per_expert": [128] * 8,
+        },
+        {
+            "name": "GLM4.7 down 8e skewed",
+            "num_experts": 8,
+            "K": 13696,
+            "N": 4096,
+            "tokens_per_expert": [128, 64, 32, 16, 8, 4, 2, 1],
         },
     ]
 
