@@ -1387,7 +1387,7 @@ def _(
         get_ptr(SFA), get_ptr(SFB),
         get_ptr(D_out),
         get_ptr(alpha_dev),
-        ct.c_void_p(_get_tensor_stream(A_batched)),
+        _get_tensor_stream(A_batched),
     )
     if ret != 0:
         raise RuntimeError(f"cgemm_nvfp4_moe_sm100_run failed: {ret}")
