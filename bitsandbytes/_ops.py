@@ -559,3 +559,36 @@ def _(
     # total_tokens = number of rows in A_concat = A_concat.numel() / (K/2)
     total_tokens = A_concat.numel() // (K // 2)
     return torch.empty(total_tokens, N, dtype=torch.bfloat16, device=A_concat.device)
+
+
+# Batched NVFP4 GEMM for MoE inference (fixed-padding, CUDA-graph-compatible)
+# All experts compute max_M rows; padded rows produce ignored output.
+# A_batched:  [num_experts * max_M * K/2]  packed FP4 activations (flat)
+# B_all:      [num_experts * N * K/2]      packed FP4 weights (flat)
+# SFA_batched: swizzled activation scales (CUTLASS block-scaled layout)
+# SFB_all:     swizzled weight scales (CUTLASS block-scaled layout)
+# alpha:       [1] float32 device tensor = A_tensor_scale * B_tensor_scale
+torch.library.define(
+    "bitsandbytes::gemm_nvfp4_batched_moe",
+    "(Tensor A_batched, Tensor B_all, Tensor SFA_batched, Tensor SFB_all, "
+    "Tensor alpha, int max_M, int N, int K, int num_experts) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::gemm_nvfp4_batched_moe")
+def _(
+    A_batched: torch.Tensor,
+    B_all: torch.Tensor,
+    SFA_batched: torch.Tensor,
+    SFB_all: torch.Tensor,
+    alpha: torch.Tensor,
+    max_M: int,
+    N: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    torch._check_is_size(max_M)
+    torch._check_is_size(N)
+    torch._check_is_size(K)
+    torch._check_is_size(num_experts)
+    return torch.empty(num_experts * max_M, N, dtype=torch.bfloat16, device=A_batched.device)

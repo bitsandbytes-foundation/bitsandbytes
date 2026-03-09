@@ -1414,6 +1414,48 @@ def gemm_nvfp4_grouped(
     )
 
 
+def gemm_nvfp4_batched_moe(
+    A_data: torch.Tensor,
+    A_scales: torch.Tensor,
+    A_tensor_scale: float,
+    B_data_all: torch.Tensor,
+    B_scales_all: torch.Tensor,
+    B_tensor_scale: float,
+    max_M: int,
+    N: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    """Batched NVFP4 GEMM for MoE with fixed padding (CUDA-graph-compatible).
+
+    All experts compute max_M rows. Padded rows produce ignored output that the
+    caller discards after gathering results.
+
+    Args:
+        A_data: Packed FP4 activations, (num_experts, max_M, K/2) flat uint8 tensor.
+        A_scales: Pre-swizzled activation scales (CUTLASS block-scaled layout).
+        A_tensor_scale: Tensor-level scale for activations (float).
+        B_data_all: Packed FP4 weights, (num_experts, N, K/2) flat uint8 tensor.
+        B_scales_all: Pre-swizzled weight scales (CUTLASS block-scaled layout).
+        B_tensor_scale: Tensor-level scale for weights (float).
+        max_M: Maximum tokens per expert (all experts compute this many rows).
+        N: Output dimension per expert.
+        K: Input/hidden dimension per expert.
+        num_experts: Number of experts.
+
+    Returns:
+        BF16 output of shape (num_experts * max_M, N). Caller should reshape to
+        (num_experts, max_M, N) and slice to actual token counts per expert.
+    """
+    alpha = torch.tensor(
+        [A_tensor_scale * B_tensor_scale], dtype=torch.float32, device=A_data.device,
+    )
+    return torch.ops.bitsandbytes.gemm_nvfp4_batched_moe(
+        A_data, B_data_all, A_scales, B_scales_all, alpha,
+        max_M, N, K, num_experts,
+    )
+
+
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def quantize(
     A: Tensor,

@@ -635,5 +635,259 @@ class TestGemmNVFP4LargeBatch:
         assert rel_err < 0.2, f"Relative error {rel_err:.4f} too large"
 
 
+def _has_batched_moe_kernel():
+    """Check if the batched MoE SM120 kernel is available."""
+    try:
+        lib = get_lib()
+        return hasattr(lib, "cgemm_nvfp4_moe_sm120_init")
+    except RuntimeError:
+        return False
+
+
+def _is_sm120():
+    """Check if current GPU is SM120 (consumer Blackwell)."""
+    if not torch.cuda.is_available():
+        return False
+    major, minor = torch.cuda.get_device_capability(0)
+    return major == 12 and minor == 0
+
+
+_skip_no_sm120 = pytest.mark.skipif(
+    not torch.cuda.is_available() or not _is_sm120(),
+    reason="Requires SM120 GPU (RTX 5090/5080)",
+)
+_skip_no_batched_moe = pytest.mark.skipif(
+    not _has_batched_moe_kernel(),
+    reason="Batched MoE SM120 kernel not available in this build",
+)
+
+
+@_skip_no_sm120
+@_skip_no_batched_moe
+class TestBatchedMoeNVFP4:
+    """Test batched NVFP4 MoE GEMM (fixed-padding, CUDA-graph-compatible)."""
+
+    def _run_batched_moe(self, max_M, N, K, num_experts, seed=42):
+        """Helper: quantize random data, run batched MoE GEMM, compare vs per-expert loop."""
+        from bitsandbytes.functional import gemm_nvfp4_batched_moe, quantize_nvfp4
+
+        torch.manual_seed(seed)
+
+        # Generate random data per expert
+        A_float = torch.randn(num_experts, max_M, K, dtype=torch.bfloat16, device="cuda")
+        B_float = torch.randn(num_experts, N, K, dtype=torch.bfloat16, device="cuda")
+
+        # Quantize each expert's activations and weights
+        A_packed_list, A_scales_list = [], []
+        B_packed_list, B_scales_list = [], []
+        A_ts_sum, B_ts_sum = 0.0, 0.0
+
+        for e in range(num_experts):
+            a_packed, a_state = quantize_nvfp4(A_float[e])
+            b_packed, b_state = quantize_nvfp4(B_float[e])
+            A_packed_list.append(a_state.packed_data)
+            A_scales_list.append(a_state.block_scales)
+            B_packed_list.append(b_state.packed_data)
+            B_scales_list.append(b_state.block_scales)
+            A_ts_sum += a_state.tensor_scale
+            B_ts_sum += b_state.tensor_scale
+
+        # For batched kernel: use a single shared tensor scale (average)
+        # In practice, all experts would share the same tensor scale
+        A_tensor_scale = A_ts_sum / num_experts
+        B_tensor_scale = B_ts_sum / num_experts
+
+        # Concatenate packed data and scales
+        A_batched = torch.cat(A_packed_list)
+        B_all = torch.cat(B_packed_list)
+        SFA_batched = torch.cat(A_scales_list)
+        SFB_all = torch.cat(B_scales_list)
+
+        # Run batched MoE GEMM
+        D_batched = gemm_nvfp4_batched_moe(
+            A_batched, SFA_batched, A_tensor_scale,
+            B_all, SFB_all, B_tensor_scale,
+            max_M, N, K, num_experts,
+        )
+
+        # Reference: per-expert dense GEMM
+        from bitsandbytes.functional import dequantize_nvfp4
+
+        D_ref_list = []
+        for e in range(num_experts):
+            a_state_e = type(quantize_nvfp4(A_float[0])[1]).__new__(
+                type(quantize_nvfp4(A_float[0])[1])
+            )
+            # Just compute reference from float data
+            D_ref_list.append(A_float[e].float() @ B_float[e].float().T)
+
+        D_ref = torch.cat(D_ref_list, dim=0)  # (num_experts * max_M, N)
+
+        return D_batched, D_ref
+
+    def test_basic_shape(self):
+        """Basic batched MoE GEMM produces correct output shape."""
+        from bitsandbytes.functional import gemm_nvfp4_batched_moe, quantize_nvfp4
+
+        torch.manual_seed(42)
+        max_M, N, K, num_experts = 4, 128, 256, 4
+
+        A = torch.randn(num_experts, max_M, K, dtype=torch.bfloat16, device="cuda")
+        B = torch.randn(num_experts, N, K, dtype=torch.bfloat16, device="cuda")
+
+        # Quantize all at once
+        A_2d = A.reshape(-1, K)
+        B_2d = B.reshape(-1, K)
+        A_packed, A_state = quantize_nvfp4(A_2d)
+        B_packed, B_state = quantize_nvfp4(B_2d)
+
+        D = gemm_nvfp4_batched_moe(
+            A_state.packed_data, A_state.block_scales, A_state.tensor_scale,
+            B_state.packed_data, B_state.block_scales, B_state.tensor_scale,
+            max_M, N, K, num_experts,
+        )
+
+        assert D.shape == (num_experts * max_M, N), f"Wrong shape: {D.shape}"
+        assert D.dtype == torch.bfloat16
+
+    def test_nonzero_output(self):
+        """Batched MoE GEMM produces non-zero output."""
+        from bitsandbytes.functional import gemm_nvfp4_batched_moe, quantize_nvfp4
+
+        torch.manual_seed(42)
+        max_M, N, K, num_experts = 8, 128, 256, 2
+
+        A = torch.randn(num_experts * max_M, K, dtype=torch.bfloat16, device="cuda")
+        B = torch.randn(num_experts * N, K, dtype=torch.bfloat16, device="cuda")
+        A_packed, A_state = quantize_nvfp4(A)
+        B_packed, B_state = quantize_nvfp4(B)
+
+        D = gemm_nvfp4_batched_moe(
+            A_state.packed_data, A_state.block_scales, A_state.tensor_scale,
+            B_state.packed_data, B_state.block_scales, B_state.tensor_scale,
+            max_M, N, K, num_experts,
+        )
+
+        assert D.nonzero().shape[0] > 0, "Output is all zeros"
+
+    def test_cache_hit(self):
+        """Second call with same shape skips init (cache hit)."""
+        from bitsandbytes.backends.cuda.ops import _batched_moe_sm120_cache
+        from bitsandbytes.functional import gemm_nvfp4_batched_moe, quantize_nvfp4
+
+        torch.manual_seed(42)
+        max_M, N, K, num_experts = 4, 128, 256, 2
+
+        A = torch.randn(num_experts * max_M, K, dtype=torch.bfloat16, device="cuda")
+        B = torch.randn(num_experts * N, K, dtype=torch.bfloat16, device="cuda")
+        A_packed, A_state = quantize_nvfp4(A)
+        B_packed, B_state = quantize_nvfp4(B)
+
+        args = (
+            A_state.packed_data, A_state.block_scales, A_state.tensor_scale,
+            B_state.packed_data, B_state.block_scales, B_state.tensor_scale,
+            max_M, N, K, num_experts,
+        )
+
+        # First call: inits
+        D1 = gemm_nvfp4_batched_moe(*args)
+        cache_after_first = _batched_moe_sm120_cache
+
+        # Second call: should hit cache
+        D2 = gemm_nvfp4_batched_moe(*args)
+
+        from bitsandbytes.backends.cuda import ops as cuda_ops
+        assert cuda_ops._batched_moe_sm120_cache is cache_after_first, "Cache was invalidated unexpectedly"
+
+    def test_cache_invalidation(self):
+        """Changing shape triggers re-init (cache miss)."""
+        from bitsandbytes.functional import gemm_nvfp4_batched_moe, quantize_nvfp4
+
+        torch.manual_seed(42)
+        max_M, K, num_experts = 4, 256, 2
+
+        # First call with N=128
+        N1 = 128
+        A1 = torch.randn(num_experts * max_M, K, dtype=torch.bfloat16, device="cuda")
+        B1 = torch.randn(num_experts * N1, K, dtype=torch.bfloat16, device="cuda")
+        A1_packed, A1_state = quantize_nvfp4(A1)
+        B1_packed, B1_state = quantize_nvfp4(B1)
+        D1 = gemm_nvfp4_batched_moe(
+            A1_state.packed_data, A1_state.block_scales, A1_state.tensor_scale,
+            B1_state.packed_data, B1_state.block_scales, B1_state.tensor_scale,
+            max_M, N1, K, num_experts,
+        )
+
+        from bitsandbytes.backends.cuda import ops as cuda_ops
+        cache_key_1 = cuda_ops._batched_moe_sm120_cache["key"]
+
+        # Second call with N=256 (different shape)
+        N2 = 256
+        B2 = torch.randn(num_experts * N2, K, dtype=torch.bfloat16, device="cuda")
+        B2_packed, B2_state = quantize_nvfp4(B2)
+        D2 = gemm_nvfp4_batched_moe(
+            A1_state.packed_data, A1_state.block_scales, A1_state.tensor_scale,
+            B2_state.packed_data, B2_state.block_scales, B2_state.tensor_scale,
+            max_M, N2, K, num_experts,
+        )
+
+        cache_key_2 = cuda_ops._batched_moe_sm120_cache["key"]
+        assert cache_key_1 != cache_key_2, "Cache should have been invalidated for different N"
+        assert D2.shape == (num_experts * max_M, N2)
+
+    @pytest.mark.parametrize(
+        "max_M,N,K,num_experts",
+        [
+            (1, 128, 256, 2),
+            (4, 128, 256, 4),
+            (8, 256, 512, 8),
+            (32, 128, 256, 128),
+        ],
+        ids=["M1_E2", "M4_E4", "M8_E8", "M32_E128"],
+    )
+    def test_various_shapes(self, max_M, N, K, num_experts):
+        """Test batched MoE with various shape configurations."""
+        from bitsandbytes.functional import gemm_nvfp4_batched_moe, quantize_nvfp4
+
+        torch.manual_seed(42)
+        A = torch.randn(num_experts * max_M, K, dtype=torch.bfloat16, device="cuda")
+        B = torch.randn(num_experts * N, K, dtype=torch.bfloat16, device="cuda")
+        A_packed, A_state = quantize_nvfp4(A)
+        B_packed, B_state = quantize_nvfp4(B)
+
+        D = gemm_nvfp4_batched_moe(
+            A_state.packed_data, A_state.block_scales, A_state.tensor_scale,
+            B_state.packed_data, B_state.block_scales, B_state.tensor_scale,
+            max_M, N, K, num_experts,
+        )
+
+        assert D.shape == (num_experts * max_M, N)
+        assert D.dtype == torch.bfloat16
+        assert D.nonzero().shape[0] > 0, f"Output is all zeros for shape M={max_M},N={N},K={K},E={num_experts}"
+
+    def test_glm47_shapes(self):
+        """Test with GLM-4.7 model dimensions."""
+        from bitsandbytes.functional import gemm_nvfp4_batched_moe, quantize_nvfp4
+
+        torch.manual_seed(42)
+        K = 4096
+        num_experts = 128
+
+        for name, N, max_M in [("gate_up", 13696, 4), ("down", 4096, 4)]:
+            A = torch.randn(num_experts * max_M, K, dtype=torch.bfloat16, device="cuda")
+            B = torch.randn(num_experts * N, K, dtype=torch.bfloat16, device="cuda")
+            A_packed, A_state = quantize_nvfp4(A)
+            B_packed, B_state = quantize_nvfp4(B)
+
+            D = gemm_nvfp4_batched_moe(
+                A_state.packed_data, A_state.block_scales, A_state.tensor_scale,
+                B_state.packed_data, B_state.block_scales, B_state.tensor_scale,
+                max_M, N, K, num_experts,
+            )
+
+            assert D.shape == (num_experts * max_M, N), f"{name}: wrong shape {D.shape}"
+            assert D.nonzero().shape[0] > 0, f"{name}: output is all zeros"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

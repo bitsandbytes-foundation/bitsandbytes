@@ -1111,43 +1111,100 @@ def _(
     )
 
 
-# Grouped NVFP4 GEMM for MoE inference (SM_120+)
+# Batched NVFP4 GEMM for MoE inference (SM_120, CUDA-graph-compatible)
 #
-# Fuses all expert GEMMs into a single kernel launch using expert-offset
-# work decomposition with binary search. Uses swizzled (block-scaled) scales.
-# CUDA-graph-safe: no dynamic allocations.
-def _gemm_nvfp4_grouped_raw(
-    A_concat: torch.Tensor,
+# Fixed-padding approach: all experts compute max_M rows. Padded rows produce
+# ignored output that the caller discards.
+# Uses CUTLASS batched GEMM with init/run split for CUDA graph support.
+#
+# Cache: stores the last (N, K, max_M, num_experts) init configuration.
+# On cache hit, skips init and just calls run. On miss, re-inits.
+_batched_moe_sm120_cache: Optional[dict] = None
+_batched_moe_restype_set = False
+
+
+def _ensure_batched_moe_restypes():
+    global _batched_moe_restype_set
+    if not _batched_moe_restype_set:
+        lib.cgemm_nvfp4_moe_sm120_sfa_size.restype = ct.c_size_t
+        lib.cgemm_nvfp4_moe_sm120_sfb_size.restype = ct.c_size_t
+        lib.cgemm_nvfp4_moe_sm120_workspace_size.restype = ct.c_size_t
+        lib.cgemm_nvfp4_moe_sm120_init.restype = ct.c_int
+        lib.cgemm_nvfp4_moe_sm120_run.restype = ct.c_int
+        lib.cgemm_nvfp4_moe_sm120_sfa_size_per_expert.restype = ct.c_size_t
+        lib.cgemm_nvfp4_moe_sm120_sfb_size_per_expert.restype = ct.c_size_t
+        _batched_moe_restype_set = True
+
+
+def _batched_moe_sm120_init_if_needed(
+    A_batched: torch.Tensor,
     B_all: torch.Tensor,
-    SFA_concat: torch.Tensor,
+    SFA_batched: torch.Tensor,
     SFB_all: torch.Tensor,
-    D_concat: torch.Tensor,
-    expert_offsets: torch.Tensor,
-    cumul_m_tiles: torch.Tensor,
+    D_out: torch.Tensor,
+    alpha: torch.Tensor,
+    max_M: int,
     N: int,
     K: int,
     num_experts: int,
-    total_tiles: int,
+    stream: int,
 ) -> None:
-    """Raw grouped NVFP4 GEMM (BF16 output) — zero allocations, CUDA-graph-safe.
+    """Call cgemm_nvfp4_moe_sm120_init if the configuration changed, else skip."""
+    global _batched_moe_sm120_cache
+    _ensure_batched_moe_restypes()
 
-    All buffers must be pre-allocated. D_concat must be BF16 of shape (total_tokens, N).
-    expert_offsets and cumul_m_tiles must be int32 on the same device.
-    """
-    lib.cgemm_nvfp4_grouped_bf16(
-        get_ptr(A_concat),
-        get_ptr(B_all),
-        get_ptr(SFA_concat),
-        get_ptr(SFB_all),
-        get_ptr(D_concat),
-        get_ptr(expert_offsets),
-        get_ptr(cumul_m_tiles),
-        ct.c_int(N),
-        ct.c_int(K),
-        ct.c_int(num_experts),
-        ct.c_int(total_tiles),
-        _get_tensor_stream(A_concat),
+    cache_key = (N, K, max_M, num_experts)
+
+    if (_batched_moe_sm120_cache is not None
+            and _batched_moe_sm120_cache["key"] == cache_key):
+        return
+
+    ws_size = lib.cgemm_nvfp4_moe_sm120_workspace_size(
+        ct.c_int(N), ct.c_int(max_M), ct.c_int(K), ct.c_int(num_experts),
     )
+    workspace = torch.empty(max(ws_size, 1), dtype=torch.uint8, device=A_batched.device)
+
+    ret = lib.cgemm_nvfp4_moe_sm120_init(
+        ct.c_int(N), ct.c_int(max_M), ct.c_int(K), ct.c_int(num_experts),
+        get_ptr(A_batched), get_ptr(B_all),
+        get_ptr(SFA_batched), get_ptr(SFB_all),
+        get_ptr(D_out), get_ptr(alpha),
+        get_ptr(workspace), ct.c_size_t(ws_size), stream,
+    )
+    if ret != 0:
+        raise RuntimeError(f"cgemm_nvfp4_moe_sm120_init failed with code {ret}")
+
+    _batched_moe_sm120_cache = {
+        "key": cache_key,
+        "workspace": workspace,  # prevent GC
+    }
+
+
+def _gemm_nvfp4_batched_moe_raw(
+    A_batched: torch.Tensor,
+    B_all: torch.Tensor,
+    SFA_batched: torch.Tensor,
+    SFB_all: torch.Tensor,
+    D_out: torch.Tensor,
+    alpha: torch.Tensor,
+    max_M: int,
+    N: int,
+    K: int,
+    num_experts: int,
+) -> None:
+    """Raw batched MoE NVFP4 GEMM — init-if-needed then run.
+
+    All buffers must be pre-allocated. D_out must be BF16 of shape (num_experts * max_M, N).
+    alpha must be a float32 device tensor of shape (1,) containing A_scale * B_scale.
+    """
+    stream = _get_tensor_stream(A_batched)
+    _batched_moe_sm120_init_if_needed(
+        A_batched, B_all, SFA_batched, SFB_all, D_out, alpha,
+        max_M, N, K, num_experts, stream,
+    )
+    ret = lib.cgemm_nvfp4_moe_sm120_run(stream)
+    if ret != 0:
+        raise RuntimeError(f"cgemm_nvfp4_moe_sm120_run failed with code {ret}")
 
 
 # Cached state for grouped SM_100 GEMM
@@ -1304,23 +1361,38 @@ def _(
             A_tensor_scale, B_tensor_scale, N, K, num_experts,
         )
 
-    # SM_120 (consumer Blackwell): use hand-written grouped kernel
-    # SM_120 expects globally-swizzled SFA, so swizzle the row-major input
-    total_tokens = A_concat.numel() // (K // 2)
-    scale_W = K // 16
-    SFA_blocked = torch.ops.bitsandbytes.scale_to_blocked(SFA_rowmajor, total_tokens, scale_W)
+    # SM_120 (consumer Blackwell): deprecated grouped path.
+    # Use gemm_nvfp4_batched_moe (fixed-padding) instead.
+    raise NotImplementedError(
+        "SM_120 grouped (variable-offset) NVFP4 MoE GEMM has been removed. "
+        "Use bitsandbytes::gemm_nvfp4_batched_moe with fixed-padding instead."
+    )
 
-    num_n_tiles = (N + 127) // 128
 
-    with _cuda_device_of(A_concat):
-        D_concat = torch.empty(total_tokens, N, dtype=torch.bfloat16, device=A_concat.device)
-        total_tiles = cumul_m_tiles[-1].item() * num_n_tiles
+@register_kernel("bitsandbytes::gemm_nvfp4_batched_moe", "cuda")
+def _(
+    A_batched: torch.Tensor,
+    B_all: torch.Tensor,
+    SFA_batched: torch.Tensor,
+    SFB_all: torch.Tensor,
+    alpha: torch.Tensor,
+    max_M: int,
+    N: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    """Batched NVFP4 GEMM for MoE: all experts compute max_M rows.
 
-        _gemm_nvfp4_grouped_raw(
-            A_concat, B_all, SFA_blocked, SFB_all, D_concat,
-            expert_offsets, cumul_m_tiles, N, K, num_experts, total_tiles,
+    A_batched:   flat packed FP4 activations, (num_experts * max_M * K/2) bytes.
+    B_all:       flat packed FP4 weights, (num_experts * N * K/2) bytes.
+    SFA_batched: pre-swizzled activation scales (CUTLASS block-scaled layout).
+    SFB_all:     pre-swizzled weight scales (CUTLASS block-scaled layout).
+    alpha:       float32 device tensor [1], = A_tensor_scale * B_tensor_scale.
+    """
+    with _cuda_device_of(A_batched):
+        D_out = torch.empty(num_experts * max_M, N, dtype=torch.bfloat16, device=A_batched.device)
+        _gemm_nvfp4_batched_moe_raw(
+            A_batched, B_all, SFA_batched, SFB_all, D_out, alpha,
+            max_M, N, K, num_experts,
         )
-
-    # Apply tensor scales (SM_120 kernel has no alpha epilogue)
-    D_concat *= A_tensor_scale * B_tensor_scale
-    return D_concat
+    return D_out
