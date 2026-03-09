@@ -1414,6 +1414,47 @@ def gemm_nvfp4_grouped(
     )
 
 
+def gemm_nvfp4_moe(
+    A_batched: torch.Tensor,
+    SFA_batched: torch.Tensor,
+    A_tensor_scale: float,
+    B_batched: torch.Tensor,
+    SFB_batched: torch.Tensor,
+    B_tensor_scale: float,
+    max_M: int,
+    N: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    """Batched NVFP4 GEMM for MoE (SM_100 datacenter Blackwell).
+
+    All experts compute max_M rows in a single kernel launch. Padded rows
+    produce ignored output. CUDA-graph friendly: fixed shape, no host-side
+    routing, no pointer arrays.
+
+    Args:
+        A_batched: Packed FP4 activations, batched (num_experts * max_M * K // 2,).
+        SFA_batched: Per-expert swizzled activation scales (concatenated).
+        A_tensor_scale: Shared tensor scale for activations.
+        B_batched: Packed FP4 weights, batched (num_experts * N * K // 2,).
+        SFB_batched: Per-expert swizzled weight scales (concatenated).
+        B_tensor_scale: Shared tensor scale for weights.
+        max_M: Max tokens per expert (all experts padded to this).
+        N: Output dimension per expert.
+        K: Input dimension per expert.
+        num_experts: Number of experts (batch dimension L).
+
+    Returns:
+        Output tensor (num_experts, max_M, N) in bfloat16 with tensor scales
+        applied via the CUTLASS epilogue alpha.
+    """
+    alpha = A_tensor_scale * B_tensor_scale
+    return torch.ops.bitsandbytes.gemm_nvfp4_moe(
+        A_batched, B_batched, SFA_batched, SFB_batched,
+        alpha, max_M, N, K, num_experts,
+    )
+
+
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def quantize(
     A: Tensor,

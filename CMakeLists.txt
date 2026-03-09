@@ -301,6 +301,7 @@ if(BUILD_CUDA)
             set(_NVFP4_SM100_SOURCES
                 csrc/qutlass/gemm_nvfp4_sm100.cu
                 csrc/qutlass/gemm_nvfp4_grouped_sm100.cu
+                csrc/qutlass/gemm_nvfp4_moe_sm100.cu
             )
 
             add_library(nvfp4_sm100a OBJECT ${_NVFP4_SM100_SOURCES})

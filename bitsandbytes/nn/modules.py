@@ -792,6 +792,7 @@ class LinearNVFP4MoE(nn.Module):
         # Quantized state (populated by _quantize_weights)
         self.register_buffer("weight_packed", None)
         self.register_buffer("weight_scales", None)
+        self.register_buffer("weight_scales_batched", None)
         self.weight_tensor_scale: float = 1.0
 
     @classmethod
@@ -819,6 +820,7 @@ class LinearNVFP4MoE(nn.Module):
         # Quantize all experts and find a shared tensor scale
         all_packed = []
         all_scales = []
+        all_scales_blocked = []
         tensor_scales = []
 
         for i in range(self.num_experts):
@@ -826,17 +828,21 @@ class LinearNVFP4MoE(nn.Module):
             packed, state = quantize_nvfp4(w)
             all_packed.append(state.packed_data)
             all_scales.append(state.block_scales)
+            all_scales_blocked.append(state.block_scales_blocked)
             tensor_scales.append(state.tensor_scale)
 
         # Stack into contiguous buffers: [num_experts * N, K/2] packed data
         self.weight_packed = torch.cat(all_packed, dim=0).contiguous()
 
-        # Swizzle the concatenated weight scales to CUTLASS block-scaled layout.
-        # The kernel indexes with absolute row (expert * N + local_n).
+        # Globally-swizzled scales for grouped GEMM (SM_120)
         weight_scales_flat = torch.cat(all_scales, dim=0).contiguous()
         self.weight_scales = torch.ops.bitsandbytes.scale_to_blocked(
             weight_scales_flat, self.num_experts * N, K // 16,
         )
+
+        # Per-expert swizzled scales for batched GEMM (SM_100)
+        self.weight_scales_batched = torch.cat(all_scales_blocked, dim=0).contiguous()
+
         self.weight_tensor_scale = max(tensor_scales)
 
         self._quantized = True
@@ -847,7 +853,10 @@ class LinearNVFP4MoE(nn.Module):
         )
 
     def forward(self, x: torch.Tensor, expert_offsets: torch.Tensor) -> torch.Tensor:
-        """Run grouped NVFP4 GEMM across all experts.
+        """Run NVFP4 GEMM across all experts.
+
+        Uses batched GEMM on SM_100 (datacenter Blackwell) or grouped GEMM
+        on SM_120 (consumer Blackwell).
 
         Args:
             x: Concatenated activations from all experts [total_tokens, K] in token order.
@@ -862,16 +871,22 @@ class LinearNVFP4MoE(nn.Module):
         if not self._quantized:
             self._quantize_weights()
 
+        major, _ = torch.cuda.get_device_capability(x.device)
+        from bitsandbytes.cextension import lib
+        if major == 10 and hasattr(lib, "cgemm_nvfp4_moe_sm100_init"):
+            return self._forward_batched(x, expert_offsets)
+        return self._forward_grouped(x, expert_offsets)
+
+    def _forward_grouped(self, x: torch.Tensor, expert_offsets: torch.Tensor) -> torch.Tensor:
+        """Grouped GEMM path (SM_120 consumer Blackwell)."""
         from bitsandbytes.functional import gemm_nvfp4_grouped, quantize_nvfp4
 
         inp_dtype = x.dtype
         N, K = self.output_features, self.input_features
 
-        # Quantize activations
         x_2d = x.reshape(-1, K).to(torch.bfloat16).contiguous()
         x_packed, x_state = quantize_nvfp4(x_2d)
 
-        # Run grouped GEMM
         out = gemm_nvfp4_grouped(
             x_packed,
             x_state,
@@ -883,11 +898,79 @@ class LinearNVFP4MoE(nn.Module):
             K,
         )
 
-        # Add per-expert bias if present
         if self.bias is not None:
             for i in range(self.num_experts):
                 start = expert_offsets[i].item()
                 end = expert_offsets[i + 1].item()
+                if end > start:
+                    out[start:end] = out[start:end] + self.bias[i].to(out.dtype)
+
+        return out.to(inp_dtype)
+
+    def _forward_batched(self, x: torch.Tensor, expert_offsets: torch.Tensor) -> torch.Tensor:
+        """Batched GEMM path (SM_100 datacenter Blackwell).
+
+        Scatters tokens into padded (num_experts, max_M, K) layout, quantizes
+        per-expert, runs a single batched GEMM kernel, then gathers results.
+        """
+        from bitsandbytes.functional import gemm_nvfp4_moe, quantize_nvfp4
+
+        inp_dtype = x.dtype
+        N, K = self.output_features, self.input_features
+        num_experts = self.num_experts
+
+        expert_offsets_i32 = expert_offsets.to(torch.int32)
+        tokens_per_expert = expert_offsets_i32[1:] - expert_offsets_i32[:-1]
+        raw_max_M = tokens_per_expert.max().item()
+        # Pad to multiple of 128 for CUTLASS tile efficiency
+        max_M = ((raw_max_M + 127) // 128) * 128
+
+        x_2d = x.reshape(-1, K).to(torch.bfloat16).contiguous()
+
+        # Shared tensor scale across all experts (matches grouped GEMM behavior)
+        act_tensor_scale = x_2d.abs().max().item()
+
+        # Quantize per-expert with shared tensor scale
+        all_act_packed = []
+        all_act_scales = []
+
+        for i in range(num_experts):
+            start = expert_offsets_i32[i].item()
+            end = expert_offsets_i32[i + 1].item()
+            n_tok = end - start
+
+            act_padded = torch.zeros(max_M, K, dtype=torch.bfloat16, device=x.device)
+            if n_tok > 0:
+                act_padded[:n_tok] = x_2d[start:end]
+
+            act_packed, act_state = quantize_nvfp4(act_padded, tensor_scale=act_tensor_scale)
+            all_act_packed.append(act_packed)
+            all_act_scales.append(act_state.block_scales_blocked)
+
+        A_batched = torch.cat(all_act_packed)
+        SFA_batched = torch.cat(all_act_scales)
+
+        # Run batched GEMM
+        D = gemm_nvfp4_moe(
+            A_batched, SFA_batched, act_tensor_scale,
+            self.weight_packed, self.weight_scales_batched, self.weight_tensor_scale,
+            max_M, N, K, num_experts,
+        )
+
+        # Gather results: D is (num_experts, max_M, N)
+        total_tokens = expert_offsets_i32[-1].item()
+        out = torch.empty(total_tokens, N, dtype=torch.bfloat16, device=x.device)
+        for i in range(num_experts):
+            start = expert_offsets_i32[i].item()
+            end = expert_offsets_i32[i + 1].item()
+            n_tok = end - start
+            if n_tok > 0:
+                out[start:end] = D[i, :n_tok]
+
+        if self.bias is not None:
+            for i in range(num_experts):
+                start = expert_offsets_i32[i].item()
+                end = expert_offsets_i32[i + 1].item()
                 if end > start:
                     out[start:end] = out[start:end] + self.bias[i].to(out.dtype)
 

@@ -1324,3 +1324,71 @@ def _(
     # Apply tensor scales (SM_120 kernel has no alpha epilogue)
     D_concat *= A_tensor_scale * B_tensor_scale
     return D_concat
+
+
+# =========================================================================
+# Batched NVFP4 GEMM for MoE inference (SM_100 datacenter Blackwell)
+# =========================================================================
+
+# Cached state for batched SM_100 MoE GEMM
+_moe_batched_restype_set = False
+_moe_batched_cache: Optional[dict] = None
+
+
+def _ensure_moe_batched_restype():
+    global _moe_batched_restype_set
+    if not _moe_batched_restype_set:
+        lib.cgemm_nvfp4_moe_sm100_sfa_size.restype = ct.c_size_t
+        lib.cgemm_nvfp4_moe_sm100_sfb_size.restype = ct.c_size_t
+        lib.cgemm_nvfp4_moe_sm100_sfa_size_per_expert.restype = ct.c_size_t
+        lib.cgemm_nvfp4_moe_sm100_sfb_size_per_expert.restype = ct.c_size_t
+        lib.cgemm_nvfp4_moe_sm100_workspace_size.restype = ct.c_size_t
+        lib.cgemm_nvfp4_moe_sm100_init.restype = ct.c_int
+        lib.cgemm_nvfp4_moe_sm100_run.restype = ct.c_int
+        _moe_batched_restype_set = True
+
+
+@register_kernel("bitsandbytes::gemm_nvfp4_moe", "cuda")
+def _(
+    A_batched: torch.Tensor,
+    B_batched: torch.Tensor,
+    SFA: torch.Tensor,
+    SFB: torch.Tensor,
+    alpha: float,
+    max_M: int,
+    N: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    global _moe_batched_cache
+    _ensure_moe_batched_restype()
+
+    key = (max_M, N, K, num_experts)
+    if _moe_batched_cache is None or _moe_batched_cache["key"] != key:
+        ws_size = lib.cgemm_nvfp4_moe_sm100_workspace_size(
+            ct.c_int(N), ct.c_int(max_M), ct.c_int(K), ct.c_int(num_experts),
+        )
+        workspace = torch.empty(max(ws_size, 1), dtype=torch.uint8, device=A_batched.device)
+
+        ret = lib.cgemm_nvfp4_moe_sm100_init(
+            ct.c_int(N), ct.c_int(max_M), ct.c_int(K), ct.c_int(num_experts),
+            get_ptr(workspace), ct.c_size_t(ws_size),
+        )
+        if ret != 0:
+            raise RuntimeError(f"cgemm_nvfp4_moe_sm100_init failed: {ret}")
+
+        _moe_batched_cache = {"key": key, "workspace": workspace}
+
+    D_out = torch.empty(num_experts * max_M * N, dtype=torch.bfloat16, device=A_batched.device)
+
+    ret = lib.cgemm_nvfp4_moe_sm100_run(
+        get_ptr(A_batched), get_ptr(B_batched),
+        get_ptr(SFA), get_ptr(SFB),
+        get_ptr(D_out),
+        ct.c_float(alpha),
+        ct.c_void_p(_get_tensor_stream(A_batched)),
+    )
+    if ret != 0:
+        raise RuntimeError(f"cgemm_nvfp4_moe_sm100_run failed: {ret}")
+
+    return D_out.view(num_experts, max_M, N)

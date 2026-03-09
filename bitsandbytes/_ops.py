@@ -559,3 +559,35 @@ def _(
     # total_tokens = number of rows in A_concat = A_concat.numel() / (K/2)
     total_tokens = A_concat.numel() // (K // 2)
     return torch.empty(total_tokens, N, dtype=torch.bfloat16, device=A_concat.device)
+
+
+# Batched NVFP4 GEMM for MoE inference (SM_100 datacenter Blackwell)
+# All experts compute max_M rows (padded); CUDA-graph friendly.
+# A_batched:   (num_experts * max_M * K // 2,) packed FP4 activations
+# B_batched:   (num_experts * N * K // 2,)     packed FP4 weights
+# SFA:         batched swizzled activation scales (L per-expert copies concatenated)
+# SFB:         batched swizzled weight scales (L per-expert copies concatenated)
+torch.library.define(
+    "bitsandbytes::gemm_nvfp4_moe",
+    "(Tensor A_batched, Tensor B_batched, Tensor SFA, Tensor SFB, "
+    "float alpha, int max_M, int N, int K, int num_experts) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::gemm_nvfp4_moe")
+def _(
+    A_batched: torch.Tensor,
+    B_batched: torch.Tensor,
+    SFA: torch.Tensor,
+    SFB: torch.Tensor,
+    alpha: float,
+    max_M: int,
+    N: int,
+    K: int,
+    num_experts: int,
+) -> torch.Tensor:
+    torch._check_is_size(max_M)
+    torch._check_is_size(N)
+    torch._check_is_size(K)
+    torch._check_is_size(num_experts)
+    return torch.empty(num_experts, max_M, N, dtype=torch.bfloat16, device=A_batched.device)
