@@ -1387,7 +1387,7 @@ def gemm_nvfp4_grouped(
         K: Input dimension per expert.
 
     Returns:
-        Output tensor of shape (total_tokens, N) in float32 with tensor scales applied.
+        Output tensor of shape (total_tokens, N) in bfloat16 with tensor scales applied.
     """
     num_experts = expert_offsets.numel() - 1
 

@@ -1151,71 +1151,10 @@ def _gemm_nvfp4_grouped_raw(
 
 
 # Cached state for grouped SM_100 GEMM
-_grouped_sfb_cache: Optional[tuple[int, torch.Tensor]] = None  # (data_ptr, per-expert swizzled)
 _grouped_restype_set = False
 
 # Cached buffers for the fused C dispatch (keyed by (offsets_tuple, N, K))
 _grouped_fused_cache: Optional[dict] = None
-
-
-def _prepare_per_expert_sfb(
-    SFB_all: torch.Tensor, N: int, K: int, num_experts: int,
-) -> torch.Tensor:
-    """Convert globally-swizzled SFB to per-expert independently-swizzled format.
-
-    Cached by SFB_all.data_ptr() — only runs once per set of weights.
-    Returns a contiguous buffer with each expert's SFB independently swizzled.
-    """
-    global _grouped_sfb_cache
-    sfb_ptr = SFB_all.data_ptr()
-    if _grouped_sfb_cache is not None and _grouped_sfb_cache[0] == sfb_ptr:
-        return _grouped_sfb_cache[1]
-
-    scale_W = K // 16
-    device = SFB_all.device
-    n_col_blocks = (scale_W + 3) // 4
-    n_sfb_row_blocks = (N + 127) // 128
-    sfb_per_expert_bytes = n_sfb_row_blocks * n_col_blocks * 512
-
-    # Un-swizzle globally-swizzled SFB to row-major (1 launch)
-    sfb_total_rows = num_experts * N
-    sfb_rowmajor = torch.ops.bitsandbytes.scale_from_blocked(SFB_all, sfb_total_rows, scale_W)
-    sfb_rowmajor = sfb_rowmajor.view(sfb_total_rows, scale_W)
-
-    # Batched per-expert re-swizzle using the batched kernel (1 launch)
-    import numpy as np
-    expert_row_offsets_h = [e * N for e in range(num_experts)]
-    expert_M_h = [N] * num_experts
-    expert_out_offsets_h = [e * sfb_per_expert_bytes for e in range(num_experts)]
-
-    meta_host = np.empty(3 * num_experts, dtype=np.int32)
-    meta_host[0:num_experts] = expert_row_offsets_h
-    meta_host[num_experts:2*num_experts] = expert_M_h
-    meta_host[2*num_experts:3*num_experts] = expert_out_offsets_h
-
-    meta_dev = torch.from_numpy(meta_host).to(device=device)
-    meta_base = meta_dev.data_ptr()
-
-    total_sfb_out_bytes = num_experts * sfb_per_expert_bytes
-    sfb_out = torch.empty(total_sfb_out_bytes, dtype=torch.uint8, device=device)
-
-    max_row_blocks = n_sfb_row_blocks
-    stream = _get_tensor_stream(SFB_all)
-
-    lib.cscale_to_blocked_batched(
-        get_ptr(sfb_rowmajor),
-        get_ptr(sfb_out),
-        ct.c_void_p(meta_base),
-        ct.c_void_p(meta_base + num_experts * 4),
-        ct.c_void_p(meta_base + 2 * num_experts * 4),
-        ct.c_int(scale_W),
-        ct.c_int(num_experts),
-        ct.c_int(max_row_blocks),
-        stream,
-    )
-
-    _grouped_sfb_cache = (sfb_ptr, sfb_out)
-    return sfb_out
 
 
 def _get_fused_buffers(
@@ -1298,6 +1237,10 @@ def _gemm_nvfp4_grouped_sm100(
     All metadata computation and pointer building happens in C.
     Python only allocates output and passes pre-cached buffers.
 
+    SFB_all is already per-expert swizzled (each expert was independently
+    quantized by quantize_nvfp4, which swizzles each expert's scales
+    separately). No conversion needed.
+
     offsets_host: host-side tuple of cumulative token offsets (num_experts + 1 ints).
     """
     device = A_concat.device
@@ -1305,18 +1248,16 @@ def _gemm_nvfp4_grouped_sm100(
     # Get or build cached buffers
     buf = _get_fused_buffers(offsets_host, N, K, num_experts, device)
 
-    # SFB: per-expert swizzle (cached by weight data_ptr)
-    SFB_per_expert = _prepare_per_expert_sfb(SFB_all, N, K, num_experts)
-
-    # Output
+    # Output (BF16 — CUTLASS accumulates in FP32, epilogue outputs BF16)
     D_concat = torch.empty(buf["total_tokens"], N, dtype=torch.bfloat16, device=device)
 
     # Single fused C call: SFA swizzle + metadata build + GEMM launch
+    # SFB_all is passed directly — already per-expert swizzled from quantize_nvfp4
     lib.cgemm_nvfp4_grouped_sm100_fused(
         get_ptr(A_concat),
         get_ptr(B_all),
         get_ptr(SFA_rowmajor),
-        get_ptr(SFB_per_expert),
+        get_ptr(SFB_all),
         get_ptr(D_concat),
         buf["host_offsets_arr"],
         ct.c_int(N),
@@ -1331,7 +1272,7 @@ def _gemm_nvfp4_grouped_sm100(
         _get_tensor_stream(A_concat),
     )
 
-    return D_concat.float()
+    return D_concat
 
 
 @register_kernel("bitsandbytes::gemm_nvfp4_grouped", "cuda")
@@ -1351,7 +1292,8 @@ def _(
     """Grouped NVFP4 GEMM for MoE: fuse all expert GEMMs into one launch.
 
     SFA_rowmajor: row-major activation scales (NOT swizzled).
-    SFB_all: globally-swizzled weight scales (SM_100 converts to per-expert internally).
+    SFB_all: per-expert swizzled weight scales (each expert independently swizzled
+             by quantize_nvfp4, then concatenated).
     """
     # SM_100 (datacenter Blackwell): use CUTLASS grouped GEMM
     major, _ = torch.cuda.get_device_capability(A_concat.device)
@@ -1381,5 +1323,6 @@ def _(
             expert_offsets, cumul_m_tiles, N, K, num_experts, total_tiles,
         )
 
-    # Apply tensor scales
-    return D_concat.float() * (A_tensor_scale * B_tensor_scale)
+    # Apply tensor scales (SM_120 kernel has no alpha epilogue)
+    D_concat *= A_tensor_scale * B_tensor_scale
+    return D_concat
