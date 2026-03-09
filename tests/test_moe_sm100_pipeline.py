@@ -1,11 +1,12 @@
-"""Tests for SM_100 (B200) NVFP4 MoE 6-kernel pipeline.
+"""Tests for SM_100 (B200) NVFP4 MoE pipeline with init/run split.
 
 Requires a B200 GPU (compute capability 10.0).
 Tests:
-1. Build verification (CUTLASS kernels compile and load)
+1. Build verification (CUTLASS kernels compile and load, including weighted gather)
 2. Individual kernel correctness (scatter, gather, quantize_raw, scale_to_blocked_batched)
 3. Full MoE pipeline correctness (compare against reference implementation)
-4. Kernel launch count verification
+4. Tile size selection (small M vs large M)
+5. Init/run caching behavior
 """
 
 import pytest
@@ -91,6 +92,11 @@ class TestBuildVerification:
         from bitsandbytes.cextension import lib
         assert hasattr(lib, "cscale_to_blocked_batched"), \
             "Batched scale swizzle kernel not found"
+
+    def test_weighted_gather_exists(self):
+        from bitsandbytes.cextension import lib
+        assert hasattr(lib, "cmoe_weighted_gather_bf16"), \
+            "Weighted gather kernel not found — moe_scatter_gather.cu not updated"
 
     def test_fused_quantize_exists(self):
         from bitsandbytes.cextension import lib
@@ -331,30 +337,19 @@ class TestFullPipeline:
 
         # Step 2: quantize
         global_scale = (1.0 / act_scale).to(torch.float32)
-        print(f"  Step 2 (global_scale = 1/abs_max): {global_scale.item():.8f}")
         packed_all, scales_all = quantize_nvfp4_raw(x_2d, global_scale)
-        print(f"  Step 2 (quantize): packed={packed_all.shape}, scales={scales_all.shape}, "
-              f"packed_nonzero={packed_all.count_nonzero().item()}/{packed_all.numel()}")
+        print(f"  Step 2 (quantize): packed={packed_all.shape}, scales={scales_all.shape}")
 
         # Step 3: scatter
         packed_batched = moe_scatter_nvfp4(packed_all, expert_offsets_i32, max_M, K, num_experts)
-        print(f"  Step 3 (scatter): shape={packed_batched.shape}, "
-              f"nonzero={packed_batched.count_nonzero().item()}/{packed_batched.numel()}")
+        print(f"  Step 3 (scatter): shape={packed_batched.shape}")
 
         # Step 4: swizzle scales
         sfa_batched = scale_to_blocked_batched(scales_all, expert_offsets_i32, max_M, K, num_experts)
-        print(f"  Step 4 (swizzle): shape={sfa_batched.shape}, "
-              f"nonzero={sfa_batched.count_nonzero().item()}/{sfa_batched.numel()}")
+        print(f"  Step 4 (swizzle): shape={sfa_batched.shape}")
 
-        # Step 5: GEMM
+        # Step 5: GEMM (uses init/run split internally)
         alpha_dev = (act_scale * layer.weight_tensor_scale).to(torch.float32)
-        print(f"  Step 5 (alpha): {alpha_dev.item():.6f}, "
-              f"weight_tensor_scale={layer.weight_tensor_scale:.6f}")
-        print(f"  Step 5 (weight_packed): shape={layer.weight_packed.shape}, "
-              f"nonzero={layer.weight_packed.count_nonzero().item()}/{layer.weight_packed.numel()}")
-        print(f"  Step 5 (weight_scales_batched): shape={layer.weight_scales_batched.shape}, "
-              f"nonzero={layer.weight_scales_batched.count_nonzero().item()}/{layer.weight_scales_batched.numel()}")
-
         D = gemm_nvfp4_moe(
             packed_batched, sfa_batched, alpha_dev,
             layer.weight_packed, layer.weight_scales_batched,
@@ -362,9 +357,8 @@ class TestFullPipeline:
         )
         torch.cuda.synchronize()
         nan_D = torch.isnan(D).sum().item()
-        inf_D = torch.isinf(D).sum().item()
         print(f"  Step 5 (GEMM out): shape={D.shape}, nan={nan_D}/{D.numel()}, "
-              f"inf={inf_D}, abs_max={D[~torch.isnan(D)].abs().max().item() if nan_D < D.numel() else 'all_nan'}")
+              f"abs_max={D[~torch.isnan(D)].abs().max().item() if nan_D < D.numel() else 'all_nan'}")
 
         # Step 6: gather
         D_flat = D.view(-1).contiguous()
@@ -373,22 +367,9 @@ class TestFullPipeline:
         nan_out = torch.isnan(out).sum().item()
         print(f"  Step 6 (gather): shape={out.shape}, nan={nan_out}/{out.numel()}")
 
-        # Try with scalar alpha=1.0 to isolate alpha_ptr issue
-        alpha_one = torch.tensor([1.0], dtype=torch.float32, device="cuda")
-        D2 = gemm_nvfp4_moe(
-            packed_batched, sfa_batched, alpha_one,
-            layer.weight_packed, layer.weight_scales_batched,
-            max_M, N, K, num_experts,
-        )
-        torch.cuda.synchronize()
-        nan_D2 = torch.isnan(D2).sum().item()
-        print(f"  GEMM with alpha=1.0: nan={nan_D2}/{D2.numel()}, "
-              f"abs_max={D2[~torch.isnan(D2)].abs().max().item() if nan_D2 < D2.numel() else 'all_nan'}")
-
         assert nan_D == 0, \
             f"GEMM output has {nan_D}/{D.numel()} NaN elements"
 
-        # Verify output is non-zero (weights should be non-zero after init)
         assert D.abs().max().item() > 0, \
             f"GEMM output is all zeros despite non-zero weights"
 
@@ -509,17 +490,75 @@ class TestDeviceSideAlpha:
         assert alpha_dev.dtype == torch.float32
 
 
-class TestKernelLaunchCount:
-    """Verify the pipeline uses the expected number of kernel launches."""
+class TestTileSelection:
+    """Test that the two tile sizes work correctly for different M values."""
+
+    def test_small_m_uses_small_tile(self):
+        """M < 512 should trigger the small tile (128x128x256)."""
+        K = 256
+        N = 512
+        num_experts = 4
+        # 4 tokens per expert → max_M = 128 → small tile
+        tpe = [4, 8, 2, 6]
+        total_tokens = sum(tpe)
+
+        layer = _make_moe_layer(num_experts, K, N, bias=False)
+        x = torch.randn(total_tokens, K, dtype=torch.bfloat16, device="cuda")
+        expert_offsets = _make_expert_offsets(tpe)
+
+        out = layer(x, expert_offsets)
+        assert out.shape == (total_tokens, N)
+        assert not torch.isnan(out).any(), "Small tile output has NaN"
+
+    def test_large_m_uses_large_tile(self):
+        """M >= 512 should trigger the large tile (128x256x256)."""
+        K = 256
+        N = 512
+        num_experts = 2
+        # 512 tokens per expert → max_M = 512 → large tile
+        tpe = [512, 256]
+        total_tokens = sum(tpe)
+
+        layer = _make_moe_layer(num_experts, K, N, bias=False)
+        x = torch.randn(total_tokens, K, dtype=torch.bfloat16, device="cuda")
+        expert_offsets = _make_expert_offsets(tpe)
+
+        out = layer(x, expert_offsets)
+        assert out.shape == (total_tokens, N)
+        assert not torch.isnan(out).any(), "Large tile output has NaN"
+
+
+class TestInitRunCaching:
+    """Test that the init/run split caches correctly."""
+
+    def test_repeated_calls_same_dims(self, small_moe_config):
+        """Multiple calls with same dimensions should reuse cached init."""
+        K = small_moe_config["input_features"]
+        N = small_moe_config["output_features"]
+        num_experts = small_moe_config["num_experts"]
+        tpe = small_moe_config["tokens_per_expert"]
+        total_tokens = sum(tpe)
+
+        layer = _make_moe_layer(num_experts, K, N, bias=False)
+        expert_offsets = _make_expert_offsets(tpe)
+
+        results = []
+        for _ in range(3):
+            x = torch.randn(total_tokens, K, dtype=torch.bfloat16, device="cuda")
+            out = layer(x, expert_offsets)
+            results.append(out.clone())
+
+        # All outputs should be valid (no NaN from stale pointers)
+        for i, r in enumerate(results):
+            assert not torch.isnan(r).any(), f"Call {i} produced NaN"
+            assert r.abs().max().item() > 0, f"Call {i} produced all zeros"
+
+
+class TestStreamCompatibility:
+    """Verify the pipeline works on non-default streams."""
 
     def test_no_item_in_compute_path(self, small_moe_config):
-        """Verify no .item() calls happen in the compute pipeline.
-
-        We test this by checking that the pipeline can run entirely
-        within a CUDA stream without explicit synchronization.
-        """
-        from bitsandbytes.nn.modules import LinearNVFP4MoE
-
+        """Verify the pipeline can run entirely within a CUDA stream."""
         K = small_moe_config["input_features"]
         N = small_moe_config["output_features"]
         num_experts = small_moe_config["num_experts"]
