@@ -937,6 +937,54 @@ def _(
     return _fused_quantize_nvfp4_impl(A, tensor_scale)
 
 
+@register_kernel("bitsandbytes::cutlass_fused_quantize_nvfp4_raw", "cuda")
+def _(
+    A: torch.Tensor,
+    global_scale_dev: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Device-side quantize: global_scale is a pre-computed device tensor.
+
+    Returns (packed_data, block_scales_rowmajor) — no swizzling, no QuantState.
+    The global_scale_dev tensor should contain 1.0/tensor_scale as a float32
+    scalar on the GPU (0-dim or 1-element tensor).
+    """
+    A = A.contiguous()
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
+    torch._check(
+        A.dtype == torch.bfloat16,
+        lambda: f"CUTLASS fused quantize requires bfloat16, got {A.dtype}",
+    )
+
+    K = 16
+    orig_M = n // K
+    padded_M = ((orig_M + 127) // 128) * 128
+
+    if padded_M != orig_M:
+        A_2d = A.view(orig_M, K)
+        A_2d = torch.nn.functional.pad(A_2d, (0, 0, 0, padded_M - orig_M))
+        A_flat = A_2d.reshape(-1)
+    else:
+        A_flat = A
+
+    packed_padded = torch.zeros(padded_M * K // 2, dtype=torch.uint8, device=A.device)
+    scales_padded = torch.zeros(padded_M, dtype=torch.uint8, device=A.device)
+
+    _fused_quantize_nvfp4_raw(
+        A_flat,
+        _get_rotation_matrix(A.device),
+        packed_padded,
+        scales_padded,
+        global_scale_dev.to(dtype=torch.float32).contiguous(),
+        padded_M,
+    )
+
+    packed = packed_padded[: orig_M * K // 2] if padded_M != orig_M else packed_padded
+    block_scales = scales_padded[:orig_M] if padded_M != orig_M else scales_padded
+
+    return packed, block_scales
+
+
 # Scale reordering for CUTLASS block-scaled GEMM
 @register_kernel("bitsandbytes::scale_to_blocked", "cuda")
 def _(scales: torch.Tensor, H: int, W: int) -> torch.Tensor:

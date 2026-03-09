@@ -1204,6 +1204,33 @@ def quantize_nvfp4(
     return packed, state
 
 
+def quantize_nvfp4_raw(
+    A: torch.Tensor,
+    global_scale_dev: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Quantize to NVFP4 with a pre-computed device-side global scale.
+
+    Unlike quantize_nvfp4(), this variant:
+    - Takes global_scale as a device tensor (1/abs_max), no .item() sync
+    - Skips scale_to_blocked (caller uses scale_to_blocked_batched instead)
+    - Returns raw (packed_data, block_scales_rowmajor) without QuantState
+
+    Args:
+        A: Input tensor (bfloat16). Must have numel divisible by 16.
+        global_scale_dev: Device tensor containing 1.0/tensor_scale (float32).
+
+    Returns:
+        Tuple of (packed_data [uint8], block_scales_rowmajor [uint8]).
+    """
+    A_flat = A.reshape(-1).contiguous()
+    A_bf16 = A_flat.to(torch.bfloat16) if A_flat.dtype != torch.bfloat16 else A_flat
+
+    packed, block_scales = torch.ops.bitsandbytes.cutlass_fused_quantize_nvfp4_raw(
+        A_bf16, global_scale_dev,
+    )
+    return packed, block_scales
+
+
 def dequantize_nvfp4(
     packed_data: torch.Tensor,
     quant_state: NVFP4QuantState,

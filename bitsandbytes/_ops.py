@@ -470,6 +470,26 @@ def _(
     return packed, block_scales, ts_out
 
 
+# Device-side quantize variant: global_scale is a device tensor (no .item() sync).
+# Returns (packed, block_scales) — row-major scales without swizzling.
+torch.library.define(
+    "bitsandbytes::cutlass_fused_quantize_nvfp4_raw",
+    "(Tensor A, Tensor global_scale_dev) -> (Tensor, Tensor)",
+)
+
+
+@register_fake("bitsandbytes::cutlass_fused_quantize_nvfp4_raw")
+def _(
+    A: torch.Tensor,
+    global_scale_dev: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    n = A.numel()
+    torch._check(n % 16 == 0, lambda: f"NVFP4 requires numel divisible by 16, got {n}")
+    packed = torch.empty(n // 2, dtype=torch.uint8, device=A.device)
+    block_scales = torch.empty(n // 16, dtype=torch.uint8, device=A.device)
+    return packed, block_scales
+
+
 # Scale reordering for CUTLASS block-scaled GEMM
 torch.library.define(
     "bitsandbytes::scale_to_blocked",
