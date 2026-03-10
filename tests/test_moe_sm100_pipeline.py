@@ -623,6 +623,143 @@ class TestInitRunCaching:
             assert r.abs().max().item() > 0, f"Call {i} produced all zeros"
 
 
+class TestWeightedGather:
+    """Test the fused weighted gather path."""
+
+    def _simulate_topk_routing(self, num_unique_tokens, num_experts, top_k, device="cuda"):
+        """Simulate top-k MoE routing to produce assignment arrays.
+
+        Returns (x_sorted, expert_offsets, token_ids, gating_weights, num_unique_tokens)
+        where x_sorted is the concatenated activations sorted by expert assignment.
+        """
+        # Each unique token is routed to top_k experts
+        total_assignments = num_unique_tokens * top_k
+
+        # Random expert selection (top_k per token)
+        expert_ids_per_token = []
+        for _ in range(num_unique_tokens):
+            chosen = torch.randperm(num_experts, device=device)[:top_k]
+            expert_ids_per_token.append(chosen)
+        expert_ids_flat = torch.cat(expert_ids_per_token)  # [total_assignments]
+
+        # Token IDs: each token appears top_k times
+        token_ids = torch.arange(num_unique_tokens, device=device, dtype=torch.int32)
+        token_ids = token_ids.repeat_interleave(top_k)  # [total_assignments]
+
+        # Sort by expert for the concatenated layout
+        sort_indices = expert_ids_flat.argsort(stable=True)
+        expert_ids_sorted = expert_ids_flat[sort_indices]
+        token_ids_sorted = token_ids[sort_indices]
+
+        # Build expert_offsets from sorted expert IDs
+        offsets = [0]
+        for e in range(num_experts):
+            offsets.append(offsets[-1] + (expert_ids_sorted == e).sum().item())
+        expert_offsets = torch.tensor(offsets, dtype=torch.int32, device=device)
+
+        # Random gating weights (softmax normalized per token)
+        raw_weights = torch.randn(num_unique_tokens, top_k, device=device)
+        gating_weights_per_token = torch.softmax(raw_weights, dim=-1)
+        gating_weights_flat = gating_weights_per_token.flatten()  # [total_assignments]
+        gating_weights_sorted = gating_weights_flat[sort_indices].float()
+
+        return expert_offsets, token_ids_sorted, gating_weights_sorted, total_assignments
+
+    def test_weighted_gather_output_shape(self, small_moe_config):
+        """Weighted gather should produce [num_unique_tokens, N] output."""
+        K = small_moe_config["input_features"]
+        N = small_moe_config["output_features"]
+        num_experts = small_moe_config["num_experts"]
+
+        num_unique_tokens = 16
+        top_k = 2
+        layer = _make_moe_layer(num_experts, K, N, bias=False)
+
+        expert_offsets, token_ids, gating_weights, total_assignments = \
+            self._simulate_topk_routing(num_unique_tokens, num_experts, top_k)
+
+        x = torch.randn(total_assignments, K, dtype=torch.bfloat16, device="cuda")
+
+        out = layer(
+            x, expert_offsets,
+            token_ids=token_ids,
+            gating_weights=gating_weights,
+            num_dest_tokens=num_unique_tokens,
+        )
+
+        assert out.shape == (num_unique_tokens, N), \
+            f"Expected shape ({num_unique_tokens}, {N}), got {out.shape}"
+        assert out.dtype == torch.bfloat16
+
+    def test_weighted_gather_correctness(self, small_moe_config):
+        """Weighted gather should match manual weight+sum over unweighted gather."""
+        K = small_moe_config["input_features"]
+        N = small_moe_config["output_features"]
+        num_experts = small_moe_config["num_experts"]
+
+        num_unique_tokens = 8
+        top_k = 2
+        layer = _make_moe_layer(num_experts, K, N, bias=False)
+
+        expert_offsets, token_ids, gating_weights, total_assignments = \
+            self._simulate_topk_routing(num_unique_tokens, num_experts, top_k)
+
+        x = torch.randn(total_assignments, K, dtype=torch.bfloat16, device="cuda")
+
+        # Path 1: unweighted gather → manual weight + sum
+        out_unweighted = layer(x, expert_offsets)
+        ref = torch.zeros(num_unique_tokens, N, dtype=torch.float32, device="cuda")
+        for i in range(total_assignments):
+            tid = token_ids[i].item()
+            w = gating_weights[i].item()
+            ref[tid] += w * out_unweighted[i].float()
+        ref = ref.to(torch.bfloat16)
+
+        # Path 2: weighted gather (fused)
+        out_weighted = layer(
+            x, expert_offsets,
+            token_ids=token_ids,
+            gating_weights=gating_weights,
+            num_dest_tokens=num_unique_tokens,
+        )
+
+        # Compare: should be close (FP32 accumulation differences)
+        abs_diff = (out_weighted.float() - ref.float()).abs()
+        max_diff = abs_diff.max().item()
+        ref_abs_max = ref.float().abs().max().item()
+        rel_error = max_diff / (ref_abs_max + 1e-8)
+
+        print(f"\n  Weighted vs manual: max_diff={max_diff:.6f}, "
+              f"rel_error={rel_error:.6f}")
+        assert rel_error < 0.05, \
+            f"Weighted gather rel_error {rel_error:.4f} exceeds tolerance (5%)"
+
+    def test_weighted_gather_with_bias(self, small_moe_config):
+        """Weighted gather with bias should include bias in weighted sum."""
+        K = small_moe_config["input_features"]
+        N = small_moe_config["output_features"]
+        num_experts = small_moe_config["num_experts"]
+
+        num_unique_tokens = 8
+        top_k = 2
+        layer = _make_moe_layer(num_experts, K, N, bias=True)
+
+        expert_offsets, token_ids, gating_weights, total_assignments = \
+            self._simulate_topk_routing(num_unique_tokens, num_experts, top_k)
+
+        x = torch.randn(total_assignments, K, dtype=torch.bfloat16, device="cuda")
+
+        out = layer(
+            x, expert_offsets,
+            token_ids=token_ids,
+            gating_weights=gating_weights,
+            num_dest_tokens=num_unique_tokens,
+        )
+
+        assert out.shape == (num_unique_tokens, N)
+        assert not torch.isnan(out).any(), "Weighted gather with bias produced NaN"
+
+
 class TestStreamCompatibility:
     """Verify the pipeline works on non-default streams."""
 

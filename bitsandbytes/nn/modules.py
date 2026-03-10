@@ -852,7 +852,15 @@ class LinearNVFP4MoE(nn.Module):
             requires_grad=False,
         )
 
-    def forward(self, x: torch.Tensor, expert_offsets: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        expert_offsets: torch.Tensor,
+        *,
+        token_ids: Optional[torch.Tensor] = None,
+        gating_weights: Optional[torch.Tensor] = None,
+        num_dest_tokens: Optional[int] = None,
+    ) -> torch.Tensor:
         """Run NVFP4 GEMM across all experts.
 
         Uses batched GEMM on SM_100 (datacenter Blackwell) or grouped GEMM
@@ -864,9 +872,18 @@ class LinearNVFP4MoE(nn.Module):
             expert_offsets: Cumulative token offsets [num_experts + 1], int32.
                 expert_offsets[i] is the starting token index for expert i.
                 expert_offsets[-1] = total_tokens.
+            token_ids: Optional mapping from assignment index to output token index
+                [total_tokens] (int32). Required for weighted gather.
+            gating_weights: Optional per-assignment gating weights [total_tokens] (float32).
+                Required for weighted gather.
+            num_dest_tokens: Number of unique destination tokens in the output.
+                Required when token_ids and gating_weights are provided.
 
         Returns:
-            Output tensor [total_tokens, N] with expert results in the same token order.
+            If token_ids and gating_weights are provided:
+                Weighted output tensor [num_dest_tokens, N] with fused gather + weight + sum.
+            Otherwise:
+                Output tensor [total_tokens, N] with per-assignment expert results.
         """
         if not self._quantized:
             self._quantize_weights()
@@ -874,7 +891,11 @@ class LinearNVFP4MoE(nn.Module):
         major, _ = torch.cuda.get_device_capability(x.device)
         from bitsandbytes.cextension import lib
         if major == 10 and hasattr(lib, "cgemm_nvfp4_moe_sm100_init"):
-            return self._forward_batched(x, expert_offsets)
+            return self._forward_batched(
+                x, expert_offsets,
+                token_ids=token_ids, gating_weights=gating_weights,
+                num_dest_tokens=num_dest_tokens,
+            )
         return self._forward_grouped(x, expert_offsets)
 
     def _forward_grouped(self, x: torch.Tensor, expert_offsets: torch.Tensor) -> torch.Tensor:
@@ -899,27 +920,35 @@ class LinearNVFP4MoE(nn.Module):
         )
 
         if self.bias is not None:
-            for i in range(self.num_experts):
-                start = expert_offsets[i].item()
-                end = expert_offsets[i + 1].item()
-                if end > start:
-                    out[start:end] = out[start:end] + self.bias[i].to(out.dtype)
+            expert_offsets_i32 = expert_offsets.to(torch.int32)
+            tokens_per_expert = expert_offsets_i32[1:] - expert_offsets_i32[:-1]
+            bias_expanded = torch.repeat_interleave(self.bias, tokens_per_expert, dim=0)
+            out = out + bias_expanded.to(out.dtype)
 
         return out.to(inp_dtype)
 
-    def _forward_batched(self, x: torch.Tensor, expert_offsets: torch.Tensor) -> torch.Tensor:
+    def _forward_batched(
+        self,
+        x: torch.Tensor,
+        expert_offsets: torch.Tensor,
+        *,
+        token_ids: Optional[torch.Tensor] = None,
+        gating_weights: Optional[torch.Tensor] = None,
+        num_dest_tokens: Optional[int] = None,
+    ) -> torch.Tensor:
         """Batched GEMM path (SM_100 datacenter Blackwell).
 
         Pipeline with init/run split for CUDA graph compatibility:
-          1. abs().max()            — compute tensor scale (device-side)
-          2. quantize_nvfp4_raw     — quantize all tokens in one launch
-          3. cmoe_scatter_nvfp4     — FP4 data → persistent padded buffer
+          1. abs().max()              — compute tensor scale (device-side)
+          2. quantize_nvfp4_raw       — quantize all tokens in one launch
+          3. cmoe_scatter_nvfp4       — FP4 data → persistent padded buffer
           4. scale_to_blocked_batched — scales → persistent swizzled buffer
-          5. batched GEMM run()     — init-if-needed, then just run(stream)
-          6. moe_gather_bf16        — padded per-expert → concatenated output
+          5. batched GEMM run()       — init-if-needed, then just run(stream)
+          6. gather                   — weighted or unweighted depending on args
 
-        All persistent buffers (A, SFA, D, alpha) are cached in the module
-        so their addresses are stable for the CUTLASS init/run split.
+        All persistent buffers (A, SFA, D, alpha, gather workspace) are cached
+        in the module so their addresses are stable for the CUTLASS init/run split.
+        No .item() GPU-CPU sync on the common (decode) path.
         """
         import ctypes as ct
 
@@ -928,21 +957,29 @@ class LinearNVFP4MoE(nn.Module):
         from bitsandbytes.functional import (
             _get_tensor_stream,
             get_ptr,
-            moe_gather_bf16,
             quantize_nvfp4_raw,
-            scale_to_blocked_batched,
         )
 
         inp_dtype = x.dtype
         N, K = self.output_features, self.input_features
         num_experts = self.num_experts
+        total_tokens = x.shape[0]  # CPU int, no GPU sync
+        use_weighted = token_ids is not None and gating_weights is not None
+        dev = x.device
 
         expert_offsets_i32 = expert_offsets.to(torch.int32)
         tokens_per_expert = expert_offsets_i32[1:] - expert_offsets_i32[:-1]
-        # .item() for shape computation — needed for tensor allocation
-        raw_max_M = tokens_per_expert.max().item()
-        max_M = ((raw_max_M + 127) // 128) * 128
-        total_tokens = expert_offsets_i32[-1].item()
+
+        # Determine max_M without GPU sync on common path.
+        # If cache exists and allocated_max_M >= total_tokens (upper bound on
+        # any single expert's count), the buffers are guaranteed sufficient.
+        if (hasattr(self, "_batched_cache")
+                and total_tokens <= self._batched_cache.get("allocated_max_M", 0)):
+            max_M = self._batched_cache["allocated_max_M"]
+        else:
+            # First call or total_tokens exceeds allocation: sync once
+            raw_max_M = tokens_per_expert.max().item()
+            max_M = ((raw_max_M + 127) // 128) * 128
 
         x_2d = x.reshape(-1, K).to(torch.bfloat16).contiguous()
 
@@ -956,7 +993,6 @@ class LinearNVFP4MoE(nn.Module):
         # 3. Ensure persistent cached buffers exist (stable pointers for init/run)
         cache_key = (max_M, N, K, num_experts)
         if not hasattr(self, "_batched_cache") or self._batched_cache.get("key") != cache_key:
-            dev = x.device
             W = K // 16
             n_col_blocks = (W + 3) // 4
             n_row_blocks = (max_M + 127) // 128
@@ -965,12 +1001,31 @@ class LinearNVFP4MoE(nn.Module):
 
             self._batched_cache = {
                 "key": cache_key,
+                "allocated_max_M": max_M,
                 "A_batched": torch.empty(num_experts * max_M * (K // 2), dtype=torch.uint8, device=dev),
                 "SFA_batched": torch.zeros(sfa_total, dtype=torch.uint8, device=dev),
                 "D_out": torch.empty(num_experts * max_M, N, dtype=torch.bfloat16, device=dev),
                 "alpha_dev": torch.empty(1, dtype=torch.float32, device=dev),
+                # Pre-computed constants for scale swizzle
+                "sfa_per_expert": sfa_per_expert,
+                "n_row_blocks": n_row_blocks,
+                "W": W,
+                "expert_out_offsets": torch.arange(
+                    num_experts, dtype=torch.int32, device=dev,
+                ) * sfa_per_expert,
             }
         cache = self._batched_cache
+
+        # Ensure weighted gather buffers exist if needed
+        if use_weighted and num_dest_tokens is not None:
+            if cache.get("gather_num_dest") != num_dest_tokens:
+                cache["gather_workspace"] = torch.empty(
+                    num_dest_tokens * N, dtype=torch.float32, device=dev,
+                )
+                cache["gather_output"] = torch.empty(
+                    num_dest_tokens, N, dtype=torch.bfloat16, device=dev,
+                )
+                cache["gather_num_dest"] = num_dest_tokens
 
         stream = _get_tensor_stream(x_2d)
 
@@ -986,29 +1041,16 @@ class LinearNVFP4MoE(nn.Module):
         )
 
         # 5. Swizzle scales per-expert into persistent buffer
-        W = K // 16
-        n_col_blocks = (W + 3) // 4
-        n_row_blocks = (max_M + 127) // 128
-        sfa_per_expert = n_row_blocks * n_col_blocks * 512
-        sfa_total = num_experts * sfa_per_expert
-
-        expert_row_offsets = expert_offsets_i32[:-1]
-        expert_M_dev = tokens_per_expert.to(torch.int32)
-        expert_out_offsets = torch.arange(
-            num_experts, dtype=torch.int32, device=x.device,
-        ) * sfa_per_expert
-
-        # Zero persistent SFA buffer, then swizzle into it
         cache["SFA_batched"].zero_()
         lib.cscale_to_blocked_batched(
             get_ptr(scales_all),
             get_ptr(cache["SFA_batched"]),
-            get_ptr(expert_row_offsets),
-            get_ptr(expert_M_dev),
-            get_ptr(expert_out_offsets),
-            ct.c_int(W),
+            get_ptr(expert_offsets_i32[:-1]),
+            get_ptr(tokens_per_expert),
+            get_ptr(cache["expert_out_offsets"]),
+            ct.c_int(cache["W"]),
             ct.c_int(num_experts),
-            ct.c_int(n_row_blocks),
+            ct.c_int(cache["n_row_blocks"]),
             stream,
         )
 
@@ -1028,18 +1070,50 @@ class LinearNVFP4MoE(nn.Module):
             max_M, N, K, num_experts,
         )
 
-        # 8. Gather: padded per-expert BF16 → concatenated output
-        out = moe_gather_bf16(
-            cache["D_out"].view(-1), expert_offsets_i32, max_M, N, num_experts, total_tokens,
-        )
-        out = out.view(total_tokens, N)
-
+        # 8. Add bias to GEMM output (before gather, included in weighted sum)
         if self.bias is not None:
-            for i in range(num_experts):
-                start = expert_offsets_i32[i].item()
-                end = expert_offsets_i32[i + 1].item()
-                if end > start:
-                    out[start:end] = out[start:end] + self.bias[i].to(out.dtype)
+            D_out_3d = cache["D_out"].view(num_experts, max_M, N)
+            D_out_3d += self.bias.unsqueeze(1).to(D_out_3d.dtype)
+
+        # 9. Gather: padded per-expert → output
+        if use_weighted and num_dest_tokens is not None:
+            # Derive expert_ids and slot_ids from expert_offsets (all on GPU)
+            expert_ids = torch.repeat_interleave(
+                torch.arange(num_experts, device=dev, dtype=torch.int32),
+                tokens_per_expert,
+            )
+            starts_expanded = torch.repeat_interleave(
+                expert_offsets_i32[:-1], tokens_per_expert,
+            )
+            slot_ids = (
+                torch.arange(total_tokens, device=dev, dtype=torch.int32)
+                - starts_expanded
+            )
+
+            # Fused weighted gather: gather + weight + FP32 accumulate + BF16 convert
+            lib.cmoe_weighted_gather_bf16(
+                get_ptr(cache["D_out"]),
+                get_ptr(cache["gather_output"]),
+                get_ptr(cache["gather_workspace"]),
+                get_ptr(token_ids.to(torch.int32)),
+                get_ptr(expert_ids),
+                get_ptr(slot_ids),
+                get_ptr(gating_weights.to(torch.float32)),
+                ct.c_int(total_tokens),
+                ct.c_int(num_dest_tokens),
+                ct.c_int(max_M),
+                ct.c_int(N),
+                stream,
+            )
+            out = cache["gather_output"]
+        else:
+            # Unweighted gather (backwards compatible path)
+            from bitsandbytes.functional import moe_gather_bf16
+            out = moe_gather_bf16(
+                cache["D_out"].view(-1), expert_offsets_i32,
+                max_M, N, num_experts, total_tokens,
+            )
+            out = out.view(total_tokens, N)
 
         return out.to(inp_dtype)
 
