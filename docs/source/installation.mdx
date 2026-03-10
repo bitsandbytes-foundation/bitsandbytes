@@ -189,6 +189,9 @@ pip install -e .
 * All features are supported for both consumer RDNA devices and Data Center CDNA products.
 * A compatible PyTorch version with AMD ROCm support is required. It is recommended to use the latest stable release. See [PyTorch on ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/3rd-party/pytorch-install.html) for guidance.
 
+> [!TIP]
+> If `rocminfo` is unavailable in your runtime environment, set `BNB_ROCM_GPU_ARCH` (for example `BNB_ROCM_GPU_ARCH=gfx90a`) to skip automatic detection.
+
 ### Installation from PyPI[[rocm-pip]]
 
 This is the most straightforward and recommended installation option.

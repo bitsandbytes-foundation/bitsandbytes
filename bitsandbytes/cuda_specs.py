@@ -1,6 +1,7 @@
 import dataclasses
 from functools import lru_cache
 import logging
+import os
 import platform
 import re
 import subprocess
@@ -83,6 +84,14 @@ def get_rocm_gpu_arch() -> str:
     """Get ROCm GPU architecture."""
     logger = logging.getLogger(__name__)
     try:
+        override = os.environ.get("BNB_ROCM_GPU_ARCH") or os.environ.get("BNB_ROCM_ARCH")
+        if override:
+            override = override.strip()
+            if override:
+                if not override.startswith("gfx"):
+                    override = f"gfx{override}"
+                logger.info("Using ROCm GPU arch override: %s", override)
+                return override
         if torch.version.hip:
             # On Windows, use hipinfo.exe; on Linux, use rocminfo
             if platform.system() == "Windows":
