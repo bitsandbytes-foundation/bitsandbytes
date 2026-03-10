@@ -167,10 +167,11 @@ def bench_nvfp4_gemm_graph(max_M, N, K, num_experts):
         lib.cgemm_nvfp4_moe_sm100_run(stream_ptr)
     torch.cuda.synchronize()
 
-    # Capture graph of run()
+    # Capture graph of run() — must use the capture stream, not the default stream
     graph = torch.cuda.CUDAGraph()
     with torch.cuda.graph(graph):
-        lib.cgemm_nvfp4_moe_sm100_run(stream_ptr)
+        capture_stream_ptr = ct.c_void_p(torch.cuda.current_stream().cuda_stream)
+        lib.cgemm_nvfp4_moe_sm100_run(capture_stream_ptr)
 
     # Warm graph replay
     for _ in range(WARMUP):
@@ -272,13 +273,14 @@ def bench_nvfp4_pipeline_graph(layer, x, expert_offsets):
         max_M, N, K, num_experts, stream,
     )
 
-    # Define the pipeline kernel sequence
+    # Define the pipeline kernel sequence — uses current stream (changes during graph capture)
     def pipeline():
+        s = ct.c_void_p(torch.cuda.current_stream().cuda_stream)
         # Scatter FP4 data
         lib.cmoe_scatter_nvfp4(
             get_ptr(packed_all), get_ptr(cache["A_batched"]),
             get_ptr(expert_offsets_i32),
-            ct.c_int(max_M), ct.c_int(K), ct.c_int(num_experts), stream,
+            ct.c_int(max_M), ct.c_int(K), ct.c_int(num_experts), s,
         )
         # Swizzle scales
         cache["SFA_batched"].zero_()
@@ -286,16 +288,16 @@ def bench_nvfp4_pipeline_graph(layer, x, expert_offsets):
             get_ptr(scales_all), get_ptr(cache["SFA_batched"]),
             get_ptr(expert_row_offsets), get_ptr(expert_M_dev),
             get_ptr(expert_out_offsets),
-            ct.c_int(W), ct.c_int(num_experts), ct.c_int(n_row_blocks), stream,
+            ct.c_int(W), ct.c_int(num_experts), ct.c_int(n_row_blocks), s,
         )
         # GEMM run
-        lib.cgemm_nvfp4_moe_sm100_run(stream)
+        lib.cgemm_nvfp4_moe_sm100_run(s)
         # Gather
         lib.cmoe_gather_bf16(
             get_ptr(cache["D_out"].view(-1)), get_ptr(gather_out),
             get_ptr(expert_offsets_i32),
             ct.c_int(max_M), ct.c_int(N), ct.c_int(num_experts),
-            ct.c_int(total_tokens), stream,
+            ct.c_int(total_tokens), s,
         )
 
     # Warmup
