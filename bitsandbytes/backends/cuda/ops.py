@@ -2106,6 +2106,49 @@ def _(data: torch.Tensor, dim: int, signs: Optional[torch.Tensor]) -> torch.Tens
     return data
 
 
+class _WorkspaceCache:
+    """Per-device cache for split-K workspace buffers (C_workspace + tile_counters).
+
+    Avoids repeated torch.zeros allocations in the default (non-workspace) path.
+    Buffers are allocated at the max size seen per device and reused via views.
+    The _impl functions call .zero_() on the views, so only used elements are zeroed.
+
+    Memory cost is modest: at M=16 with N=5120, C_workspace is 320 KB (float32)
+    and tile_counters is <1 KB.  For MoE with 8 experts × max_M=16, C_workspace
+    is ~2.5 MB.  Buffers are never freed until process exit.
+
+    Not thread-safe — assumes single-threaded inference (typical for LLM serving).
+    """
+
+    def __init__(self):
+        # {device_index: (flat_ws_tensor, flat_tc_tensor)}
+        self._cache: dict[int, tuple[torch.Tensor, torch.Tensor]] = {}
+
+    def get(self, device: torch.device, ws_numel: int, tc_numel: int):
+        """Return (C_workspace_flat, tile_counters_flat) views of cached buffers.
+
+        Grows the cache if needed, never shrinks.
+        """
+        idx = device.index if device.index is not None else 0
+        if idx in self._cache:
+            ws_buf, tc_buf = self._cache[idx]
+            if ws_buf.numel() >= ws_numel and tc_buf.numel() >= tc_numel:
+                return ws_buf[:ws_numel], tc_buf[:tc_numel]
+
+        # Allocate with 2x headroom to reduce re-allocations
+        ws_buf = torch.empty(max(ws_numel * 2, 1), device=device, dtype=torch.float32)
+        tc_buf = torch.empty(max(tc_numel * 2, 1024), device=device, dtype=torch.int32)
+        self._cache[idx] = (ws_buf, tc_buf)
+        return ws_buf[:ws_numel], tc_buf[:tc_numel]
+
+    def clear(self):
+        """Free all cached buffers."""
+        self._cache.clear()
+
+
+_workspace_cache = _WorkspaceCache()
+
+
 def _kbit_gemm_prod_check(A, B_packed, B_absmax, codebook, N, k, k_chunks):
     torch._check(k >= 2 and k <= 5, lambda: f"k must be 2-5, got {k}")
     torch._check(
@@ -2164,15 +2207,14 @@ def _(
     M = A.shape[0]
     C = torch.empty(M, N, device=A.device, dtype=A.dtype)
 
-    # The persistent kernel auto-selects k_splits and TILE_N internally.
-    # TILE_N=64 for M<=16 gives more tiles; allocate for worst case.
     TILE_M = 16
     TILE_N = 64  # worst case (most tiles)
     m_tiles = (M + TILE_M - 1) // TILE_M
     n_tiles = N // TILE_N
 
-    C_workspace = torch.zeros(M, N, device=A.device, dtype=torch.float32)
-    tile_counters = torch.zeros(m_tiles * n_tiles, device=A.device, dtype=torch.int32)
+    ws_flat, tc_flat = _workspace_cache.get(A.device, M * N, m_tiles * n_tiles)
+    C_workspace = ws_flat.view(M, N)
+    tile_counters = tc_flat
 
     _kbit_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, k, k_chunks, C, C_workspace, tile_counters)
     return C
@@ -2247,8 +2289,9 @@ def _(
     m_tiles = (M + TILE_M - 1) // TILE_M
     n_tiles = N // TILE_N
 
-    C_workspace = torch.zeros(M, N, device=A.device, dtype=torch.float32)
-    tile_counters = torch.zeros(m_tiles * n_tiles, device=A.device, dtype=torch.int32)
+    ws_flat, tc_flat = _workspace_cache.get(A.device, M * N, m_tiles * n_tiles)
+    C_workspace = ws_flat.view(M, N)
+    tile_counters = tc_flat
 
     _vq_gemm_prod_impl(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, C, C_workspace, tile_counters, index_bits)
     return C
@@ -2354,10 +2397,6 @@ def _(
     total_M = A_concat.shape[0]
     C_concat = torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
 
-    # Workspace for split-K atomicAdd reduction
-    C_workspace = torch.zeros(total_M, N, device=A_concat.device, dtype=torch.float32)
-    # Tile counters for split-K last-block detection
-    # Upper bound: num_experts * max_m_tiles * max_n_tiles
     m_blocks = 1
     if max_M > 48:
         m_blocks = 4
@@ -2369,7 +2408,10 @@ def _(
     n_tiles = N // tile_n
     m_tiles = (max_M + m_blocks * 16 - 1) // (m_blocks * 16)
     mn_tiles = num_experts * m_tiles * n_tiles
-    tile_counters = torch.zeros(mn_tiles, device=A_concat.device, dtype=torch.int32)
+
+    ws_flat, tc_flat = _workspace_cache.get(A_concat.device, total_M * N, mn_tiles)
+    C_workspace = ws_flat.view(total_M, N)
+    tile_counters = tc_flat
 
     _kbit_grouped_gemm_impl(
         A_concat,
@@ -2506,9 +2548,6 @@ def _(
     total_M = A_concat.shape[0]
     C_concat = torch.empty(total_M, N, device=A_concat.device, dtype=A_concat.dtype)
 
-    # Workspace for split-K atomicAdd reduction
-    C_workspace = torch.zeros(total_M, N, device=A_concat.device, dtype=torch.float32)
-    # Tile counters for split-K last-block detection
     m_blocks = 1
     if max_M > 48:
         m_blocks = 4
@@ -2520,7 +2559,10 @@ def _(
     n_tiles = N // tile_n
     m_tiles = (max_M + m_blocks * 16 - 1) // (m_blocks * 16)
     mn_tiles = num_experts * m_tiles * n_tiles
-    tile_counters = torch.zeros(mn_tiles, device=A_concat.device, dtype=torch.int32)
+
+    ws_flat, tc_flat = _workspace_cache.get(A_concat.device, total_M * N, mn_tiles)
+    C_workspace = ws_flat.view(total_M, N)
+    tile_counters = tc_flat
 
     _vq_grouped_gemm_impl(
         A_concat,
