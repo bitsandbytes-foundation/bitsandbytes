@@ -378,7 +378,8 @@ def matmul_4bit(
     out: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
 ):
-    assert quant_state is not None
+    if quant_state is None:
+        raise ValueError("quant_state cannot be None")
     # Change dtype to input dtype on CPU
     if A.device.type == "cpu":
         quant_state.dtype = A.dtype
