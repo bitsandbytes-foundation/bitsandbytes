@@ -1578,6 +1578,1017 @@ def gemm_nvfp4_moe(
     )
 
 
+# ---------------------------------------------------------------------------
+# K-bit blockwise quantization (K=2..5, blocksize=32)
+# ---------------------------------------------------------------------------
+
+# Cache for precomputed normal-float codebooks (K -> Tensor on each device)
+_kbit_codebook_cache: dict[tuple[int, torch.device], torch.Tensor] = {}
+
+
+def create_normal_float_codebook(k: int, device=None) -> torch.Tensor:
+    """Create a 2^k-entry normal-float codebook (quantiles of N(0,1), normalized to [-1, 1]).
+
+    For k bits we have 2^k reconstruction levels placed at the expected values
+    of N(0,1) within 2^k equiprobable bins.  The result is sorted ascending
+    and normalized so the largest magnitude is 1.0.
+
+    Args:
+        k: Bit width (2-5).
+        device: Target device. Defaults to "cuda".
+
+    Returns:
+        Float32 tensor of shape (2^k,) with values in [-1, 1].
+    """
+    try:
+        from scipy.stats import norm
+    except ImportError as ie:
+        raise ImportError(
+            "Scipy is required for `create_normal_float_codebook`. Install `bitsandbytes` with the `[test]` extra.",
+        ) from ie
+
+    if device is None:
+        device = torch.device("cuda")
+    device = torch.device(device)
+
+    cache_key = (k, device)
+    if cache_key in _kbit_codebook_cache:
+        return _kbit_codebook_cache[cache_key]
+
+    n_levels = 1 << k
+    quantiles = torch.linspace(0.5 / n_levels, 1.0 - 0.5 / n_levels, n_levels)
+    values = torch.tensor(norm.ppf(quantiles.numpy()), dtype=torch.float32)
+    values = values / values.abs().max()
+    values = values.to(device)
+
+    _kbit_codebook_cache[cache_key] = values
+    return values
+
+
+# Precomputed VQ codebooks (k-means on N(0,1)^p, normalized to [-1,1]).
+# Generated via k-means++ on 1M standard Gaussian samples, 200 iterations.
+# Stored as base64-encoded fp16 bytes for instant loading.
+# Naming: _VQ_CODEBOOK_P{p}_{n_entries}_B64 (256-entry variants keep original names for compat)
+_VQ_CODEBOOK_P2_B64 = "NzXnM96yD7GjrTkzIysVsGq5WDaytGgygzKjL0sw87MrNnC55LD2OIevyLNcuECt5TCaMDI0FjP8M0IxCyRaI4komrW8Mean/bRuq2wtuKo1KdAvA6cXtXC4/jTULWu3uzSqNjs2mKmKrbyiCCN9NC4tbC1zNPGkR7RrNB+txLg6MgM1uak0sK8oDzOPsEQwAzi+L5a27DFqtHex4LXaLJCxTilSNnm0fSybMXktbjabtNEqITC3NOWzRbdyNOc0prAbtYWxK7QZM5Yh8LYdNmAwtC3PsSU4OjcisBKoJrTRsQMuBbevsGCy76D+skAz/yOqNd21crgdtrS2czJDsCg1qKtOqJq3LaTcKV01iyLSN+4yWjRfseCqiaotNM60UzD/OTY1ZjF6NiIxxLTqOAO2j62GpNUyxTf4KAw0dbP8rqo077OfNW8uTjCBray2OTGYJLsw+7E5pSq2XLLJMEC5szH5r3otqbM5LlE1PrVSrzmyATnLtHs1vC2wtpOz5CgfrZOwU5/CpIOtiTORqlI3GDXhOPQxCbi+MXG5DLLrrDOuXSYtNwM6PzSbKJmxiC10svgwxDMWuA24EzMvuda0QS+gMCW14alkNrI4CigFMak4RbhQOD215iHHsMAzzDfrtC+vDqtvK9cofbS7tGUwsDVMr4IouCkJpj+3UbVRq0w49y3ptYkvTzIetwas47HhNJCxirIkLQk0srijtQiyCjsXpQIulK36sJQ6S7UYMAWl2rLftSKtkLV1KOa2cjPpN52xVjYrt2c0ByzSs78pXzhitTg1TKxrLP6lorG5MA+wxDBttr0mXriatdEzYSEaszkyZrdnOP22T7Ftq142cyZGtNGjBzIAMroywrWGM38ssrT3tcMvtze7pk45yzVHNdQ3kTjKtZ+x1TIONKo2/C3VJZW0Cy5krtE0xDjgqTg0Hy8AvEg3u7IhteOv5jmAlHs08C7FMT8sACRvMXSw2bcmt+YtBDYSr2svVinjMsSxJrjSsso1GbhNOBCt2SauLGWvuDVAGqypJjQcuAe0LjFxOFWya7P6KNmwVLZcNqQzNrbuGGQz+TUNMlqzey0Hl0ezN6szsRkyaTG/NgKqNjVtuIkskC28tAsyQK0ftLWumTZPtlMwdrjksNWwOLmDnsWr5LIfNImuyqt0JVY386gfNYizTDCMrDMynbQjsr+u07UCOKe1zjAgKbK55K6QMYMu57Bxsz6zfDjXNYmkYDCzszk3+rRos8003TpXHR+wiDQdKf+0oDblrKYv2qqUMaO3diCYNFu2hywiNXI2OzcdsN6uHjnTrrOm76BEs3C4VK46N4uzjLkTNSGwe62JtPeyurTdNfKxx7XWtA=="
+_VQ_CODEBOOK_P4_B64 = "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"
+# p=3 codebooks (256-entry for 8-bit/p=3, 1024-entry for 10-bit/p=3)
+_VQ_CODEBOOK_P3_256_B64 = "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"
+_VQ_CODEBOOK_P3_1024_B64 = "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"
+# 1024-entry p=2 codebook (for 10-bit/p=2)
+_VQ_CODEBOOK_P2_1024_B64 = "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"
+
+# Cache for precomputed VQ codebooks ((p, n_entries) -> Tensor on each device)
+_vq_codebook_cache: dict[tuple[int, int, torch.device], torch.Tensor] = {}
+
+
+def create_vq_codebook(p: int, n_entries: int = 256, device=None, index_bits: int = 0) -> torch.Tensor:
+    """Create a VQ codebook for p-dimensional standard Gaussian vectors.
+
+    Returns a precomputed codebook trained via k-means on N(0,1)^p samples.
+    Each entry is a p-dimensional vector normalized so that the maximum absolute
+    component across all entries is 1.0.
+
+    Args:
+        p: VQ dimension (2, 3, or 4).
+        n_entries: Number of codebook entries (256 or 1024). Overridden by index_bits if set.
+        device: Target device. Defaults to "cuda".
+        index_bits: If > 0, determines n_entries as 2^index_bits (8->256, 10->1024).
+
+    Returns:
+        Float16 tensor of shape (n_entries, p) with values in [-1, 1].
+    """
+    if index_bits > 0:
+        n_entries = 1 << index_bits
+    import base64
+
+    if device is None:
+        device = torch.device("cuda")
+    device = torch.device(device)
+
+    cache_key = (p, n_entries, device)
+    if cache_key in _vq_codebook_cache:
+        return _vq_codebook_cache[cache_key]
+
+    # Select codebook data based on (p, n_entries)
+    _codebook_map = {
+        (2, 256): _VQ_CODEBOOK_P2_B64,
+        (2, 1024): _VQ_CODEBOOK_P2_1024_B64,
+        (3, 256): _VQ_CODEBOOK_P3_256_B64,
+        (3, 1024): _VQ_CODEBOOK_P3_1024_B64,
+        (4, 256): _VQ_CODEBOOK_P4_B64,
+    }
+    key = (p, n_entries)
+    if key not in _codebook_map:
+        valid = sorted(_codebook_map.keys())
+        raise ValueError(f"No VQ codebook for p={p}, n_entries={n_entries}. Valid: {valid}")
+
+    b64_data = _codebook_map[key]
+    raw = base64.b64decode(b64_data)
+    codebook = torch.frombuffer(bytearray(raw), dtype=torch.float16).reshape(n_entries, p).clone()
+    codebook = codebook.to(device)
+
+    _vq_codebook_cache[cache_key] = codebook
+    return codebook
+
+
+def encode_absmax_e4m4(absmax: Tensor, bias: int = 11) -> Tensor:
+    """Encode fp32 absmax values to uint8 using E4M4 micro-float format.
+
+    Format: 4-bit exponent + 4-bit mantissa with IEEE-style subnormals.
+    Normal   (e > 0): 2^(e - bias) * (1 + m/16)
+    Subnormal (e = 0): 2^(1 - bias) * (m/16)
+    Zero     (e = 0, m = 0): 0.0
+
+    Args:
+        absmax: float32 tensor of per-block absolute maximum values.
+        bias: Exponent bias. Default 11 gives range [6.1e-5, 31.0].
+
+    Returns:
+        uint8 tensor of same shape as absmax.
+    """
+    result = torch.zeros_like(absmax, dtype=torch.uint8)
+    nonzero = absmax > 0
+
+    # Compute exponent: floor(log2(absmax))
+    log2_val = torch.log2(absmax[nonzero])
+    e_unbiased = torch.floor(log2_val).to(torch.int32)
+
+    # Clamp to representable range
+    e_biased = (e_unbiased + bias).clamp(0, 15)
+
+    # Handle subnormals (e_biased <= 0 before clamping)
+    is_subnormal = (e_unbiased + bias) <= 0
+    e_biased[is_subnormal] = 0
+
+    # Compute mantissa
+    abs_nz = absmax[nonzero]
+    # Normal: m = round((absmax / 2^e_unbiased - 1) * 16)
+    # Subnormal: m = round(absmax / 2^(1-bias) * 16)
+    mantissa = torch.zeros_like(abs_nz, dtype=torch.int32)
+
+    normal_mask = ~is_subnormal
+    if normal_mask.any():
+        e_ub_normal = e_unbiased[normal_mask]
+        scale = torch.exp2(e_ub_normal.float())
+        m_float = (abs_nz[normal_mask] / scale - 1.0) * 16.0
+        mantissa[normal_mask] = m_float.round().to(torch.int32).clamp(0, 15)
+
+    if is_subnormal.any():
+        subnormal_scale = 2.0 ** (1 - bias)
+        m_float = abs_nz[is_subnormal] / subnormal_scale * 16.0
+        mantissa[is_subnormal] = m_float.round().to(torch.int32).clamp(0, 15)
+
+    encoded = (e_biased << 4 | mantissa).to(torch.uint8)
+    result[nonzero] = encoded
+    return result
+
+
+def decode_absmax_e4m4(encoded: Tensor, bias: int = 11) -> Tensor:
+    """Decode uint8 E4M4 absmax values to fp32.
+
+    Args:
+        encoded: uint8 tensor of E4M4-encoded absmax values.
+        bias: Exponent bias (must match encoding).
+
+    Returns:
+        float32 tensor of decoded absmax values.
+    """
+    raw = encoded.to(torch.int32)
+    e = raw >> 4
+    m = raw & 0xF
+
+    # Normal: 2^(e - bias) * (1 + m/16)
+    # Subnormal: 2^(1 - bias) * (m/16)
+    is_subnormal = e == 0
+    result = torch.zeros_like(encoded, dtype=torch.float32)
+
+    if (~is_subnormal).any():
+        e_normal = e[~is_subnormal].float()
+        m_normal = m[~is_subnormal].float()
+        result[~is_subnormal] = torch.exp2(e_normal - bias) * (1.0 + m_normal / 16.0)
+
+    if is_subnormal.any():
+        m_sub = m[is_subnormal].float()
+        result[is_subnormal] = (2.0 ** (1 - bias)) * (m_sub / 16.0)
+
+    return result
+
+
+def hadamard_rotate(
+    data: Tensor,
+    block_size: int = 32,
+    signs: Optional[Tensor] = None,
+) -> Tensor:
+    """Apply in-place randomized Walsh-Hadamard rotation (H*D).
+
+    Spreads outliers across quantization blocks, improving kbit accuracy.
+    Since H*D is orthogonal, rotating both weights and activations with the
+    same signs preserves the GEMM result: (H*D)(A) @ (H*D)(B)^T = A @ B^T.
+
+    Two modes:
+
+    **Block-diagonal** (block_size in {32, 64, 128, 256}): Applies independent
+    Hadamard rotations to contiguous blocks of ``block_size`` elements across
+    the flattened tensor. Fast and parallel, but only spreads outliers within
+    each block.
+
+    **Full-dimension** (block_size=0): Applies the Hadamard rotation across
+    the entire last dimension of the tensor. Matches the approach used by
+    QuIP#, QuaRot, and SpinQuant for maximal outlier suppression. The last
+    dimension must be a power of 2 in {512, 1024, 2048, 4096, 8192}.
+
+    Args:
+        data: Input tensor (float16 or bfloat16). Modified in-place.
+        block_size: Rotation block size (32, 64, 128, 256) for block-diagonal
+            mode, or 0 for full-dimension mode.
+        signs: Optional int32 tensor of sign-flip bits. For block-diagonal
+            mode: ``block_size // 32`` words (repeated per block). For
+            full-dimension mode: ``dim // 32`` words where ``dim`` is the
+            last dimension. Each bit controls the sign flip for one element.
+            If None, no sign flips (plain Hadamard). Generate once per model
+            with ``torch.randint(0, 2**32, (n_words,), dtype=torch.int32)``.
+
+    Returns:
+        The input tensor, rotated in-place.
+    """
+    if block_size == 0:
+        # Full-dimension mode: rotate across the entire last dimension.
+        dim = data.shape[-1]
+        data_flat = data.contiguous().view(-1)
+        torch.ops.bitsandbytes.hadamard_rotate_full_(data_flat, dim, signs)
+    else:
+        # Block-diagonal mode: independent rotations per block.
+        data_flat = data.contiguous().view(-1)
+        torch.ops.bitsandbytes.hadamard_rotate_(data_flat, block_size, signs)
+    return data
+
+
+def quantize_kbit(
+    A: Tensor,
+    k: int = 4,
+    codebook: Optional[Tensor] = None,
+    absmax_format: str = "e4m4",
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Quantize a tensor using k-bit blockwise quantization (blocksize=32).
+
+    Uses warp-level CUDA primitives for efficient bit-plane packing.
+
+    Args:
+        A: Input tensor. Supports float16, bfloat16, or float32.
+        k: Bit width (2, 3, 4, or 5). Defaults to 4.
+        codebook: Optional float32 codebook tensor with 2^k entries in [-1, 1], sorted ascending.
+            If None, uses a precomputed normal-float codebook.
+        absmax_format: Format for absmax storage. "e4m4" (default, uint8) or "fp32".
+
+    Returns:
+        Tuple of (packed, absmax, codebook):
+        - packed: int32 tensor of bit-plane packed quantized values.
+        - absmax: Tensor of per-block absolute maximum values (float32 or uint8).
+        - codebook: The codebook tensor used (useful when auto-generated).
+    """
+    if codebook is None:
+        codebook = create_normal_float_codebook(k, device=A.device)
+    else:
+        codebook = codebook.to(device=A.device, dtype=torch.float32)
+
+    A_flat = A.contiguous().view(-1)
+    packed, absmax = torch.ops.bitsandbytes.quantize_kbit(A_flat, codebook, k)
+
+    # The CUDA kernel now encodes absmax as uint8 E4M4 natively.
+    # No Python-side encode needed.
+
+    return packed, absmax, codebook
+
+
+def dequantize_kbit(
+    packed: Tensor,
+    absmax: Tensor,
+    codebook: Tensor,
+    k: int,
+    n: int,
+    dtype: torch.dtype = torch.float16,
+    out: Optional[Tensor] = None,
+) -> Tensor:
+    """Dequantize a k-bit blockwise quantized tensor.
+
+    Args:
+        packed: int32 tensor of bit-plane packed values (from quantize_kbit).
+        absmax: Tensor of per-block absmax values (from quantize_kbit).
+            Supports float32 or uint8 (E4M4 format).
+        codebook: float32 codebook tensor with 2^k entries.
+        k: Bit width (2, 3, 4, or 5).
+        n: Number of original elements.
+        dtype: Output dtype. Defaults to float16.
+        out: Optional pre-allocated output tensor for CUDA graph compatibility.
+            Must have at least ceil(n/32)*32 elements and matching dtype.
+
+    Returns:
+        Dequantized tensor of shape (n,) with the given dtype.
+    """
+    num_blocks = -(n // -32)
+    padded_n = num_blocks * 32
+
+    if out is not None:
+        if out.numel() < padded_n:
+            raise ValueError(f"out tensor has {out.numel()} elements, need at least {padded_n}")
+        if out.dtype != dtype:
+            raise ValueError(f"out dtype {out.dtype} does not match requested dtype {dtype}")
+        torch.ops.bitsandbytes.dequantize_kbit_(packed, codebook, absmax, k, n, dtype, out)
+        return out[:n]
+
+    result = torch.ops.bitsandbytes.dequantize_kbit(packed, codebook, absmax, k, n, dtype)
+    return result[:n]
+
+
+def quantize_vq(
+    A: Tensor,
+    p: int = 2,
+    codebook: Optional[Tensor] = None,
+    index_bits: int = 8,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Quantize a tensor using VQ codebook quantization.
+
+    Each group of p consecutive weights is mapped to the nearest entry in a
+    codebook. Blocksize is 48 for p=3, 32 otherwise.
+
+    Args:
+        A: Input tensor. Supports float16, bfloat16, or float32.
+        p: VQ dimension (2, 3, or 4). Each index maps to p weight values.
+        codebook: Optional fp16 codebook tensor of shape [n_entries, p].
+            If None, uses precomputed Gaussian codebook.
+        index_bits: Bits per codebook index (8 or 10). Default 8.
+
+    Returns:
+        Tuple of (packed, absmax, codebook):
+        - packed: int32 tensor of packed indices.
+        - absmax: uint8 tensor of E4M4 per-block absmax values.
+        - codebook: The codebook tensor used.
+    """
+    if codebook is None:
+        codebook = create_vq_codebook(p, device=A.device, index_bits=index_bits)
+    else:
+        codebook = codebook.to(device=A.device, dtype=torch.float16)
+
+    A_flat = A.contiguous().view(-1)
+    packed, absmax = torch.ops.bitsandbytes.quantize_vq(A_flat, codebook, p, index_bits)
+    return packed, absmax, codebook
+
+
+def dequantize_vq(
+    packed: Tensor,
+    absmax: Tensor,
+    codebook: Tensor,
+    p: int,
+    n: int,
+    dtype: torch.dtype = torch.float16,
+    out: Optional[Tensor] = None,
+    index_bits: int = 8,
+) -> Tensor:
+    """Dequantize a VQ codebook quantized tensor.
+
+    Args:
+        packed: int32 tensor of packed indices (from quantize_vq).
+        absmax: Per-block absmax values (uint8 E4M4 or float32).
+        codebook: fp16 codebook tensor of shape [n_entries, p].
+        p: VQ dimension (2, 3, or 4).
+        n: Number of original elements.
+        dtype: Output dtype. Defaults to float16.
+        out: Optional pre-allocated output tensor.
+        index_bits: Bits per codebook index (8 or 10). Default 8.
+
+    Returns:
+        Dequantized tensor of shape (n,) with the given dtype.
+    """
+    BS = 48 if p == 3 else 32
+    num_blocks = -(n // -BS)
+    padded_n = num_blocks * BS
+
+    if out is not None:
+        torch.ops.bitsandbytes.dequantize_vq_(packed, codebook, absmax, p, n, dtype, out, index_bits)
+        return out[:n]
+
+    result = torch.ops.bitsandbytes.dequantize_vq(packed, codebook, absmax, p, n, dtype, index_bits)
+    return result[:n]
+
+
+def repack_vq(
+    packed_flat: Tensor,
+    absmax_flat: Tensor,
+    K_dim: int,
+    N: int,
+    p: int = 2,
+    index_bits: int = 8,
+) -> tuple[Tensor, Tensor]:
+    """Repack VQ quantized weights from flat to tiled layout.
+
+    Rearranges packed indices and absmax from flat column-major layout
+    to tile-interleaved layout used by vq_scalar_gemv_tiled and vq_gemm_prod.
+
+    Args:
+        packed_flat: int32 tensor of packed indices (from quantize_vq).
+        absmax_flat: uint8 E4M4 per-block absmax values.
+        K_dim: Reduction dimension.
+        N: Output dimension (must be multiple of 128).
+        p: VQ dimension (2, 3, or 4).
+        index_bits: Bits per codebook index (8 or 10). Default 8.
+
+    Returns:
+        Tuple of (packed_tiled, absmax_tiled).
+    """
+    return torch.ops.bitsandbytes.repack_vq(packed_flat, absmax_flat, K_dim, N, p, index_bits)
+
+
+def dequantize_kbit_tiled(
+    packed: Tensor,
+    absmax: Tensor,
+    codebook: Tensor,
+    k: int,
+    K_dim: int,
+    N: int,
+    dtype: torch.dtype = torch.float16,
+    out: Optional[Tensor] = None,
+) -> Tensor:
+    """Dequantize a k-bit tiled-layout tensor (from repack_kbit output).
+
+    Reads from the GEMM-tiled layout produced by repack_kbit and writes
+    a flat [N, K_dim] row-major output suitable for cuBLAS matmul.
+
+    Args:
+        packed: int32 tensor of tiled bit-plane packed values (from repack_kbit).
+        absmax: Tensor of tiled per-block absmax values (from repack_kbit).
+        codebook: float32 codebook tensor with 2^k entries.
+        k: Bit width (2, 3, 4, or 5).
+        K_dim: Reduction dimension (inner dim of weight matrix).
+        N: Output columns (outer dim of weight matrix).
+        dtype: Output dtype. Defaults to float16.
+        out: Optional pre-allocated output tensor for CUDA graph compatibility.
+
+    Returns:
+        Dequantized tensor of shape (N * K_dim,) with the given dtype.
+    """
+    n = N * K_dim
+    num_blocks = -(n // -32)
+    padded_n = num_blocks * 32
+
+    if out is not None:
+        if out.numel() < padded_n:
+            raise ValueError(f"out tensor has {out.numel()} elements, need at least {padded_n}")
+        if out.dtype != dtype:
+            raise ValueError(f"out dtype {out.dtype} does not match requested dtype {dtype}")
+        torch.ops.bitsandbytes.dequantize_kbit_tiled_(packed, codebook, absmax, k, K_dim, N, dtype, out)
+        return out[:n]
+
+    result = torch.ops.bitsandbytes.dequantize_kbit_tiled(packed, codebook, absmax, k, K_dim, N, dtype)
+    return result[:n]
+
+
+def kbit_linear(
+    A: Tensor,
+    B_packed: Tensor,
+    B_absmax: Tensor,
+    codebook: Tensor,
+    k: int,
+    K_dim: int,
+    N: int,
+    out: Optional[Tensor] = None,
+    workspace: Optional[dict] = None,
+) -> Tensor:
+    """Unified dispatch for k-bit quantized linear (C = A @ B^T).
+
+    Routes to the optimal kernel based on M (batch dimension):
+      - M <= 4:  scalar GEMV (tiled layout, register-based dequant)
+      - M <= 16: fused dequant + MMA (tiled layout, tensor core)
+      - M > 16:  dequantize to fp16/bf16 + cuBLAS matmul
+
+    All paths read tiled B layout (from repack_kbit output).
+
+    Args:
+        A: Input activations [M, K_dim], fp16 or bf16.
+        B_packed: Tiled bit-plane packed weights (from repack_kbit).
+        B_absmax: Tiled per-block absmax values (from repack_kbit).
+        codebook: float32 codebook with 2^k entries.
+        k: Bit width (2, 3, 4, or 5).
+        K_dim: Reduction dimension of weight matrix.
+        N: Output dimension of weight matrix.
+        out: Optional pre-allocated output [M, N] for CUDA graph compat.
+        workspace: Optional dict with pre-allocated buffers:
+            'C_workspace': float32 [M, N] for MMA accumulation
+            'tile_counters': int32 [m_tiles * n_tiles] for persistent kernel
+            'dequant_buf': fp16/bf16 [N * K_dim] for dequant+matmul path
+
+    Returns:
+        Output tensor [M, N] with same dtype as A.
+    """
+    M = A.shape[0]
+    dtype = A.dtype
+
+    if M <= 4:
+        # Scalar GEMV: tiled layout, one column per block
+        if out is not None:
+            return torch.ops.bitsandbytes.kbit_scalar_gemv_tiled_(
+                A, B_packed, B_absmax, codebook, K_dim, N, k, out[:M]
+            )
+        return torch.ops.bitsandbytes.kbit_scalar_gemv_tiled(A, B_packed, B_absmax, codebook, K_dim, N, k)
+
+    if M <= 16:
+        # Fused dequant + MMA: tiled layout, tensor core path
+        k_chunks = 1  # auto-selected internally by the kernel
+        if out is not None and workspace is not None:
+            C_workspace = workspace["C_workspace"]
+            tile_counters = workspace["tile_counters"]
+            return torch.ops.bitsandbytes.kbit_gemm_prod_(
+                A, B_packed, B_absmax, codebook, K_dim, N, k, k_chunks, out, C_workspace, tile_counters
+            )
+        return torch.ops.bitsandbytes.kbit_gemm_prod(A, B_packed, B_absmax, codebook, K_dim, N, k, k_chunks)
+
+    # M > 16: dequantize to dense + cuBLAS matmul
+    if workspace is not None and "dequant_buf" in workspace:
+        dequant_buf = workspace["dequant_buf"]
+        dequantize_kbit_tiled(B_packed, B_absmax, codebook, k, K_dim, N, dtype=dtype, out=dequant_buf)
+        W = dequant_buf[: N * K_dim].view(N, K_dim)
+    else:
+        W_flat = dequantize_kbit_tiled(B_packed, B_absmax, codebook, k, K_dim, N, dtype=dtype)
+        W = W_flat.view(N, K_dim)
+
+    if out is not None:
+        torch.mm(A, W.t(), out=out[:M])
+        return out[:M]
+    return torch.mm(A, W.t())
+
+
+def kbit_linear_workspace(M: int, K_dim: int, N: int, dtype: torch.dtype, device: torch.device) -> dict:
+    """Pre-allocate workspace buffers for kbit_linear (CUDA graph compatibility).
+
+    Args:
+        M: Maximum batch size (must be >= actual M at runtime).
+        K_dim: Reduction dimension.
+        N: Output dimension.
+        dtype: Activation dtype (fp16 or bf16).
+        device: CUDA device.
+
+    Returns:
+        Dict with 'C_workspace', 'tile_counters', 'dequant_buf' tensors.
+    """
+    TILE_M, TILE_N = 16, 64  # worst-case tile sizes for counter allocation
+    m_tiles = (M + TILE_M - 1) // TILE_M
+    n_tiles = N // TILE_N
+    n_total = N * K_dim
+    num_blocks = -(n_total // -32)
+
+    return {
+        "C_workspace": torch.zeros(M, N, device=device, dtype=torch.float32),
+        "tile_counters": torch.zeros(m_tiles * n_tiles, device=device, dtype=torch.int32),
+        "dequant_buf": torch.empty(num_blocks * 32, device=device, dtype=dtype),
+    }
+
+
+def vq_linear(
+    A: Tensor,
+    B_packed: Tensor,
+    B_absmax: Tensor,
+    codebook: Tensor,
+    p: int,
+    K_dim: int,
+    N: int,
+    out: Optional[Tensor] = None,
+    workspace: Optional[dict] = None,
+    index_bits: int = 8,
+) -> Tensor:
+    """Unified dispatch for VQ codebook quantized linear (C = A @ B^T).
+
+    Routes to the optimal kernel based on M (batch dimension):
+      - M <= 4:  scalar GEMV (tiled layout, shmem codebook lookup)
+      - M <= 16: fused dequant + MMA (tiled layout, tensor core)
+      - M > 16:  dequantize to fp16/bf16 + cuBLAS matmul
+
+    All paths read tiled B layout (from repack_vq output).
+
+    Args:
+        A: Input activations [M, K_dim], fp16 or bf16.
+        B_packed: Tiled VQ packed weights (from repack_vq).
+        B_absmax: Tiled per-block absmax values (from repack_vq).
+        codebook: fp16 codebook tensor [n_entries, p].
+        p: VQ dimension (2, 3, or 4).
+        K_dim: Reduction dimension of weight matrix.
+        N: Output dimension of weight matrix.
+        out: Optional pre-allocated output [M, N] for CUDA graph compat.
+        workspace: Optional dict with pre-allocated buffers:
+            'C_workspace': float32 [M, N] for MMA accumulation
+            'tile_counters': int32 [m_tiles * n_tiles] for persistent kernel
+            'dequant_buf': fp16/bf16 [N * K_dim] for dequant+matmul path
+        index_bits: Bits per codebook index (8 or 10). Default 8.
+
+    Returns:
+        Output tensor [M, N] with same dtype as A.
+    """
+    M = A.shape[0]
+    dtype = A.dtype
+
+    if M <= 4:
+        # Scalar GEMV: tiled layout, shared memory codebook lookup
+        if out is not None:
+            return torch.ops.bitsandbytes.vq_scalar_gemv_tiled_(
+                A, B_packed, B_absmax, codebook, K_dim, N, p, out[:M], index_bits
+            )
+        return torch.ops.bitsandbytes.vq_scalar_gemv_tiled(A, B_packed, B_absmax, codebook, K_dim, N, p, index_bits)
+
+    if M <= 16:
+        # Fused dequant + MMA: tiled layout, tensor core path
+        k_chunks = 1  # auto-selected internally by the kernel
+        if out is not None and workspace is not None:
+            C_workspace = workspace["C_workspace"]
+            tile_counters = workspace["tile_counters"]
+            return torch.ops.bitsandbytes.vq_gemm_prod_(
+                A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, out, C_workspace, tile_counters, index_bits
+            )
+        return torch.ops.bitsandbytes.vq_gemm_prod(A, B_packed, B_absmax, codebook, K_dim, N, p, k_chunks, index_bits)
+
+    # M > 16: dequantize tiled VQ to dense + cuBLAS matmul
+    if workspace is not None and "dequant_buf" in workspace:
+        dequant_buf = workspace["dequant_buf"]
+        torch.ops.bitsandbytes.dequantize_vq_tiled_(
+            B_packed, codebook, B_absmax, p, K_dim, N, dtype, dequant_buf, index_bits
+        )
+        W = dequant_buf[: N * K_dim].view(N, K_dim)
+    else:
+        W_flat = torch.ops.bitsandbytes.dequantize_vq_tiled(B_packed, codebook, B_absmax, p, K_dim, N, dtype, index_bits)
+        W = W_flat[: N * K_dim].view(N, K_dim)
+
+    if out is not None:
+        torch.mm(A, W.t(), out=out[:M])
+        return out[:M]
+    return torch.mm(A, W.t())
+
+
+def vq_linear_workspace(M: int, K_dim: int, N: int, p: int, dtype: torch.dtype, device: torch.device) -> dict:
+    """Pre-allocate workspace buffers for vq_linear (CUDA graph compatibility).
+
+    Args:
+        M: Maximum batch size (must be >= actual M at runtime).
+        K_dim: Reduction dimension.
+        N: Output dimension.
+        p: VQ dimension (2, 3, or 4).
+        dtype: Activation dtype (fp16 or bf16).
+        device: CUDA device.
+
+    Returns:
+        Dict with 'C_workspace', 'tile_counters', 'dequant_buf' tensors.
+    """
+    TILE_M, TILE_N = 16, 64  # worst-case tile sizes for counter allocation
+    m_tiles = (M + TILE_M - 1) // TILE_M
+    n_tiles = N // TILE_N
+    n_total = N * K_dim
+    BS = 48 if p == 3 else 32
+    num_blocks = -(n_total // -BS)
+
+    return {
+        "C_workspace": torch.zeros(M, N, device=device, dtype=torch.float32),
+        "tile_counters": torch.zeros(m_tiles * n_tiles, device=device, dtype=torch.int32),
+        "dequant_buf": torch.empty(num_blocks * BS, device=device, dtype=dtype),
+    }
+
+
+def vq_expert_linear(
+    A_concat: Tensor,
+    B_packed_all: Tensor,
+    B_absmax_all: Tensor,
+    codebook: Tensor,
+    expert_offsets: Tensor,
+    p: int,
+    K_dim: int,
+    N: int,
+    num_experts: int,
+    max_M: int,
+    out: Optional[Tensor] = None,
+    workspace: Optional[dict] = None,
+    index_bits: int = 8,
+) -> Tensor:
+    """Unified dispatch for VQ codebook quantized MoE expert linear.
+
+    Routes to the optimal kernel based on max_M (max tokens per expert):
+      - max_M <= 16: grouped VQ MMA (single fused launch for all experts)
+      - max_M > 16:  per-expert dequantize + matmul
+
+    All paths read tiled B layout (from repack_vq output).
+
+    Args:
+        A_concat: Concatenated activations [total_M, K_dim], fp16 or bf16.
+        B_packed_all: Tiled VQ packed weights for all experts, concatenated.
+        B_absmax_all: Tiled absmax for all experts, concatenated (uint8 E4M4).
+        codebook: fp16 codebook tensor [n_entries, p].
+        expert_offsets: int32 tensor [num_experts+1] with cumulative token offsets.
+        p: VQ dimension (2, 3, or 4). Grouped kernel supports p=2 only.
+        K_dim: Reduction dimension.
+        N: Output dimension per expert.
+        num_experts: Number of experts.
+        max_M: Maximum tokens routed to any single expert.
+        out: Optional pre-allocated output [total_M, N].
+        workspace: Optional dict with pre-allocated buffers.
+        index_bits: Bits per codebook index (8 or 10). Default 8.
+
+    Returns:
+        Output tensor [total_M, N] with same dtype as A_concat.
+    """
+    total_M = A_concat.shape[0]
+    dtype = A_concat.dtype
+
+    if max_M <= 4:
+        # Grouped VQ Scalar GEMV: optimal for M=1-4 (typical MoE decode)
+        if out is not None:
+            return torch.ops.bitsandbytes.vq_grouped_scalar_gemv_(
+                A_concat,
+                B_packed_all,
+                B_absmax_all,
+                codebook,
+                expert_offsets,
+                K_dim,
+                N,
+                p,
+                num_experts,
+                max_M,
+                out,
+                index_bits,
+            )
+        return torch.ops.bitsandbytes.vq_grouped_scalar_gemv(
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            p,
+            num_experts,
+            max_M,
+            index_bits,
+        )
+
+    if max_M <= 16:
+        # Grouped VQ MMA: single fused kernel launch for M=5-16
+        if out is not None and workspace is not None:
+            C_workspace = workspace["C_workspace"]
+            tile_counters = workspace["tile_counters"]
+            return torch.ops.bitsandbytes.vq_grouped_gemm_(
+                A_concat,
+                B_packed_all,
+                B_absmax_all,
+                codebook,
+                expert_offsets,
+                K_dim,
+                N,
+                p,
+                num_experts,
+                max_M,
+                out,
+                C_workspace,
+                tile_counters,
+                index_bits,
+            )
+        return torch.ops.bitsandbytes.vq_grouped_gemm(
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            p,
+            num_experts,
+            max_M,
+            index_bits,
+        )
+
+    # max_M > 16: per-expert dequant + matmul
+    if out is None:
+        out = torch.empty(total_M, N, device=A_concat.device, dtype=dtype)
+
+    # Per-expert weight size in the packed/absmax tensors (via VQ traits)
+    from bitsandbytes._ops import _vq_traits
+    traits = _vq_traits(p, index_bits)
+    TILE_K = traits["TILE_K"]
+    TILE_N = traits["TILE_N"]
+    BS = traits["BS"]
+    WORDS = traits["WORDS"]
+    KB_PER_TILE = traits["KB_PER_TILE"]
+    k_tiles = K_dim // TILE_K
+    n_tiles = N // TILE_N
+    words_per_expert = k_tiles * n_tiles * TILE_N * KB_PER_TILE * WORDS
+    absmax_per_expert = k_tiles * n_tiles * TILE_N * KB_PER_TILE
+
+    offsets_cpu = expert_offsets.cpu()
+    for e in range(num_experts):
+        start = offsets_cpu[e].item()
+        end = offsets_cpu[e + 1].item()
+        expert_M = end - start
+        if expert_M == 0:
+            continue
+
+        A_expert = A_concat[start:end]  # [expert_M, K_dim]
+        B_packed_e = B_packed_all[e * words_per_expert : (e + 1) * words_per_expert]
+        B_absmax_e = B_absmax_all[e * absmax_per_expert : (e + 1) * absmax_per_expert]
+
+        W_flat = torch.ops.bitsandbytes.dequantize_vq_tiled(
+            B_packed_e, codebook, B_absmax_e, p, K_dim, N, dtype, index_bits
+        )
+        W = W_flat[: N * K_dim].view(N, K_dim)
+        torch.mm(A_expert, W.t(), out=out[start:end])
+
+    return out
+
+
+def vq_expert_linear_workspace(
+    max_M: int,
+    K_dim: int,
+    N: int,
+    p: int,
+    num_experts: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> dict:
+    """Pre-allocate workspace buffers for vq_expert_linear (CUDA graph compat).
+
+    Args:
+        max_M: Maximum tokens per expert.
+        K_dim: Reduction dimension.
+        N: Output dimension per expert.
+        p: VQ dimension.
+        num_experts: Number of experts.
+        dtype: Activation dtype (fp16 or bf16).
+        device: CUDA device.
+
+    Returns:
+        Dict with 'C_workspace', 'tile_counters', 'dequant_buf' tensors.
+    """
+    # Calculate total_M upper bound (all experts at max_M)
+    total_M = num_experts * max_M
+
+    m_blocks = 1
+    if max_M > 48:
+        m_blocks = 4
+    elif max_M > 32:
+        m_blocks = 3
+    elif max_M > 16:
+        m_blocks = 2
+    TILE_M = m_blocks * 16
+    tile_n = 64 if (m_blocks == 1 and N % 64 == 0) else 128
+    n_tiles = N // tile_n
+    m_tiles = (max_M + TILE_M - 1) // TILE_M
+    mn_tiles = num_experts * m_tiles * n_tiles
+
+    n_total = N * K_dim
+    num_blocks = -(n_total // -32)
+
+    return {
+        "C_workspace": torch.zeros(total_M, N, device=device, dtype=torch.float32),
+        "tile_counters": torch.zeros(mn_tiles, device=device, dtype=torch.int32),
+        "dequant_buf": torch.empty(num_blocks * 32, device=device, dtype=dtype),
+    }
+
+
+def vq_moe_fixed_pad(
+    tokens: Tensor,
+    expert_indices: Tensor,
+    pad_M: int,
+    K_dim: int,
+    num_experts: int,
+) -> tuple[Tensor, Tensor]:
+    """Scatter tokens into a fixed-padded buffer for CUDA graph compatibility.
+
+    Args:
+        tokens: Input tokens [total_batch, K_dim].
+        expert_indices: 1D int64 tensor with expert assignment per token.
+        pad_M: Fixed per-expert token capacity (must be >= max tokens per expert).
+        K_dim: Feature dimension.
+        num_experts: Number of experts.
+
+    Returns:
+        (A_concat_padded, expert_offsets_fixed):
+            A_concat_padded: [num_experts * pad_M, K_dim] zero-padded buffer.
+            expert_offsets_fixed: int32 [num_experts + 1] constant offsets [0, pad_M, 2*pad_M, ...].
+    """
+    device = tokens.device
+    dtype = tokens.dtype
+
+    A_concat = torch.zeros(num_experts * pad_M, K_dim, device=device, dtype=dtype)
+    expert_offsets = torch.arange(num_experts + 1, device=device, dtype=torch.int32) * pad_M
+
+    # Scatter tokens to their expert slots
+    for e in range(num_experts):
+        mask = expert_indices == e
+        expert_tokens = tokens[mask]
+        n = expert_tokens.shape[0]
+        if n > 0:
+            A_concat[e * pad_M : e * pad_M + n] = expert_tokens
+
+    return A_concat, expert_offsets
+
+
+def kbit_expert_linear(
+    A_concat: Tensor,
+    B_packed_all: Tensor,
+    B_absmax_all: Tensor,
+    codebook: Tensor,
+    expert_offsets: Tensor,
+    k: int,
+    K_dim: int,
+    N: int,
+    num_experts: int,
+    max_M: int,
+    out: Optional[Tensor] = None,
+    workspace: Optional[dict] = None,
+) -> Tensor:
+    """Unified dispatch for k-bit quantized MoE expert linear.
+
+    Routes to the optimal kernel based on max_M (max tokens per expert):
+      - max_M <= 16: grouped MMA (single fused launch for all experts)
+      - max_M > 16:  per-expert dequantize + matmul
+
+    All paths read tiled B layout (from repack_kbit output).
+
+    Args:
+        A_concat: Concatenated activations [total_M, K_dim], fp16 or bf16.
+        B_packed_all: Tiled packed weights for all experts, concatenated.
+        B_absmax_all: Tiled absmax for all experts, concatenated.
+        codebook: float32 codebook with 2^k entries.
+        expert_offsets: int32 tensor [num_experts+1] with cumulative token offsets.
+        k: Bit width (2, 3, 4, or 5).
+        K_dim: Reduction dimension.
+        N: Output dimension per expert.
+        num_experts: Number of experts.
+        max_M: Maximum tokens routed to any single expert.
+        out: Optional pre-allocated output [total_M, N].
+        workspace: Optional dict with pre-allocated buffers.
+
+    Returns:
+        Output tensor [total_M, N] with same dtype as A_concat.
+    """
+    total_M = A_concat.shape[0]
+    dtype = A_concat.dtype
+
+    if max_M <= 16:
+        # Grouped MMA: single fused kernel launch
+        if out is not None and workspace is not None:
+            C_workspace = workspace["C_workspace"]
+            tile_counters = workspace["tile_counters"]
+            return torch.ops.bitsandbytes.kbit_grouped_gemm_(
+                A_concat,
+                B_packed_all,
+                B_absmax_all,
+                codebook,
+                expert_offsets,
+                K_dim,
+                N,
+                k,
+                num_experts,
+                max_M,
+                out,
+                C_workspace,
+                tile_counters,
+            )
+        return torch.ops.bitsandbytes.kbit_grouped_gemm(
+            A_concat,
+            B_packed_all,
+            B_absmax_all,
+            codebook,
+            expert_offsets,
+            K_dim,
+            N,
+            k,
+            num_experts,
+            max_M,
+        )
+
+    # max_M > 16: per-expert dequant + matmul
+    if out is None:
+        out = torch.empty(total_M, N, device=A_concat.device, dtype=dtype)
+
+    # Per-expert weight size in the packed/absmax tensors
+    TILE_K, TILE_N, BS = 64, 128, 32
+    k_blocks_per_tile = TILE_K // BS
+    k_tiles = K_dim // TILE_K
+    n_tiles = N // TILE_N
+    words_per_expert = k_tiles * n_tiles * TILE_N * k_blocks_per_tile * k
+    absmax_per_expert = k_tiles * n_tiles * TILE_N * k_blocks_per_tile
+
+    offsets_cpu = expert_offsets.cpu()
+    for e in range(num_experts):
+        start = offsets_cpu[e].item()
+        end = offsets_cpu[e + 1].item()
+        expert_M = end - start
+        if expert_M == 0:
+            continue
+
+        A_expert = A_concat[start:end]  # [expert_M, K_dim]
+        B_packed_e = B_packed_all[e * words_per_expert : (e + 1) * words_per_expert]
+        B_absmax_e = B_absmax_all[e * absmax_per_expert : (e + 1) * absmax_per_expert]
+
+        W_flat = dequantize_kbit_tiled(B_packed_e, B_absmax_e, codebook, k, K_dim, N, dtype=dtype)
+        W = W_flat.view(N, K_dim)
+        torch.mm(A_expert, W.t(), out=out[start:end])
+
+    return out
+
+
 @deprecated("This function is deprecated and will be removed in a future release.", category=FutureWarning)
 def quantize(
     A: Tensor,

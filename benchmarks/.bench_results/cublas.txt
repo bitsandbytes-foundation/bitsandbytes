@@ -1,0 +1,26 @@
+shape     M     avg_us
+---
+gateup    1      20.87
+gateup    2      14.70
+gateup    4      14.33
+down      1      19.19
+down      2      17.94
+down      4      18.08
+Q         1      11.50
+Q         2      13.62
+Q         4      20.27
+O         1      15.72
+O         2      16.77
+O         4      29.05
+KV        1      11.83
+KV        2      17.62
+KV        4      18.69
+
+shape     M nexp     avg_us
+---
+moe_gu    1    8      12.90
+moe_gu    2    8      13.89
+moe_gu    4    8      14.46
+moe_dn    1    8      12.88
+moe_dn    2    8      12.94
+moe_dn    4    8      12.99
