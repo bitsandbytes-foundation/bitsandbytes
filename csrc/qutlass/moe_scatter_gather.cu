@@ -23,9 +23,9 @@
 // =========================================================================
 // Scatter: concatenated FP4 → padded per-expert batched FP4
 // =========================================================================
-// Each threadblock handles one expert. Threads cooperatively copy
-// n_tokens * row_bytes from the concatenated source to the padded
-// destination, then zero-fill padding rows.
+// Grid: (num_experts, chunks_per_expert).  Each block handles a byte-range
+// slice of one expert's total_bytes = max_M * row_bytes, splitting work
+// across multiple SMs for bandwidth saturation on wide GPUs (B200: 160 SMs).
 //
 // Data layout:
 //   Input:  packed_concat [total_tokens * row_bytes] contiguous
@@ -37,70 +37,67 @@ __global__ void kMoeScatterNVFP4(
     uint8_t* __restrict__ output,          // [num_experts * max_M * row_bytes]
     const int* __restrict__ expert_offsets, // [num_experts + 1] cumulative token offsets
     int max_M,                             // padded max tokens per expert
-    int row_bytes                          // K / 2
+    int row_bytes,                         // K / 2
+    int chunks_per_expert                  // gridDim.y
 ) {
     int expert = blockIdx.x;
+    int chunk  = blockIdx.y;
+
     int start = expert_offsets[expert];
     int end = expert_offsets[expert + 1];
     int n_tokens = end - start;
 
-    // Source: contiguous in concatenated buffer
     const uint8_t* src = input + (long long)start * row_bytes;
-
-    // Destination: padded slot for this expert
     uint8_t* dst = output + (long long)expert * max_M * row_bytes;
 
-    // Total bytes to process for this expert (data + padding)
     long long total_bytes = (long long)max_M * row_bytes;
     long long data_bytes = (long long)n_tokens * row_bytes;
 
-    // Use vectorized uint4 (16-byte) copies where possible
+    // This block's byte range (aligned to 16 for vectorization)
+    long long bytes_per_chunk = ((total_bytes + chunks_per_expert - 1) / chunks_per_expert + 15) & ~15LL;
+    long long my_start = (long long)chunk * bytes_per_chunk;
+    long long my_end = min(my_start + bytes_per_chunk, total_bytes);
+    if (my_start >= total_bytes) return;
+
     int tid = threadIdx.x;
     int stride = blockDim.x;
 
-    // Copy data rows using uint4 vectorization
-    long long vec_data_bytes = (data_bytes / 16) * 16;
+    // Process byte range [my_start, my_end) — copy from src where < data_bytes, zero otherwise
+    // Use uint4 (16-byte) vectorization
+    long long vec_start = (my_start + 15) / 16;  // first full uint4 in range
+    long long vec_end = my_end / 16;              // last full uint4 in range
+
+    // Scalar head bytes
+    for (long long i = my_start + tid; i < min(vec_start * 16, my_end); i += stride) {
+        dst[i] = (i < data_bytes) ? src[i] : 0;
+    }
+
+    // Vectorized middle
     const uint4* src4 = reinterpret_cast<const uint4*>(src);
     uint4* dst4 = reinterpret_cast<uint4*>(dst);
-    long long n_vec = vec_data_bytes / 16;
+    uint4 zero4 = make_uint4(0, 0, 0, 0);
+    long long data_vec_boundary = data_bytes / 16;  // last full uint4 within data
 
-    for (long long i = tid; i < n_vec; i += stride) {
-        dst4[i] = src4[i];
+    for (long long i = vec_start + tid; i < vec_end; i += stride) {
+        if (i < data_vec_boundary) {
+            dst4[i] = src4[i];
+        } else if (i * 16 >= data_bytes) {
+            dst4[i] = zero4;
+        } else {
+            // Straddles data/padding boundary — byte-by-byte
+            uint8_t tmp[16];
+            const uint8_t* s = src + i * 16;
+            for (int b = 0; b < 16; b++) {
+                long long pos = i * 16 + b;
+                tmp[b] = (pos < data_bytes) ? s[b] : 0;
+            }
+            dst4[i] = *reinterpret_cast<uint4*>(tmp);
+        }
     }
 
-    // Handle remaining bytes in data region
-    for (long long i = vec_data_bytes + tid; i < data_bytes; i += stride) {
-        dst[i] = src[i];
-    }
-
-    // Zero-fill padding region using uint4
-    long long pad_start = data_bytes;
-    long long pad_bytes = total_bytes - pad_start;
-
-    if (pad_bytes > 0) {
-        // Align pad_start up to 16-byte boundary for vectorized zeroing
-        long long aligned_pad_start = ((pad_start + 15) / 16) * 16;
-
-        // Zero unaligned bytes at start of padding
-        for (long long i = pad_start + tid; i < aligned_pad_start && i < total_bytes; i += stride) {
-            dst[i] = 0;
-        }
-
-        // Vectorized zero-fill
-        uint4 zero4 = make_uint4(0, 0, 0, 0);
-        long long vec_pad_end = (total_bytes / 16) * 16;
-        uint4* dst4_pad = reinterpret_cast<uint4*>(dst);
-        long long vec_start = aligned_pad_start / 16;
-        long long vec_end = vec_pad_end / 16;
-
-        for (long long i = vec_start + tid; i < vec_end; i += stride) {
-            dst4_pad[i] = zero4;
-        }
-
-        // Zero remaining bytes at end
-        for (long long i = vec_pad_end + tid; i < total_bytes; i += stride) {
-            dst[i] = 0;
-        }
+    // Scalar tail bytes
+    for (long long i = vec_end * 16 + tid; i < my_end; i += stride) {
+        dst[i] = (i < data_bytes) ? src[i] : 0;
     }
 }
 
@@ -108,9 +105,8 @@ __global__ void kMoeScatterNVFP4(
 // =========================================================================
 // Gather: padded per-expert BF16 → concatenated BF16
 // =========================================================================
-// Each threadblock handles one expert. Threads cooperatively copy
-// n_tokens * row_elems BF16 values from the padded batched output
-// to the concatenated result.
+// Grid: (num_experts, chunks_per_expert).  Each block handles a byte-range
+// slice of one expert's data_bytes = n_tokens * row_bytes.
 //
 // Data layout:
 //   Input:  D_batched [num_experts * max_M * N] bf16
@@ -122,38 +118,49 @@ __global__ void kMoeGatherBF16(
     uint8_t* __restrict__ output,           // [total_tokens * row_bytes]
     const int* __restrict__ expert_offsets, // [num_experts + 1]
     int max_M,
-    int row_bytes                           // N * 2
+    int row_bytes,                          // N * 2
+    int chunks_per_expert                   // gridDim.y
 ) {
     int expert = blockIdx.x;
+    int chunk  = blockIdx.y;
+
     int start = expert_offsets[expert];
     int end = expert_offsets[expert + 1];
     int n_tokens = end - start;
-
     if (n_tokens <= 0) return;
 
-    // Source: padded slot for this expert
     const uint8_t* src = input + (long long)expert * max_M * row_bytes;
-
-    // Destination: contiguous in concatenated buffer
     uint8_t* dst = output + (long long)start * row_bytes;
 
     long long data_bytes = (long long)n_tokens * row_bytes;
 
+    // This block's byte range (aligned to 16)
+    long long bytes_per_chunk = ((data_bytes + chunks_per_expert - 1) / chunks_per_expert + 15) & ~15LL;
+    long long my_start = (long long)chunk * bytes_per_chunk;
+    long long my_end = min(my_start + bytes_per_chunk, data_bytes);
+    if (my_start >= data_bytes) return;
+
     int tid = threadIdx.x;
     int stride = blockDim.x;
 
-    // Vectorized uint4 copy
-    long long vec_bytes = (data_bytes / 16) * 16;
+    // Vectorized uint4 copy over [my_start, my_end)
+    long long vec_start = (my_start + 15) / 16;
+    long long vec_end = my_end / 16;
+
+    // Scalar head
+    for (long long i = my_start + tid; i < min(vec_start * 16, my_end); i += stride) {
+        dst[i] = src[i];
+    }
+
+    // Vectorized middle
     const uint4* src4 = reinterpret_cast<const uint4*>(src);
     uint4* dst4 = reinterpret_cast<uint4*>(dst);
-    long long n_vec = vec_bytes / 16;
-
-    for (long long i = tid; i < n_vec; i += stride) {
+    for (long long i = vec_start + tid; i < vec_end; i += stride) {
         dst4[i] = src4[i];
     }
 
-    // Handle remaining bytes
-    for (long long i = vec_bytes + tid; i < data_bytes; i += stride) {
+    // Scalar tail
+    for (long long i = vec_end * 16 + tid; i < my_end; i += stride) {
         dst[i] = src[i];
     }
 }
@@ -219,6 +226,10 @@ __global__ void kConvertFP32ToBF16(
 // extern "C" launchers
 // =========================================================================
 
+// Target enough total blocks to saturate GPU SMs.
+// B200 has 160 SMs; 2× oversubscription hides latency.
+static constexpr int kTargetBlocks = 320;
+
 extern "C" void cmoe_scatter_nvfp4(
     const void* input,
     void* output,
@@ -229,9 +240,9 @@ extern "C" void cmoe_scatter_nvfp4(
     cudaStream_t stream
 ) {
     int row_bytes = K / 2;  // packed FP4: 2 values per byte
+    int chunks = max(1, kTargetBlocks / max(num_experts, 1));
 
-    // One threadblock per expert, 256 threads
-    dim3 grid(num_experts);
+    dim3 grid(num_experts, chunks);
     dim3 block(256);
 
     kMoeScatterNVFP4<<<grid, block, 0, stream>>>(
@@ -239,7 +250,8 @@ extern "C" void cmoe_scatter_nvfp4(
         static_cast<uint8_t*>(output),
         expert_offsets,
         max_M,
-        row_bytes
+        row_bytes,
+        chunks
     );
 }
 
@@ -253,8 +265,9 @@ extern "C" void cmoe_gather_bf16(
     cudaStream_t stream
 ) {
     int row_bytes = N * 2;  // bf16: 2 bytes per element
+    int chunks = max(1, kTargetBlocks / max(num_experts, 1));
 
-    dim3 grid(num_experts);
+    dim3 grid(num_experts, chunks);
     dim3 block(256);
 
     kMoeGatherBF16<<<grid, block, 0, stream>>>(
@@ -262,7 +275,8 @@ extern "C" void cmoe_gather_bf16(
         static_cast<uint8_t*>(output),
         expert_offsets,
         max_M,
-        row_bytes
+        row_bytes,
+        chunks
     );
 }
 
