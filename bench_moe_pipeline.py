@@ -372,11 +372,10 @@ def run_config(name, num_experts, K, N, tokens_per_expert):
     except Exception as e:
         results["nvfp4_gemm_graph"] = None
 
-    # 5. NVFP4 pipeline (graph)
-    try:
-        results["nvfp4_pipe_graph"] = bench_nvfp4_pipeline_graph(layer, x, expert_offsets)
-    except Exception as e:
-        results["nvfp4_pipe_graph"] = None
+    # 5. NVFP4 pipeline (graph) — disabled: mode 4's direct C init
+    # conflicts with mode 5's cached init, and zero_() in graph capture
+    # needs further investigation. Mode 4 gives the GEMM throughput ceiling.
+    results["nvfp4_pipe_graph"] = None
 
     results["padded_flops"] = padded_flops
     return results
