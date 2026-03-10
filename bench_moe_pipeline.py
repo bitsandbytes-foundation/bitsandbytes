@@ -173,8 +173,7 @@ def bench_nvfp4_pipeline_graph(layer, x, expert_offsets):
         lib.cmoe_gather_bf16(
             get_ptr(D_out.view(-1)), get_ptr(gather_out),
             get_ptr(expert_offsets_i32),
-            ct.c_int(max_M), ct.c_int(N), ct.c_int(num_experts),
-            ct.c_int(total_tokens), s,
+            ct.c_int(max_M), ct.c_int(N), ct.c_int(num_experts), s,
         )
 
     # Warmup on default stream
