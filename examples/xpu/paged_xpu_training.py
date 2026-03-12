@@ -2,9 +2,10 @@
 Real training case for XPU Paged Optimizer using JackFram/llama-68m + Alpaca Clean.
 
 Usage:
-    python test_paged_xpu_training.py
-    python test_paged_xpu_training.py --optimizer paged_adamw8bit --steps 50
-    python test_paged_xpu_training.py --compare  # compare paged vs non-paged loss curves
+    python paged_xpu_training.py
+    python paged_xpu_training.py --optimizer paged_adamw8bit --steps 50
+    python paged_xpu_training.py --compare  # compare paged vs non-paged loss curves
+    python paged_xpu_training.py --use_trainer --optimizer paged_adamw8bit  # use HF Trainer
 """
 
 import argparse
@@ -12,7 +13,7 @@ import time
 
 import torch
 from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
+from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments, set_seed
 
 import bitsandbytes as bnb
 
@@ -33,6 +34,7 @@ def get_args():
     parser.add_argument("--steps", type=int, default=30)
     parser.add_argument("--log_interval", type=int, default=5)
     parser.add_argument("--compare", action="store_true", help="Compare paged vs non-paged optimizer")
+    parser.add_argument("--use_trainer", action="store_true", help="Use HF Trainer instead of manual training loop")
     parser.add_argument("--device", type=str, default="xpu")
     parser.add_argument("--dtype", type=str, default="bf16", choices=["bf16", "fp32", "fp16"])
     return parser.parse_args()
@@ -166,6 +168,75 @@ def run_single(args):
     return history
 
 
+def run_with_trainer(args):
+    """Train using HuggingFace Trainer with a bnb optimizer."""
+    dtype = get_torch_dtype(args.dtype)
+    print(f"=== Trainer mode with {args.optimizer} on {args.device} ({args.dtype}) ===")
+    print(f"Model: {args.model} | Dataset: {args.dataset}")
+    print(f"Steps: {args.steps} | LR: {args.lr} | Batch: {args.batch_size} | MaxLen: {args.max_length}")
+    print()
+
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype)
+
+    ds = prepare_data(tokenizer, args.dataset, args.max_length)
+
+    training_args = TrainingArguments(
+        output_dir="./trainer_output",
+        per_device_train_batch_size=args.batch_size,
+        max_steps=args.steps,
+        logging_steps=args.log_interval,
+        learning_rate=args.lr,
+        save_strategy="steps",
+        save_steps=args.steps,
+        save_total_limit=1,
+        report_to="none",
+        bf16=(args.dtype == "bf16"),
+        fp16=(args.dtype == "fp16"),
+        no_cuda=(args.device == "xpu"),
+        use_xpu=(args.device == "xpu"),
+        dataloader_pin_memory=False,
+    )
+
+    optimizer = create_optimizer(model, args.optimizer, args.lr)
+    scheduler = torch.optim.lr_scheduler.ConstantLR(optimizer, factor=1.0)
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=ds,
+        data_collator=collate_fn,
+        optimizers=(optimizer, scheduler),
+    )
+
+    train_result = trainer.train()
+    metrics = train_result.metrics
+    print(f"\n--- Trainer Results ---")
+    print(f"Training loss: {metrics['train_loss']:.4f}")
+    print(f"Training runtime: {metrics['train_runtime']:.1f}s")
+    print(f"Steps/sec: {metrics['train_steps_per_second']:.1f}")
+    print(f"Optimizer: {args.optimizer} | Dtype: {args.dtype}")
+
+    save_dir = "./trainer_output/final"
+    print(f"\nSaving model and tokenizer to {save_dir} ...")
+    trainer.save_model(save_dir)
+    tokenizer.save_pretrained(save_dir)
+    print("Save complete.")
+
+    # Verify saved model can be loaded back
+    print("Verifying saved model loads correctly ...")
+    loaded_model = AutoModelForCausalLM.from_pretrained(save_dir, torch_dtype=dtype)
+    loaded_tokenizer = AutoTokenizer.from_pretrained(save_dir)
+    test_input = loaded_tokenizer("Hello", return_tensors="pt")
+    with torch.no_grad():
+        out = loaded_model(**test_input)
+    print(f"Reload OK — output logits shape: {out.logits.shape}")
+    print("Full finetune pipeline completed successfully.")
+
+
 def run_compare(args):
     """Compare paged_adamw vs adamw numerically."""
     device = args.device
@@ -217,6 +288,8 @@ def main():
 
     if args.compare:
         run_compare(args)
+    elif args.use_trainer:
+        run_with_trainer(args)
     else:
         run_single(args)
 
