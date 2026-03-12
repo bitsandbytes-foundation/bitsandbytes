@@ -22,7 +22,11 @@ def get_args():
     parser.add_argument("--model", type=str, default="JackFram/llama-68m")
     parser.add_argument("--dataset", type=str, default="yahma/alpaca-cleaned")
     parser.add_argument("--optimizer", type=str, default="paged_adamw",
-                        choices=["paged_adamw", "paged_adam", "paged_lion", "adamw", "adam"])
+                        choices=["paged_adamw", "paged_adamw8bit", "paged_adamw32bit",
+                                 "paged_adam", "paged_adam8bit", "paged_adam32bit",
+                                 "paged_lion", "paged_lion8bit", "paged_lion32bit",
+                                 "adamw", "adamw8bit", "adamw32bit",
+                                 "adam", "adam8bit", "adam32bit"])
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--max_length", type=int, default=128)
@@ -66,10 +70,20 @@ def create_optimizer(model, name, lr):
     """Create a bnb optimizer by name."""
     optim_map = {
         "paged_adamw": bnb.optim.PagedAdamW,
+        "paged_adamw8bit": bnb.optim.PagedAdamW8bit,
+        "paged_adamw32bit": bnb.optim.PagedAdamW32bit,
         "paged_adam": bnb.optim.PagedAdam,
+        "paged_adam8bit": bnb.optim.PagedAdam8bit,
+        "paged_adam32bit": bnb.optim.PagedAdam32bit,
         "paged_lion": bnb.optim.PagedLion,
+        "paged_lion8bit": bnb.optim.PagedLion8bit,
+        "paged_lion32bit": bnb.optim.PagedLion32bit,
         "adamw": bnb.optim.AdamW,
+        "adamw8bit": bnb.optim.AdamW8bit,
+        "adamw32bit": bnb.optim.AdamW32bit,
         "adam": bnb.optim.Adam,
+        "adam8bit": bnb.optim.Adam8bit,
+        "adam32bit": bnb.optim.Adam32bit,
     }
     cls = optim_map[name]
     return cls(model.parameters(), lr=lr)
