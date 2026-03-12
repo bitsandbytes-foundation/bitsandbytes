@@ -2,9 +2,9 @@
 Real training case for XPU Paged Optimizer using JackFram/llama-68m + Alpaca Clean.
 
 Usage:
-    python tests/test_paged_xpu_training.py
-    python tests/test_paged_xpu_training.py --optimizer paged_adamw --steps 50
-    python tests/test_paged_xpu_training.py --compare  # compare paged vs non-paged loss curves
+    python test_paged_xpu_training.py
+    python test_paged_xpu_training.py --optimizer paged_adamw8bit --steps 50
+    python test_paged_xpu_training.py --compare  # compare paged vs non-paged loss curves
 """
 
 import argparse
@@ -231,26 +231,26 @@ if __name__ == "__main__":
 #  Step |  AdamW Loss |  PagedAdamW Loss |       Diff
 # -------------------------------------------------------
 #     0 |      4.9552 |           4.9552 |   0.000000
-#     5 |      5.0027 |           5.0053 |   0.002588
-#    10 |      2.7280 |           2.7284 |   0.000325
-#    15 |      1.7927 |           1.7960 |   0.003312
-#    20 |      2.8800 |           2.8778 |   0.002215
-#    25 |      2.6720 |           2.6712 |   0.000807
+#     5 |      4.9919 |           5.0084 |   0.016532
+#    10 |      2.7263 |           2.7266 |   0.000363
+#    15 |      1.7890 |           1.7936 |   0.004563
+#    20 |      2.8816 |           2.8848 |   0.003176
+#    25 |      2.6691 |           2.6727 |   0.003588
 
-# Final loss difference: 0.000739
+# Final loss difference: 0.002235
 # OK: Paged and non-paged optimizers produce similar results.
 
+
 # python paged_xpu_training.py --optimizer paged_adamw8bit --steps 30
-#   step    0 | loss 3.5257 | time 3.1s
-#   step    5 | loss 3.0382 | time 3.2s
-#   step   10 | loss 1.7832 | time 3.3s
-#   step   15 | loss 2.6076 | time 3.3s
-#   step   20 | loss 2.8776 | time 3.4s
-#   step   25 | loss 2.3506 | time 3.5s
+#   step    0 | loss 9.7069 | time 3.1s
+#   step    5 | loss 2.9078 | time 3.2s
+#   step   10 | loss 3.9377 | time 3.3s
+#   step   15 | loss 2.2048 | time 3.3s
+#   step   20 | loss 2.5178 | time 3.4s
+#   step   25 | loss 1.0203 | time 3.5s
 
 # --- Results ---
-# Loss: 3.5257 -> 2.4939 (delta=+1.0318)
+# Loss: 9.7069 -> 1.5947 (delta=+8.1121)
 # Total time: 3.6s (8.4 steps/s)
 # Optimizer: paged_adamw8bit | Dtype: bf16
 # OK: Loss decreased as expected.
-
