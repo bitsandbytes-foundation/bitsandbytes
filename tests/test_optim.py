@@ -34,6 +34,24 @@ def _to_device(t, device):
     return t
 
 
+def _clone_paged(t, device):
+    """Clone a tensor that may be paged (USM-backed).
+
+    On XPU, paged tensors use SYCL USM shared memory. After device kernel writes,
+    calling .clone() directly can segfault because the CPU-side memcpy (used by
+    aten::clone) may not correctly trigger USM demand-paging on some Intel GPU drivers.
+    Workaround: copy via .to(device).cpu() which goes through the SYCL queue memcpy path.
+
+    This is an XPU USM runtime limitation, NOT a bitsandbytes bug. Real training
+    workloads (optimizer.step / checkpoint save via torch.save) are NOT affected
+    because they don't do direct CPU memcpy on paged state tensors right after
+    device kernel writes.
+    """
+    if getattr(t, "is_paged", False):
+        return t.to(device).cpu()
+    return t.clone()
+
+
 def get_temp_dir():
     path = f"/tmp/autoswap/{uuid.uuid4()}"
     os.makedirs(path, exist_ok=True)
@@ -454,7 +472,15 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
         if i % 10 == 0 and i > 0:
             for (name1, name2, qmap, max_val), s in zip(str2statenames[optim_name], dequant_states):
                 s1cpy = s.clone()
-                raws1cpy = bnb_optimizer.state[p2][name2].clone()
+                # XPU workaround: On XPU, .clone() on paged (USM) state tensors right
+                # after device kernel writes can segfault due to a USM demand-paging
+                # limitation. Use _clone_paged which copies via device instead.
+                # Only paged optimizers allocate USM-backed state; non-paged is fine.
+                state_tensor = bnb_optimizer.state[p2][name2]
+                if getattr(state_tensor, "is_paged", False):
+                    raws1cpy = _clone_paged(state_tensor, device)
+                else:
+                    raws1cpy = state_tensor.clone()
                 qmap1 = bnb_optimizer.state[p2][qmap].clone()
 
                 path = get_temp_dir()
