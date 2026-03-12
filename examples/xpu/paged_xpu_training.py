@@ -180,7 +180,7 @@ def run_with_trainer(args):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype)
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype)
 
     ds = prepare_data(tokenizer, args.dataset, args.max_length)
 
@@ -195,9 +195,6 @@ def run_with_trainer(args):
         save_total_limit=1,
         report_to="none",
         bf16=(args.dtype == "bf16"),
-        fp16=(args.dtype == "fp16"),
-        no_cuda=(args.device == "xpu"),
-        use_xpu=(args.device == "xpu"),
         dataloader_pin_memory=False,
     )
 
@@ -228,7 +225,7 @@ def run_with_trainer(args):
 
     # Verify saved model can be loaded back
     print("Verifying saved model loads correctly ...")
-    loaded_model = AutoModelForCausalLM.from_pretrained(save_dir, torch_dtype=dtype)
+    loaded_model = AutoModelForCausalLM.from_pretrained(save_dir, dtype=dtype)
     loaded_tokenizer = AutoTokenizer.from_pretrained(save_dir)
     test_input = loaded_tokenizer("Hello", return_tensors="pt")
     with torch.no_grad():
@@ -327,3 +324,33 @@ if __name__ == "__main__":
 # Total time: 3.6s (8.4 steps/s)
 # Optimizer: paged_adamw8bit | Dtype: bf16
 # OK: Loss decreased as expected.
+
+
+# python paged_xpu_training.py --use_trainer --optimizer paged_adamw8bit --steps 50
+# {'loss': '4.364', 'grad_norm': '21.5', 'learning_rate': '0.0002', 'epoch': '0.05'}
+# {'loss': '2.199', 'grad_norm': '10.56', 'learning_rate': '0.0002', 'epoch': '0.1'}
+# {'loss': '2.033', 'grad_norm': '7.812', 'learning_rate': '0.0002', 'epoch': '0.15'}
+# {'loss': '2.427', 'grad_norm': '9', 'learning_rate': '0.0002', 'epoch': '0.2'}
+# {'loss': '2.13', 'grad_norm': '3.812', 'learning_rate': '0.0002', 'epoch': '0.25'}
+# {'loss': '1.975', 'grad_norm': '9.438', 'learning_rate': '0.0002', 'epoch': '0.3'}
+# {'loss': '1.978', 'grad_norm': '8.562', 'learning_rate': '0.0002', 'epoch': '0.35'}
+# {'loss': '2.056', 'grad_norm': '7.469', 'learning_rate': '0.0002', 'epoch': '0.4'}
+# {'loss': '2.561', 'grad_norm': '10.88', 'learning_rate': '0.0002', 'epoch': '0.45'}
+# {'loss': '2.17', 'grad_norm': '10.12', 'learning_rate': '0.0002', 'epoch': '0.5'}
+# Writing model shards: 100%|████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  6.23it/s]
+# {'train_runtime': '4.716', 'train_samples_per_second': '21.2', 'train_steps_per_second': '10.6', 'train_loss': '2.389', 'epoch': '0.5'}
+# 100%|████████████████████████████████████████████████████████████████████████████████████████████████| 50/50 [00:04<00:00, 10.60it/s]
+
+# --- Trainer Results ---
+# Training loss: 2.3893
+# Training runtime: 4.7s
+# Steps/sec: 10.6
+# Optimizer: paged_adamw8bit | Dtype: bf16
+
+# Saving model and tokenizer to ./trainer_output/final ...
+# Writing model shards: 100%|████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  6.27it/s]
+# Save complete.
+# Verifying saved model loads correctly ...
+# Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████| 21/21 [00:00<00:00, 8293.82it/s]
+# Reload OK — output logits shape: torch.Size([1, 2, 32000])
+# Full finetune pipeline completed successfully.
