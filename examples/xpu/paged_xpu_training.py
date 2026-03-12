@@ -183,7 +183,7 @@ def run_compare(args):
     for opt_name in ["adamw", "paged_adamw"]:
         print(f"\n>> {opt_name}")
         torch.manual_seed(42)
-        model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype, device_map=device)
+        model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype, device_map=device)
         optimizer = create_optimizer(model, opt_name, args.lr)
         history = train_loop(model, optimizer, dataloader, args.steps, args.log_interval, torch.device(device))
         results[opt_name] = history

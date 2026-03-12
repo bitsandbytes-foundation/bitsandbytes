@@ -5,9 +5,9 @@ Demonstrates that paged optimizers significantly reduce GPU memory consumption
 by storing optimizer states in CPU/GPU shared memory (USM) instead of pure GPU memory.
 
 Usage:
-    python tests/benchmark_paged_memory.py
-    python tests/benchmark_paged_memory.py --hidden_size 2048 --num_layers 16
-    python tests/benchmark_paged_memory.py --device cuda  # also works on CUDA
+    python benchmark_paged_memory.py
+    python benchmark_paged_memory.py --hidden_size 2048 --num_layers 16
+    python benchmark_paged_memory.py --device cuda  # also works on CUDA
 """
 
 import argparse
@@ -232,17 +232,20 @@ if __name__ == "__main__":
 
 
 # python benchmark_paged_memory.py
-# =================================================================
+# =====================================================================================
 #   RESULTS
-# =================================================================
-#                                         AdamW    PagedAdamW
-#   ------------------------------ ------------  ------------
-#   Peak GPU Memory                   2524.7 MB      861.3 MB
-#   Optimizer State on GPU            1658.2 MB        0.2 MB
-#   Optimizer State on CPU (USM)         0.0 MB     1658.0 MB
-#   ------------------------------ ------------  ------------
-#   GPU Memory Saved                  1663.5 MB  (65.9%)
-# =================================================================
+# =====================================================================================
+#                                              AdamW         AdamW8bit        PagedAdamW    PagedAdamW8bit
+#   ------------------------------  ----------------  ----------------  ----------------  ----------------
+#   Peak GPU Memory                        2524.7 MB         1287.4 MB          861.3 MB          867.8 MB
+#   Optimizer State on GPU                 1658.2 MB          421.3 MB            0.2 MB            6.8 MB
+#   Optimizer State on CPU (USM)              0.0 MB            0.0 MB         1658.0 MB          414.5 MB
+#   ------------------------------  ----------------  ----------------  ----------------  ----------------
+#   GPU Memory Saved vs AdamW               baseline  1237.4 MB (49.0%)  1663.5 MB (65.9%)  1657.0 MB (65.6%)
+# =====================================================================================
 
-#   >>> PagedAdamW saved 1663.5 MB GPU memory (65.9% reduction)
-#   >>> Optimizer states moved to shared memory (USM), freeing GPU VRAM
+#   >>> AdamW8bit saved 1237.4 MB GPU memory (49.0% reduction vs AdamW)
+
+#   >>> PagedAdamW saved 1663.5 MB GPU memory (65.9% reduction vs AdamW)
+
+#   >>> PagedAdamW8bit saved 1657.0 MB GPU memory (65.6% reduction vs AdamW)
