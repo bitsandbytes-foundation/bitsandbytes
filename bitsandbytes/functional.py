@@ -89,8 +89,8 @@ else:
 
 def get_paged(*shape, dtype=torch.float32, device=FIRST_CUDA_DEVICE):
     num_bytes = dtype.itemsize * prod(shape)
-    cuda_ptr = lib.cget_managed_ptr(ct.c_size_t(num_bytes))
-    c_ptr = ct.cast(cuda_ptr, ct.POINTER(ct.c_int))
+    managed_ptr = lib.cget_managed_ptr(ct.c_size_t(num_bytes))
+    c_ptr = ct.cast(managed_ptr, ct.POINTER(ct.c_int))
     new_array = np.ctypeslib.as_array(c_ptr, shape=shape)
     out = torch.frombuffer(new_array, dtype=dtype, count=prod(shape)).view(shape)
     out.is_paged = True
@@ -132,7 +132,10 @@ def elementwise_func(func_name, A, B, value, prefetch=True):
         # if we return from this function, we want to the tensor
         # to be in the correct state, that is the final state after the
         # operation occurred. So we synchronize.
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        elif hasattr(torch, "xpu") and torch.xpu.is_available():
+            torch.xpu.synchronize()
 
 
 def fill(A, value, device=None, prefetch=True):

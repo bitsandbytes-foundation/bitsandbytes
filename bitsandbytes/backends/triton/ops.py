@@ -235,7 +235,9 @@ def optimizer_update_8bit_blockwise(
     #         lambda: f"Expected qmap2 and absmax2 to be float32, got qmap2.dtype={qmap2.dtype}, absmax2.dtype={absmax2.dtype}",
     #     )
 
-    with torch_accelerator_module.device(state1.device):
+    # Use g.device for device context: paged state tensors appear as CPU tensors
+    # but are backed by USM shared memory and accessible from the accelerator.
+    with torch_accelerator_module.device(g.device):
         optimizer_update_8bit_blockwise_impl(
             optimizer_name=optimizer_name,
             g=g,
@@ -279,7 +281,9 @@ def optimizer_update_32bit(
     gnorm_scale: float,
     skip_zeros=False,
 ) -> None:
-    with torch_accelerator_module.device(state1.device):
+    # Use g.device for device context: paged state tensors appear as CPU tensors
+    # but are backed by USM shared memory and accessible from the accelerator.
+    with torch_accelerator_module.device(g.device):
         kernels_optim.optimizer_update_32bit_impl(
             optimizer_name=optimizer_name,
             g=g,
