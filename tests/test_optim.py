@@ -27,6 +27,13 @@ def assert_most_approx_close(a, b, rtol=1e-3, atol=1e-3, max_error_count=0):
         torch.testing.assert_close(a, b, rtol=rtol, atol=atol)
 
 
+def _to_device(t, device):
+    """Move tensor to device. Handles paged (USM) tensors that appear as CPU."""
+    if getattr(t, "is_paged", False):
+        return t.to(device)
+    return t
+
+
 def get_temp_dir():
     path = f"/tmp/autoswap/{uuid.uuid4()}"
     os.makedirs(path, exist_ok=True)
@@ -409,13 +416,13 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
                 m1 = F.dequantize_blockwise(
                     code=bnb_optimizer.state[p2][qmap],
                     absmax=bnb_optimizer.state[p2][max_val][0],
-                    A=bnb_optimizer.state[p2][name2][0],
+                    A=_to_device(bnb_optimizer.state[p2][name2][0], device),
                     blocksize=blocksize,
                 )
                 m2 = F.dequantize_blockwise(
                     code=bnb_optimizer.state[p2][qmap],
                     absmax=bnb_optimizer.state[p2][max_val][1],
-                    A=bnb_optimizer.state[p2][name2][1],
+                    A=_to_device(bnb_optimizer.state[p2][name2][1], device),
                     blocksize=blocksize,
                 )
 
@@ -424,7 +431,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
                 s1 = F.dequantize_blockwise(
                     code=bnb_optimizer.state[p2][qmap],
                     absmax=bnb_optimizer.state[p2][max_val],
-                    A=bnb_optimizer.state[p2][name2],
+                    A=_to_device(bnb_optimizer.state[p2][name2], device),
                     blocksize=blocksize,
                 )
 
@@ -457,8 +464,8 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
                 bnb_optimizer = str2optimizers[optim_name][1]([p2])
                 bnb_optimizer.load_state_dict(torch.load(join(path, "opt.pt")))
                 rm_path(path)
-                torch.testing.assert_close(raws1cpy, bnb_optimizer.state[p2][name2])
-                torch.testing.assert_close(qmap1, bnb_optimizer.state[p2][qmap])
+                torch.testing.assert_close(raws1cpy.to(device), bnb_optimizer.state[p2][name2].to(device))
+                torch.testing.assert_close(qmap1.to(device), bnb_optimizer.state[p2][qmap].to(device))
 
                 ## For AdEMAMix, we need to dequantize [p2][name2][0] and [p2][name2][1]
                 ## separately and then stack them. The qmap is shared, but absmax is also stacked.
@@ -468,13 +475,13 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
                             F.dequantize_blockwise(
                                 code=bnb_optimizer.state[p2][qmap],
                                 absmax=bnb_optimizer.state[p2][max_val][0],
-                                A=bnb_optimizer.state[p2][name2][0],
+                                A=_to_device(bnb_optimizer.state[p2][name2][0], device),
                                 blocksize=blocksize,
                             ),
                             F.dequantize_blockwise(
                                 code=bnb_optimizer.state[p2][qmap],
                                 absmax=bnb_optimizer.state[p2][max_val][1],
-                                A=bnb_optimizer.state[p2][name2][1],
+                                A=_to_device(bnb_optimizer.state[p2][name2][1], device),
                                 blocksize=blocksize,
                             ),
                         )
@@ -483,7 +490,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
                     s1 = F.dequantize_blockwise(
                         code=bnb_optimizer.state[p2][qmap],
                         absmax=bnb_optimizer.state[p2][max_val],
-                        A=bnb_optimizer.state[p2][name2],
+                        A=_to_device(bnb_optimizer.state[p2][name2], device),
                         blocksize=blocksize,
                     )
 
