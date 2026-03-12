@@ -742,12 +742,10 @@ void cfill_fp32(float* A, float* B, float value, long n) {
 }
 
 void cfill_uint8(unsigned char* A, unsigned char* B, unsigned char value, long n) {
-    try {
-        auto& q = xpu_default_queue();
-        q.fill(A, value, static_cast<size_t>(n)).wait();
-    } catch (const sycl::exception& e) {
-        fprintf(stderr, "XPU Error in cfill_uint8: %s\n", e.what());
-    }
+    // Use host-side memset instead of sycl::queue::fill<unsigned char>
+    // which segfaults on certain Intel GPU drivers (e.g. Max 1550).
+    // USM shared memory is host-accessible, so memset works directly.
+    memset(A, value, static_cast<size_t>(n));
 }
 
 #endif
