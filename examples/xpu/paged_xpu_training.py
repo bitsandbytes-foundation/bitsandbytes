@@ -12,7 +12,7 @@ import time
 
 import torch
 from datasets import load_dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed
 
 import bitsandbytes as bnb
 
@@ -222,6 +222,7 @@ def main():
 
 
 if __name__ == "__main__":
+    set_seed(42)
     main()
 
 
@@ -238,3 +239,18 @@ if __name__ == "__main__":
 
 # Final loss difference: 0.000739
 # OK: Paged and non-paged optimizers produce similar results.
+
+# python paged_xpu_training.py --optimizer paged_adamw8bit --steps 30
+#   step    0 | loss 3.5257 | time 3.1s
+#   step    5 | loss 3.0382 | time 3.2s
+#   step   10 | loss 1.7832 | time 3.3s
+#   step   15 | loss 2.6076 | time 3.3s
+#   step   20 | loss 2.8776 | time 3.4s
+#   step   25 | loss 2.3506 | time 3.5s
+
+# --- Results ---
+# Loss: 3.5257 -> 2.4939 (delta=+1.0318)
+# Total time: 3.6s (8.4 steps/s)
+# Optimizer: paged_adamw8bit | Dtype: bf16
+# OK: Loss decreased as expected.
+

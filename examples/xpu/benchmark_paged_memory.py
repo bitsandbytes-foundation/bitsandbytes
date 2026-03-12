@@ -79,7 +79,7 @@ def cleanup(device_type):
     acc.synchronize()
 
 
-def measure_training(args, optimizer_name, paged):
+def measure_training(args, optimizer_name, OptClass):
     """Run a few training steps and return peak GPU memory in bytes."""
     acc = get_accelerator(args.device)
 
@@ -94,10 +94,6 @@ def measure_training(args, optimizer_name, paged):
     mem_after_model = acc.memory_allocated()
 
     # Create optimizer
-    if paged:
-        OptClass = bnb.optim.PagedAdamW
-    else:
-        OptClass = bnb.optim.AdamW
     optimizer = OptClass(model.parameters(), lr=2e-4)
 
     # Training steps
@@ -166,9 +162,9 @@ def main():
     del model_tmp
     cleanup(device_type)
 
-    print("=" * 65)
-    print("  Paged vs Non-Paged Optimizer: GPU Memory Benchmark")
-    print("=" * 65)
+    print("=" * 85)
+    print("  Paged vs Non-Paged Optimizer: GPU Memory Benchmark (32-bit & 8-bit)")
+    print("=" * 85)
     print(f"  Device:       {device_type}")
     print(f"  Dtype:        {args.dtype}")
     print(f"  Model:        LLaMA (hidden={args.hidden_size}, layers={args.num_layers}, heads={args.num_heads})")
@@ -176,44 +172,57 @@ def main():
     print(f"  Batch:        {args.batch_size} x {args.seq_len}")
     print(f"  Train steps:  {args.train_steps}")
     expected_state = n_params * 4 * 2  # fp32, 2 states (exp_avg + exp_avg_sq)
-    print(f"  Expected optimizer state size: {fmt_mb(expected_state)}")
-    print("=" * 65)
+    expected_state_8bit = n_params * 1 * 2  # int8, 2 states
+    print(f"  Expected optimizer state size (32-bit): {fmt_mb(expected_state)}")
+    print(f"  Expected optimizer state size (8-bit):  {fmt_mb(expected_state_8bit)}")
+    print("=" * 85)
 
-    # --- Run non-paged ---
-    print("\n[1/2] Running AdamW (non-paged)...")
-    r_normal = measure_training(args, "AdamW", paged=False)
-    print(f"  Peak GPU memory: {fmt_mb(r_normal['peak_mem'])}")
-    print(f"  Optimizer state on GPU: {fmt_mb(r_normal['gpu_state_bytes'])}")
-    print(f"  Optimizer state on CPU: {fmt_mb(r_normal['cpu_state_bytes'])}")
+    # Define all optimizers to benchmark
+    benchmarks = [
+        ("AdamW",          bnb.optim.AdamW),
+        ("AdamW8bit",      bnb.optim.AdamW8bit),
+        ("PagedAdamW",     bnb.optim.PagedAdamW),
+        ("PagedAdamW8bit", bnb.optim.PagedAdamW8bit),
+    ]
 
-    # --- Run paged ---
-    print("\n[2/2] Running PagedAdamW (paged)...")
-    r_paged = measure_training(args, "PagedAdamW", paged=True)
-    print(f"  Peak GPU memory: {fmt_mb(r_paged['peak_mem'])}")
-    print(f"  Optimizer state on GPU: {fmt_mb(r_paged['gpu_state_bytes'])}")
-    print(f"  Optimizer state on CPU: {fmt_mb(r_paged['cpu_state_bytes'])}")
+    results = []
+    for i, (name, OptClass) in enumerate(benchmarks, 1):
+        print(f"\n[{i}/{len(benchmarks)}] Running {name}...")
+        r = measure_training(args, name, OptClass)
+        print(f"  Peak GPU memory: {fmt_mb(r['peak_mem'])}")
+        print(f"  Optimizer state on GPU: {fmt_mb(r['gpu_state_bytes'])}")
+        print(f"  Optimizer state on CPU: {fmt_mb(r['cpu_state_bytes'])}")
+        results.append(r)
 
     # --- Comparison ---
-    saved = r_normal["peak_mem"] - r_paged["peak_mem"]
-    pct = (saved / r_normal["peak_mem"]) * 100 if r_normal["peak_mem"] > 0 else 0
+    col_width = 16
+    header_names = [r["name"] for r in results]
+    baseline_peak = results[0]["peak_mem"]
 
-    print("\n" + "=" * 65)
+    print("\n" + "=" * 85)
     print("  RESULTS")
-    print("=" * 65)
-    print(f"  {'':30s} {'AdamW':>12s}  {'PagedAdamW':>12s}")
-    print(f"  {'-'*30} {'-'*12}  {'-'*12}")
-    print(f"  {'Peak GPU Memory':30s} {fmt_mb(r_normal['peak_mem']):>12s}  {fmt_mb(r_paged['peak_mem']):>12s}")
-    print(f"  {'Optimizer State on GPU':30s} {fmt_mb(r_normal['gpu_state_bytes']):>12s}  {fmt_mb(r_paged['gpu_state_bytes']):>12s}")
-    print(f"  {'Optimizer State on CPU (USM)':30s} {fmt_mb(r_normal['cpu_state_bytes']):>12s}  {fmt_mb(r_paged['cpu_state_bytes']):>12s}")
-    print(f"  {'-'*30} {'-'*12}  {'-'*12}")
-    print(f"  {'GPU Memory Saved':30s} {fmt_mb(saved):>12s}  ({pct:.1f}%)")
-    print("=" * 65)
+    print("=" * 85)
+    print(f"  {'':30s}" + "".join(f"  {n:>{col_width}s}" for n in header_names))
+    print(f"  {'-'*30}" + "".join(f"  {'-'*col_width}" for _ in results))
+    for label, key in [("Peak GPU Memory", "peak_mem"),
+                        ("Optimizer State on GPU", "gpu_state_bytes"),
+                        ("Optimizer State on CPU (USM)", "cpu_state_bytes")]:
+        print(f"  {label:30s}" + "".join(f"  {fmt_mb(r[key]):>{col_width}s}" for r in results))
+    print(f"  {'-'*30}" + "".join(f"  {'-'*col_width}" for _ in results))
+    # Show savings vs baseline (AdamW)
+    savings_row = []
+    for r in results:
+        saved = baseline_peak - r["peak_mem"]
+        pct = (saved / baseline_peak) * 100 if baseline_peak > 0 else 0
+        savings_row.append(f"{fmt_mb(saved)} ({pct:.1f}%)" if saved > 0 else "baseline")
+    print(f"  {'GPU Memory Saved vs AdamW':30s}" + "".join(f"  {s:>{col_width}s}" for s in savings_row))
+    print("=" * 85)
 
-    if saved > 0:
-        print(f"\n  >>> PagedAdamW saved {fmt_mb(saved)} GPU memory ({pct:.1f}% reduction)")
-        print(f"  >>> Optimizer states moved to shared memory (USM), freeing GPU VRAM")
-    else:
-        print("\n  NOTE: No memory saving detected. Model may be too small to observe the difference.")
+    for r in results[1:]:
+        saved = baseline_peak - r["peak_mem"]
+        if saved > 0:
+            pct = (saved / baseline_peak) * 100
+            print(f"\n  >>> {r['name']} saved {fmt_mb(saved)} GPU memory ({pct:.1f}% reduction vs AdamW)")
 
     print()
 
