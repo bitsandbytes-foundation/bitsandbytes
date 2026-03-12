@@ -151,7 +151,7 @@ str2statenames["ademamix8bit_blockwise"] = str2statenames["ademamix8bit_blockwis
     ("m1_m2", "state1", "qmap1", "absmax1"),
     ("nu", "state2", "qmap2", "absmax2"),
 ]
-str2statenames["paged_ademamix8bit_blockwise"] = [
+str2statenames["paged_ademamix8bit_blockwise"] = str2statenames["paged_ademamix8bit_blockwise_scheduled"] = [
     ("m1_m2", "state1", "qmap1", "absmax1"),
     ("nu", "state2", "qmap2", "absmax2"),
 ]
@@ -341,11 +341,16 @@ def test_override_config_after_register(device):
 
 optimizer_names_8bit = [
     "adam8bit_blockwise",
+    "paged_adam8bit_blockwise",
+    "paged_adamw8bit_blockwise",
     "lion8bit_blockwise",
+    "paged_lion8bit_blockwise",
     "momentum8bit_blockwise",
     "rmsprop8bit_blockwise",
     "ademamix8bit_blockwise",
     "ademamix8bit_blockwise_scheduled",
+    "paged_ademamix8bit_blockwise",
+    "paged_ademamix8bit_blockwise_scheduled",
 ]
 
 
