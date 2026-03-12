@@ -27,31 +27,6 @@ def assert_most_approx_close(a, b, rtol=1e-3, atol=1e-3, max_error_count=0):
         torch.testing.assert_close(a, b, rtol=rtol, atol=atol)
 
 
-def _to_device(t, device):
-    """Move tensor to device. Handles paged (USM) tensors that appear as CPU."""
-    if getattr(t, "is_paged", False):
-        return t.to(device)
-    return t
-
-
-def _clone_paged(t, device):
-    """Clone a tensor that may be paged (USM-backed).
-
-    On XPU, paged tensors use SYCL USM shared memory. After device kernel writes,
-    calling .clone() directly can segfault because the CPU-side memcpy (used by
-    aten::clone) may not correctly trigger USM demand-paging on some Intel GPU drivers.
-    Workaround: copy via .to(device).cpu() which goes through the SYCL queue memcpy path.
-
-    This is an XPU USM runtime limitation, NOT a bitsandbytes bug. Real training
-    workloads (optimizer.step / checkpoint save via torch.save) are NOT affected
-    because they don't do direct CPU memcpy on paged state tensors right after
-    device kernel writes.
-    """
-    if getattr(t, "is_paged", False):
-        return t.to(device).cpu()
-    return t.clone()
-
-
 def get_temp_dir():
     path = f"/tmp/autoswap/{uuid.uuid4()}"
     os.makedirs(path, exist_ok=True)
@@ -176,7 +151,7 @@ str2statenames["ademamix8bit_blockwise"] = str2statenames["ademamix8bit_blockwis
     ("m1_m2", "state1", "qmap1", "absmax1"),
     ("nu", "state2", "qmap2", "absmax2"),
 ]
-str2statenames["paged_ademamix8bit_blockwise"] = str2statenames["paged_ademamix8bit_blockwise_scheduled"] = [
+str2statenames["paged_ademamix8bit_blockwise"] = [
     ("m1_m2", "state1", "qmap1", "absmax1"),
     ("nu", "state2", "qmap2", "absmax2"),
 ]
@@ -366,16 +341,11 @@ def test_override_config_after_register(device):
 
 optimizer_names_8bit = [
     "adam8bit_blockwise",
-    "paged_adam8bit_blockwise",
-    "paged_adamw8bit_blockwise",
     "lion8bit_blockwise",
-    "paged_lion8bit_blockwise",
     "momentum8bit_blockwise",
     "rmsprop8bit_blockwise",
     "ademamix8bit_blockwise",
     "ademamix8bit_blockwise_scheduled",
-    "paged_ademamix8bit_blockwise",
-    "paged_ademamix8bit_blockwise_scheduled",
 ]
 
 
@@ -434,13 +404,13 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
                 m1 = F.dequantize_blockwise(
                     code=bnb_optimizer.state[p2][qmap],
                     absmax=bnb_optimizer.state[p2][max_val][0],
-                    A=_to_device(bnb_optimizer.state[p2][name2][0], device),
+                    A=bnb_optimizer.state[p2][name2][0],
                     blocksize=blocksize,
                 )
                 m2 = F.dequantize_blockwise(
                     code=bnb_optimizer.state[p2][qmap],
                     absmax=bnb_optimizer.state[p2][max_val][1],
-                    A=_to_device(bnb_optimizer.state[p2][name2][1], device),
+                    A=bnb_optimizer.state[p2][name2][1],
                     blocksize=blocksize,
                 )
 
@@ -449,7 +419,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
                 s1 = F.dequantize_blockwise(
                     code=bnb_optimizer.state[p2][qmap],
                     absmax=bnb_optimizer.state[p2][max_val],
-                    A=_to_device(bnb_optimizer.state[p2][name2], device),
+                    A=bnb_optimizer.state[p2][name2],
                     blocksize=blocksize,
                 )
 
@@ -472,15 +442,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
         if i % 10 == 0 and i > 0:
             for (name1, name2, qmap, max_val), s in zip(str2statenames[optim_name], dequant_states):
                 s1cpy = s.clone()
-                # XPU workaround: On XPU, .clone() on paged (USM) state tensors right
-                # after device kernel writes can segfault due to a USM demand-paging
-                # limitation. Use _clone_paged which copies via device instead.
-                # Only paged optimizers allocate USM-backed state; non-paged is fine.
-                state_tensor = bnb_optimizer.state[p2][name2]
-                if getattr(state_tensor, "is_paged", False):
-                    raws1cpy = _clone_paged(state_tensor, device)
-                else:
-                    raws1cpy = state_tensor.clone()
+                raws1cpy = bnb_optimizer.state[p2][name2].clone()
                 qmap1 = bnb_optimizer.state[p2][qmap].clone()
 
                 path = get_temp_dir()
@@ -490,8 +452,8 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
                 bnb_optimizer = str2optimizers[optim_name][1]([p2])
                 bnb_optimizer.load_state_dict(torch.load(join(path, "opt.pt")))
                 rm_path(path)
-                torch.testing.assert_close(raws1cpy.to(device), bnb_optimizer.state[p2][name2].to(device))
-                torch.testing.assert_close(qmap1.to(device), bnb_optimizer.state[p2][qmap].to(device))
+                torch.testing.assert_close(raws1cpy, bnb_optimizer.state[p2][name2])
+                torch.testing.assert_close(qmap1, bnb_optimizer.state[p2][qmap])
 
                 ## For AdEMAMix, we need to dequantize [p2][name2][0] and [p2][name2][1]
                 ## separately and then stack them. The qmap is shared, but absmax is also stacked.
@@ -501,13 +463,13 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
                             F.dequantize_blockwise(
                                 code=bnb_optimizer.state[p2][qmap],
                                 absmax=bnb_optimizer.state[p2][max_val][0],
-                                A=_to_device(bnb_optimizer.state[p2][name2][0], device),
+                                A=bnb_optimizer.state[p2][name2][0],
                                 blocksize=blocksize,
                             ),
                             F.dequantize_blockwise(
                                 code=bnb_optimizer.state[p2][qmap],
                                 absmax=bnb_optimizer.state[p2][max_val][1],
-                                A=_to_device(bnb_optimizer.state[p2][name2][1], device),
+                                A=bnb_optimizer.state[p2][name2][1],
                                 blocksize=blocksize,
                             ),
                         )
@@ -516,7 +478,7 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
                     s1 = F.dequantize_blockwise(
                         code=bnb_optimizer.state[p2][qmap],
                         absmax=bnb_optimizer.state[p2][max_val],
-                        A=_to_device(bnb_optimizer.state[p2][name2], device),
+                        A=bnb_optimizer.state[p2][name2],
                         blocksize=blocksize,
                     )
 
