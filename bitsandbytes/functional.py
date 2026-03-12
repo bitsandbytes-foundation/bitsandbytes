@@ -387,7 +387,12 @@ def _get_tensor_stream(tensor: Tensor) -> ct.c_void_p:
     # We use the raw stream for performance reasons.
     if tensor.device.type == "xpu":
         return ct.c_void_p(torch._C._xpu_getCurrentRawStream(tensor.device.index))
-    return ct.c_void_p(torch._C._cuda_getCurrentRawStream(tensor.device.index))
+    if tensor.device.type == "cuda":
+        return ct.c_void_p(torch._C._cuda_getCurrentRawStream(tensor.device.index))
+    # For CPU tensors (e.g. paged optimizer states), use current device's stream.
+    if hasattr(torch, "xpu") and torch.xpu.is_available():
+        return ct.c_void_p(torch._C._xpu_getCurrentRawStream(torch.xpu.current_device()))
+    return ct.c_void_p(torch._C._cuda_getCurrentRawStream(torch.cuda.current_device()))
 
 
 def get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]:
