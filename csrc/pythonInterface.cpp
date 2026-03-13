@@ -723,7 +723,8 @@ void* cget_managed_ptr(size_t bytes) {
 void cprefetch(void* ptr, size_t bytes, int device) {
     // device == -1 means prefetch to host; for SYCL we skip in that case
     // since SYCL prefetch targets the device associated with the queue.
-    if (device < 0) return;
+    if (device < 0)
+        return;
     try {
         auto& q = xpu_default_queue();
         q.prefetch(ptr, bytes);

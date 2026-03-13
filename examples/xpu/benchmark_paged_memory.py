@@ -179,9 +179,9 @@ def main():
 
     # Define all optimizers to benchmark
     benchmarks = [
-        ("AdamW",          bnb.optim.AdamW),
-        ("AdamW8bit",      bnb.optim.AdamW8bit),
-        ("PagedAdamW",     bnb.optim.PagedAdamW),
+        ("AdamW", bnb.optim.AdamW),
+        ("AdamW8bit", bnb.optim.AdamW8bit),
+        ("PagedAdamW", bnb.optim.PagedAdamW),
         ("PagedAdamW8bit", bnb.optim.PagedAdamW8bit),
     ]
 
@@ -203,12 +203,14 @@ def main():
     print("  RESULTS")
     print("=" * 85)
     print(f"  {'':30s}" + "".join(f"  {n:>{col_width}s}" for n in header_names))
-    print(f"  {'-'*30}" + "".join(f"  {'-'*col_width}" for _ in results))
-    for label, key in [("Peak GPU Memory", "peak_mem"),
-                        ("Optimizer State on GPU", "gpu_state_bytes"),
-                        ("Optimizer State on CPU (USM)", "cpu_state_bytes")]:
+    print(f"  {'-' * 30}" + "".join(f"  {'-' * col_width}" for _ in results))
+    for label, key in [
+        ("Peak GPU Memory", "peak_mem"),
+        ("Optimizer State on GPU", "gpu_state_bytes"),
+        ("Optimizer State on CPU (USM)", "cpu_state_bytes"),
+    ]:
         print(f"  {label:30s}" + "".join(f"  {fmt_mb(r[key]):>{col_width}s}" for r in results))
-    print(f"  {'-'*30}" + "".join(f"  {'-'*col_width}" for _ in results))
+    print(f"  {'-' * 30}" + "".join(f"  {'-' * col_width}" for _ in results))
     # Show savings vs baseline (AdamW)
     savings_row = []
     for r in results:

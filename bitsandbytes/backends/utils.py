@@ -4,8 +4,9 @@ from packaging import version
 import torch
 
 try:
-    import triton  # noqa: F401
     import triton.language as tl  # noqa: F401
+
+    import triton  # noqa: F401
 
     triton_available = True
 except ImportError:

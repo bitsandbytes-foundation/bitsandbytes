@@ -11,8 +11,8 @@ Usage:
 import argparse
 import time
 
-import torch
 from datasets import load_dataset
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments, set_seed
 
 import bitsandbytes as bnb
@@ -22,12 +22,28 @@ def get_args():
     parser = argparse.ArgumentParser(description="XPU Paged Optimizer Training Test")
     parser.add_argument("--model", type=str, default="JackFram/llama-68m")
     parser.add_argument("--dataset", type=str, default="yahma/alpaca-cleaned")
-    parser.add_argument("--optimizer", type=str, default="paged_adamw",
-                        choices=["paged_adamw", "paged_adamw8bit", "paged_adamw32bit",
-                                 "paged_adam", "paged_adam8bit", "paged_adam32bit",
-                                 "paged_lion", "paged_lion8bit", "paged_lion32bit",
-                                 "adamw", "adamw8bit", "adamw32bit",
-                                 "adam", "adam8bit", "adam32bit"])
+    parser.add_argument(
+        "--optimizer",
+        type=str,
+        default="paged_adamw",
+        choices=[
+            "paged_adamw",
+            "paged_adamw8bit",
+            "paged_adamw32bit",
+            "paged_adam",
+            "paged_adam8bit",
+            "paged_adam32bit",
+            "paged_lion",
+            "paged_lion8bit",
+            "paged_lion32bit",
+            "adamw",
+            "adamw8bit",
+            "adamw32bit",
+            "adam",
+            "adam8bit",
+            "adam32bit",
+        ],
+    )
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--max_length", type=int, default=128)
@@ -62,10 +78,7 @@ def prepare_data(tokenizer, dataset_name, max_length, num_samples=200):
 
 
 def collate_fn(batch):
-    return {
-        k: torch.tensor([ex[k] for ex in batch])
-        for k in batch[0].keys()
-    }
+    return {k: torch.tensor([ex[k] for ex in batch]) for k in batch[0].keys()}
 
 
 def create_optimizer(model, name, lr):
@@ -155,7 +168,7 @@ def run_single(args):
     loss_start = history[0][1]
     loss_end = history[-1][1]
     total_time = history[-1][2]
-    print(f"\n--- Results ---")
+    print("\n--- Results ---")
     print(f"Loss: {loss_start:.4f} -> {loss_end:.4f} (delta={loss_start - loss_end:+.4f})")
     print(f"Total time: {total_time:.1f}s ({args.steps / total_time:.1f} steps/s)")
     print(f"Optimizer: {args.optimizer} | Dtype: {args.dtype}")
@@ -211,7 +224,7 @@ def run_with_trainer(args):
 
     train_result = trainer.train()
     metrics = train_result.metrics
-    print(f"\n--- Trainer Results ---")
+    print("\n--- Trainer Results ---")
     print(f"Training loss: {metrics['train_loss']:.4f}")
     print(f"Training runtime: {metrics['train_runtime']:.1f}s")
     print(f"Steps/sec: {metrics['train_steps_per_second']:.1f}")
@@ -263,7 +276,7 @@ def run_compare(args):
     h_paged = results["paged_adamw"]
     for i in range(0, min(len(h_normal), len(h_paged)), max(1, args.log_interval)):
         s1, l1, _ = h_normal[i]
-        s2, l2, _ = h_paged[i]
+        _, l2, _ = h_paged[i]
         print(f"{s1:5d} | {l1:11.4f} | {l2:16.4f} | {abs(l1 - l2):10.6f}")
 
     final_diff = abs(h_normal[-1][1] - h_paged[-1][1])
