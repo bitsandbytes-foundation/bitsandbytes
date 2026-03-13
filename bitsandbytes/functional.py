@@ -89,8 +89,8 @@ else:
 
 def get_paged(*shape, dtype=torch.float32, device=FIRST_CUDA_DEVICE):
     num_bytes = dtype.itemsize * prod(shape)
-    cuda_ptr = lib.cget_managed_ptr(ct.c_size_t(num_bytes))
-    c_ptr = ct.cast(cuda_ptr, ct.POINTER(ct.c_int))
+    managed_ptr = lib.cget_managed_ptr(ct.c_size_t(num_bytes))
+    c_ptr = ct.cast(managed_ptr, ct.POINTER(ct.c_int))
     new_array = np.ctypeslib.as_array(c_ptr, shape=shape)
     out = torch.frombuffer(new_array, dtype=dtype, count=prod(shape)).view(shape)
     out.is_paged = True
@@ -132,7 +132,10 @@ def elementwise_func(func_name, A, B, value, prefetch=True):
         # if we return from this function, we want to the tensor
         # to be in the correct state, that is the final state after the
         # operation occurred. So we synchronize.
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        elif hasattr(torch, "xpu") and torch.xpu.is_available():
+            torch.xpu.synchronize()
 
 
 def fill(A, value, device=None, prefetch=True):
@@ -384,7 +387,12 @@ def _get_tensor_stream(tensor: Tensor) -> ct.c_void_p:
     # We use the raw stream for performance reasons.
     if tensor.device.type == "xpu":
         return ct.c_void_p(torch._C._xpu_getCurrentRawStream(tensor.device.index))
-    return ct.c_void_p(torch._C._cuda_getCurrentRawStream(tensor.device.index))
+    if tensor.device.type == "cuda":
+        return ct.c_void_p(torch._C._cuda_getCurrentRawStream(tensor.device.index))
+    # For CPU tensors (e.g. paged optimizer states), use current device's stream.
+    if hasattr(torch, "xpu") and torch.xpu.is_available():
+        return ct.c_void_p(torch._C._xpu_getCurrentRawStream(torch.xpu.current_device()))
+    return ct.c_void_p(torch._C._cuda_getCurrentRawStream(torch.cuda.current_device()))
 
 
 def get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]:
