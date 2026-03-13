@@ -30,28 +30,34 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
     prefix = "rocm" if torch.version.hip else "cuda"
     library_name = f"libbitsandbytes_{prefix}{cuda_specs.cuda_version_string}{DYNAMIC_LIBRARY_SUFFIX}"
 
-    override_value = os.environ.get("BNB_CUDA_VERSION")
+    cuda_override_value = os.environ.get("BNB_CUDA_VERSION")
     rocm_override_value = os.environ.get("BNB_ROCM_VERSION")
 
-    if rocm_override_value and torch.version.hip:
+    if rocm_override_value:
         library_name = re.sub(r"rocm\d+", f"rocm{rocm_override_value}", library_name, count=1)
+        if torch.version.cuda:
+            raise RuntimeError(
+                f"BNB_ROCM_VERSION={rocm_override_value} detected for CUDA!\n"
+                "Use BNB_CUDA_VERSION instead: export BNB_CUDA_VERSION=<version>\n"
+                "Clear the variable and retry: unset BNB_ROCM_VERSION\n"
+            )
         logger.warning(
             f"WARNING: BNB_ROCM_VERSION={rocm_override_value} environment variable detected; loading {library_name}.\n"
             "This can be used to load a bitsandbytes version built with a ROCm version that is different from the PyTorch ROCm version.\n"
-            "If this was unintended set the BNB_ROCM_VERSION variable to an empty string: export BNB_ROCM_VERSION=\n"
+            "If this was unintended clear the variable and retry: unset BNB_ROCM_VERSION\n"
         )
-    elif override_value:
-        library_name = re.sub(r"cuda\d+", f"cuda{override_value}", library_name, count=1)
+    elif cuda_override_value:
+        library_name = re.sub(r"cuda\d+", f"cuda{cuda_override_value}", library_name, count=1)
         if torch.version.hip:
             raise RuntimeError(
-                f"BNB_CUDA_VERSION={override_value} detected for ROCm!! \n"
+                f"BNB_CUDA_VERSION={cuda_override_value} detected for ROCm!\n"
                 f"Use BNB_ROCM_VERSION instead: export BNB_ROCM_VERSION=<version>\n"
-                f"Clear the variable and retry: export BNB_CUDA_VERSION=\n"
+                f"Clear the variable and retry: unset BNB_CUDA_VERSION\n"
             )
         logger.warning(
-            f"WARNING: BNB_CUDA_VERSION={override_value} environment variable detected; loading {library_name}.\n"
+            f"WARNING: BNB_CUDA_VERSION={cuda_override_value} environment variable detected; loading {library_name}.\n"
             "This can be used to load a bitsandbytes version built with a CUDA version that is different from the PyTorch CUDA version.\n"
-            "If this was unintended set the BNB_CUDA_VERSION variable to an empty string: export BNB_CUDA_VERSION=\n"
+            "If this was unintended clear the variable and retry: unset BNB_CUDA_VERSION\n"
         )
 
     return PACKAGE_DIR / library_name
