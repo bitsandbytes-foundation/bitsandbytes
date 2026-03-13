@@ -204,7 +204,7 @@ def _print_hip_runtime_diagnostics() -> None:
             f"""
             Found duplicate ROCm runtime files (see below).
 
-            We select the PyTorch default ROCm runtime, which is {torch.version.hip},
+            We select the PyTorch default ROCm runtime, which is {getattr(torch.version, "rocm", None) or torch.version.hip},
             but this might mismatch with the ROCm version that is needed for bitsandbytes.
             To override this behavior set the `BNB_ROCM_VERSION=<version string, e.g. 72>` environmental variable.
 
