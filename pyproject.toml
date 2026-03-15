@@ -137,13 +137,19 @@ ignore = [
 
 [tool.ruff.lint.extend-per-file-ignores]
 "**/__init__.py" = ["F401"]  # allow unused imports in __init__.py
-"{benchmarking,tests}/**/*.py" = [
+"{benchmarking,benchmarks,tests}/**/*.py" = [
     "B007",
     "B011",
     "B023",
+    "E402",
     "E701",
     "E731",
     "F841",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "RUF015",
+    "RUF059",
     "UP030",
 ]
 "bitsandbytes/**/triton/**/*.py" = [

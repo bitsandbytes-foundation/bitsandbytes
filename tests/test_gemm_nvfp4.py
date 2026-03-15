@@ -23,29 +23,12 @@ def get_lib():
 
 
 def cuda_quantize_nvfp4(x, tensor_scale=None):
-    """Quantize using the CUDA kernel (same as test_nvfp4.py)."""
-    lib = get_lib()
-    n = x.numel()
-    assert n % 16 == 0
-    if tensor_scale is None:
-        tensor_scale = x.abs().max().item()
-    packed = torch.zeros(n // 2, dtype=torch.uint8, device=x.device)
-    block_scales = torch.zeros(n // 16, dtype=torch.uint8, device=x.device)
-    if x.dtype == torch.float16:
-        func = lib.cquantize_nvfp4_fp16
-    elif x.dtype == torch.bfloat16:
-        func = lib.cquantize_nvfp4_bf16
-    else:
-        func = lib.cquantize_nvfp4_fp32
-    func(
-        ctypes.c_void_p(x.data_ptr()),
-        ctypes.c_void_p(packed.data_ptr()),
-        ctypes.c_void_p(block_scales.data_ptr()),
-        ctypes.c_float(tensor_scale),
-        ctypes.c_int(n),
-    )
-    torch.cuda.synchronize()
-    return packed, block_scales, tensor_scale
+    """Quantize to NVFP4 using the CUTLASS fused quantize path."""
+    from bitsandbytes.functional import quantize_nvfp4
+
+    x_2d = x.reshape(1, -1) if x.dim() == 1 else x
+    packed, state = quantize_nvfp4(x_2d.to(torch.bfloat16), tensor_scale=tensor_scale)
+    return state.packed_data, state.block_scales, state.tensor_scale
 
 
 def cuda_dequantize_nvfp4(packed, block_scales, tensor_scale, n, dtype=torch.float32):
@@ -70,24 +53,53 @@ def cuda_dequantize_nvfp4(packed, block_scales, tensor_scale, n, dtype=torch.flo
     return output
 
 
-def cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K):
-    """Run GEMM using the CUDA kernel."""
+def swizzle_scales(flat_scales, rows, scale_K):
+    """Convert flat row-major scales to CUTLASS block-scaled (swizzled) layout."""
     lib = get_lib()
-    D_out = torch.zeros(M, N, dtype=torch.float32, device=A_packed.device)
+    n_row_blocks = (rows + 127) // 128
+    n_col_blocks = (scale_K + 3) // 4
+    out_size = n_row_blocks * n_col_blocks * 128 * 4
+    swizzled = torch.empty(out_size, dtype=torch.uint8, device=flat_scales.device)
     stream = torch.cuda.current_stream()
-    lib.cgemm_nvfp4(
+    lib.cscale_to_blocked(
+        ctypes.c_void_p(flat_scales.data_ptr()),
+        ctypes.c_void_p(swizzled.data_ptr()),
+        ctypes.c_int(rows),
+        ctypes.c_int(scale_K),
+        ctypes.c_void_p(stream.cuda_stream),
+    )
+    torch.cuda.synchronize()
+    return swizzled
+
+
+def cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K):
+    """Run GEMM using the CUDA kernel (BF16 output).
+
+    A_scales and B_scales must be in flat row-major format; they are
+    swizzled to CUTLASS block-scaled layout before calling the kernel.
+    """
+    lib = get_lib()
+    scale_K = K // 16
+    A_scales_sw = swizzle_scales(A_scales, M, scale_K)
+    B_scales_sw = swizzle_scales(B_scales, N, scale_K)
+
+    D_out = torch.zeros(M, N, dtype=torch.bfloat16, device=A_packed.device)
+    workspace = torch.zeros(M, N, dtype=torch.float32, device=A_packed.device)
+    stream = torch.cuda.current_stream()
+    lib.cgemm_nvfp4_bf16(
         ctypes.c_void_p(A_packed.data_ptr()),
         ctypes.c_void_p(B_packed.data_ptr()),
-        ctypes.c_void_p(A_scales.data_ptr()),
-        ctypes.c_void_p(B_scales.data_ptr()),
+        ctypes.c_void_p(A_scales_sw.data_ptr()),
+        ctypes.c_void_p(B_scales_sw.data_ptr()),
         ctypes.c_void_p(D_out.data_ptr()),
+        ctypes.c_void_p(workspace.data_ptr()),
         ctypes.c_int(M),
         ctypes.c_int(N),
         ctypes.c_int(K),
         ctypes.c_void_p(stream.cuda_stream),
     )
     torch.cuda.synchronize()
-    return D_out
+    return D_out.float()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")

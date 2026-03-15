@@ -1,0 +1,50 @@
+{
+  "description": "Token count frequency distributions across 397 Claude Code sessions (472 files, 75 empty). Buckets are nearest power of two. Frequencies sum to 1.0.",
+  "sessions": 397,
+  "input_tokens_per_turn": {
+    "description": "Estimated input tokens per user turn (user text + tool results, chars/4). Only non-empty turns included.",
+    "num_turns": 24229,
+    "freq": {
+      "1": 0.00388,
+      "2": 0.006108,
+      "4": 0.049858,
+      "8": 0.062198,
+      "16": 0.152256,
+      "32": 0.167733,
+      "64": 0.100045,
+      "128": 0.093566,
+      "256": 0.085022,
+      "512": 0.086219,
+      "1024": 0.064221,
+      "2048": 0.050147,
+      "4096": 0.035742,
+      "8192": 0.014157,
+      "16384": 0.013785,
+      "32768": 0.013703,
+      "65536": 0.001279,
+      "131072": 4.1e-05,
+      "262144": 4.1e-05
+    }
+  },
+  "generated_tokens_per_turn": {
+    "description": "Output tokens per user turn (from API usage.output_tokens, includes text + tool calls + thinking). Only non-empty turns included.",
+    "num_turns": 20946,
+    "freq": {
+      "1": 0.065502,
+      "2": 0.201518,
+      "4": 0.109902,
+      "8": 0.100449,
+      "16": 0.112766,
+      "32": 0.19302,
+      "64": 0.04144,
+      "128": 0.055619,
+      "256": 0.048219,
+      "512": 0.034947,
+      "1024": 0.022057,
+      "2048": 0.010312,
+      "4096": 0.003533,
+      "8192": 0.000668,
+      "16384": 4.8e-05
+    }
+  }
+}

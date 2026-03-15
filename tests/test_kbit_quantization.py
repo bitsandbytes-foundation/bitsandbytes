@@ -1398,3 +1398,69 @@ class TestE4M4Absmax:
         # uint8 should use 4x less storage (ignoring padding)
         assert absmax_e4.element_size() == 1
         assert absmax_f32.element_size() == 4
+
+
+class TestDequantizeKbitOut:
+    """Tests for dequantize_kbit with pre-allocated out tensor (CUDA graph compatibility)."""
+
+    @pytest.mark.parametrize("k", [2, 3, 4, 5])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_out_matches_normal(self, k, dtype):
+        """Dequant with pre-allocated out should match normal dequant."""
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
+        n = 1024
+        A = torch.randn(n, dtype=dtype, device="cuda")
+        packed, absmax, cb = quantize_kbit(A, k=k, absmax_format="e4m4")
+
+        expected = dequantize_kbit(packed, absmax, cb, k=k, n=n, dtype=dtype)
+
+        num_blocks = -(n // -32)
+        out = torch.empty(num_blocks * 32, device="cuda", dtype=dtype)
+        result = dequantize_kbit(packed, absmax, cb, k=k, n=n, dtype=dtype, out=out)
+
+        assert result.shape == expected.shape
+        assert torch.equal(result, expected)
+        # Verify it wrote into the provided buffer
+        assert result.data_ptr() == out.data_ptr()
+
+    def test_out_reuse_same_buffer(self):
+        """Calling twice with the same out buffer should produce identical results."""
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
+        n = 512
+        A = torch.randn(n, dtype=torch.float16, device="cuda")
+        packed, absmax, cb = quantize_kbit(A, k=4, absmax_format="e4m4")
+
+        num_blocks = -(n // -32)
+        out = torch.empty(num_blocks * 32, device="cuda", dtype=torch.float16)
+
+        r1 = dequantize_kbit(packed, absmax, cb, k=4, n=n, dtype=torch.float16, out=out)
+        r2 = dequantize_kbit(packed, absmax, cb, k=4, n=n, dtype=torch.float16, out=out)
+
+        assert torch.equal(r1, r2)
+        assert r1.data_ptr() == r2.data_ptr()
+
+    def test_out_wrong_dtype_raises(self):
+        """Passing out with wrong dtype should raise ValueError."""
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
+        n = 256
+        A = torch.randn(n, dtype=torch.float16, device="cuda")
+        packed, absmax, cb = quantize_kbit(A, k=4, absmax_format="e4m4")
+
+        out = torch.empty(256, device="cuda", dtype=torch.float32)
+        with pytest.raises(ValueError, match="does not match"):
+            dequantize_kbit(packed, absmax, cb, k=4, n=n, dtype=torch.float16, out=out)
+
+    def test_out_too_small_raises(self):
+        """Passing out tensor that is too small should raise ValueError."""
+        from bitsandbytes.functional import dequantize_kbit, quantize_kbit
+
+        n = 256
+        A = torch.randn(n, dtype=torch.float16, device="cuda")
+        packed, absmax, cb = quantize_kbit(A, k=4, absmax_format="e4m4")
+
+        out = torch.empty(128, device="cuda", dtype=torch.float16)
+        with pytest.raises(ValueError, match="need at least"):
+            dequantize_kbit(packed, absmax, cb, k=4, n=n, dtype=torch.float16, out=out)

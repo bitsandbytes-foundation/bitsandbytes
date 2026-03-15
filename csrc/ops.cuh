@@ -121,18 +121,9 @@ void dequantizeBlockwise(
 );
 
 template <typename T>
-void quantizeNVFP4(const T* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n);
-template <typename T>
 void dequantizeNVFP4(
     const unsigned char* input, const unsigned char* block_scales, float tensor_scale, T* output, const int n,
     cudaStream_t stream
-);
-
-template <typename T> void hadamardRotate16(T* data, const int n);
-
-template <typename T>
-void fusedHadamardQuantizeNVFP4(
-    const T* input, unsigned char* output, unsigned char* block_scales, float tensor_scale, const int n
 );
 
 template <typename T, int OPTIMIZER>
@@ -207,14 +198,7 @@ template <typename T, int FUNC> void func(T* A, T* B, T value, long n);
 template <int K, typename scalar_t>
 void kbitScalarGemv(
     const scalar_t* A, const unsigned int* B_packed, const float* B_absmax, const float* codebook, scalar_t* C, int M,
-    int K_dim, int N
-);
-
-// K-bit grouped scalar GEMV for MoE expert dispatch
-template <int K, typename scalar_t>
-void kbitGroupedScalarGemv(
-    const scalar_t* A_concat, const unsigned int* B_packed_all, const unsigned char* B_absmax_all,
-    const float* codebook, scalar_t* C_concat, const int* d_expert_offsets, int K_dim, int N, int num_experts
+    int K_dim, int N, cudaStream_t stream
 );
 
 #endif

@@ -15,6 +15,7 @@ from .modules import (
     LinearKbit,
     LinearNF4,
     LinearNVFP4,
+    LinearNVFP4MoE,
     OutlierAwareLinear,
     Params4bit,
     ParamsKbit,

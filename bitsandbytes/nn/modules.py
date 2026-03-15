@@ -672,372 +672,6 @@ class LinearNF4(Linear4bit):
         )
 
 
-# ---------------------------------------------------------------------------
-# K-bit quantization (generalized 2-5 bit, blocksize 32, E4M4 absmax)
-# ---------------------------------------------------------------------------
-
-KBIT_BLOCKSIZE = 32
-KBIT_TILE_N = 128
-
-
-def _pad_to_multiple(n: int, m: int) -> int:
-    """Round *n* up to the next multiple of *m*."""
-    return ((n + m - 1) // m) * m
-
-
-class _GlobalWeightBuffer:
-    """Per-device pre-allocated buffer for dequantized weights.
-
-    Avoids repeated allocation/deallocation on every forward and backward call
-    through kbit linear layers.  The buffer is lazily created and grows as
-    needed but never shrinks.
-
-    Thread-safety: PyTorch guarantees only one forward/backward is active per
-    device at a time, so a single buffer per device suffices.
-    """
-
-    _buffers: dict[torch.device, torch.Tensor] = {}
-
-    @classmethod
-    def get_buffer(cls, device: torch.device, min_elements: int, dtype: torch.dtype) -> torch.Tensor:
-        """Return a buffer with at least *min_elements* on *device*."""
-        key = device
-        buf = cls._buffers.get(key)
-        if buf is None or buf.numel() < min_elements or buf.dtype != dtype:
-            cls._buffers[key] = torch.empty(min_elements, dtype=dtype, device=device)
-        return cls._buffers[key][:min_elements]
-
-    @classmethod
-    def clear(cls):
-        cls._buffers.clear()
-
-
-class ParamsKbit(torch.nn.Parameter):
-    """Parameter subclass for k-bit blockwise quantized weights.
-
-    Stores weights in bit-plane packed int32 format with E4M4 absmax scaling.
-    Quantization and (optional) repacking happen lazily on the first
-    ``.to(device)`` call, mirroring the ``Params4bit`` pattern.
-
-    Attributes:
-        k: Bit width (2-5).
-        K_dim: Inner (reduction) dimension of the weight matrix.
-        N: Output (row) dimension of the weight matrix.
-        N_padded: N rounded up to the next multiple of 128.
-        packed: int32 bit-plane packed data (flat layout).
-        absmax: float32 per-block absmax values (flat layout).
-        codebook: float32 codebook tensor (2^k entries).
-        original_dtype: The dtype of the weight before quantization.
-        kbit_quantized: Whether quantization has been applied.
-    """
-
-    def __new__(
-        cls,
-        data: Optional[torch.Tensor] = None,
-        requires_grad: bool = False,
-        k: int = 4,
-        module: Optional["LinearKbit"] = None,
-    ) -> "ParamsKbit":
-        if data is None:
-            data = torch.empty(0)
-        self = torch.Tensor._make_subclass(cls, data, requires_grad)
-        self.k = k
-        self.module = module
-        self.kbit_quantized = False
-        # Populated during _quantize:
-        self.packed = None
-        self.absmax = None
-        self.codebook = None
-        self.K_dim = 0
-        self.N = 0
-        self.N_padded = 0
-        self.original_dtype = data.dtype
-        return self
-
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        state["data"] = self.data
-        state["requires_grad"] = self.requires_grad
-        return state
-
-    def __setstate__(self, state):
-        self.requires_grad = state["requires_grad"]
-        self.k = state["k"]
-        self.module = state["module"]
-        self.kbit_quantized = state["kbit_quantized"]
-        self.packed = state["packed"]
-        self.absmax = state["absmax"]
-        self.codebook = state["codebook"]
-        self.K_dim = state["K_dim"]
-        self.N = state["N"]
-        self.N_padded = state["N_padded"]
-        self.original_dtype = state["original_dtype"]
-        self.data = state["data"]
-
-    def __deepcopy__(self, memo):
-        import copy as _copy
-
-        new_instance = type(self).__new__(type(self))
-        state = self.__getstate__()
-        new_instance.__setstate__(state)
-        new_instance.packed = _copy.deepcopy(state["packed"])
-        new_instance.absmax = _copy.deepcopy(state["absmax"])
-        new_instance.codebook = _copy.deepcopy(state["codebook"])
-        new_instance.data = _copy.deepcopy(state["data"])
-        return new_instance
-
-    def __copy__(self):
-        new_instance = type(self).__new__(type(self))
-        state = self.__getstate__()
-        new_instance.__setstate__(state)
-        return new_instance
-
-    def _quantize(self, device):
-        """Quantize fp16/bf16 weight to kbit format on *device*.
-
-        The weight tensor ``self.data`` is expected to be shape ``(N, K_dim)``
-        (standard ``nn.Linear`` weight layout: ``out_features × in_features``).
-        """
-        w = self.data.contiguous().to(device)
-        N, K_dim = w.shape
-        self.original_dtype = w.dtype
-        self.N = N
-        self.K_dim = K_dim
-        self.N_padded = _pad_to_multiple(N, KBIT_TILE_N)
-
-        # Pad N dimension to multiple of 128 for kernel alignment
-        if self.N_padded != N:
-            w = torch.nn.functional.pad(w, (0, 0, 0, self.N_padded - N))
-
-        packed, absmax, codebook = bnb.functional.quantize_kbit(
-            w.reshape(-1).float(),  # quantize_kbit expects flat input
-            k=self.k,
-            absmax_format="fp32",  # keep float32 for GEMV; E4M4 applied at repack
-        )
-
-        self.packed = packed
-        self.absmax = absmax
-        self.codebook = codebook
-        self.kbit_quantized = True
-
-        # Store a small sentinel in self.data so the Parameter has the right device
-        self.data = torch.empty(0, device=device, dtype=self.original_dtype)
-
-        if self.module is not None:
-            self.module._sync_kbit_state(self)
-
-        return self
-
-    def cpu(self):
-        return self.to(device="cpu")
-
-    def cuda(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
-        return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
-
-    @overload
-    def to(
-        self: T,
-        device: Optional[int | device] = ...,
-        dtype: Optional[dtype | str] = ...,
-        non_blocking: bool = ...,
-    ) -> T: ...
-
-    @overload
-    def to(self: T, dtype: dtype | str, non_blocking: bool = ...) -> T: ...
-
-    @overload
-    def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T: ...
-
-    def to(self, *args, **kwargs):
-        device, dtype, non_blocking, _ = torch._C._nn._parse_to(*args, **kwargs)
-
-        if device is not None and device.type != "meta" and not self.kbit_quantized:
-            return self._quantize(device)
-        else:
-            # Already quantized — move packed data to new device
-            new_param = ParamsKbit(
-                super().to(device=device, dtype=dtype, non_blocking=non_blocking),
-                requires_grad=self.requires_grad,
-                k=self.k,
-                module=self.module,
-            )
-            new_param.kbit_quantized = self.kbit_quantized
-            new_param.packed = self.packed.to(device) if self.packed is not None else None
-            new_param.absmax = self.absmax.to(device) if self.absmax is not None else None
-            new_param.codebook = self.codebook.to(device) if self.codebook is not None else None
-            new_param.K_dim = self.K_dim
-            new_param.N = self.N
-            new_param.N_padded = self.N_padded
-            new_param.original_dtype = self.original_dtype
-            return new_param
-
-
-class LinearKbit(nn.Linear):
-    """Linear layer using k-bit blockwise quantization.
-
-    Supports generalized k-bit widths (k=2,3,4,5) with blocksize 32 and
-    E4M4 absmax encoding.  Inference uses automatic kernel dispatch:
-
-    - M <= 4 (decode): ``kbit_scalar_gemv`` (flat-layout, float32 absmax)
-    - M > 4 (prefill/training): ``dequantize_kbit`` + ``torch.mm``
-
-    Example::
-
-        layer = LinearKbit(4096, 4096, k=4)
-        layer.load_state_dict(fp16_layer.state_dict())
-        layer = layer.to("cuda")  # quantization happens here
-        out = layer(x)            # dispatches to optimal kernel
-    """
-
-    def __init__(
-        self,
-        input_features: int,
-        output_features: int,
-        bias: bool = True,
-        k: int = 4,
-        compute_dtype: Optional[torch.dtype] = None,
-        device=None,
-    ):
-        super().__init__(input_features, output_features, bias, device)
-        self.weight = ParamsKbit(self.weight.data, requires_grad=False, k=k, module=self)
-        self.k = k
-        self.compute_dtype = compute_dtype
-
-    def _sync_kbit_state(self, params: ParamsKbit):
-        """Called by ParamsKbit after quantization to sync module metadata."""
-        pass  # reserved for future use (e.g., registering buffer sizes)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        from bitsandbytes.autograd._functions import MatMulKbit
-
-        w = self.weight
-        if not w.kbit_quantized:
-            raise RuntimeError("LinearKbit weight not quantized. Call .to(device) first.")
-
-        inp_dtype = x.dtype
-        compute_dtype = self.compute_dtype or x.dtype
-        if compute_dtype not in (torch.float16, torch.bfloat16):
-            compute_dtype = torch.float16
-        x = x.to(compute_dtype)
-
-        # Flatten batch dimensions: (*, K_dim) -> (M, K_dim)
-        orig_shape = x.shape
-        x_2d = x.reshape(-1, x.shape[-1])
-        M = x_2d.shape[0]
-
-        if M <= 4 and not self.training and not x.requires_grad:
-            # Decode path: scalar GEMV (flat layout, float32 absmax)
-            out = torch.ops.bitsandbytes.kbit_scalar_gemv(
-                x_2d,
-                w.packed,
-                w.absmax,
-                w.codebook,
-                w.K_dim,
-                w.N_padded,
-                w.k,
-            )
-        elif x.requires_grad:
-            # Training path: use autograd-aware MatMulKbit
-            out = MatMulKbit.apply(
-                x_2d,
-                w.packed,
-                w.absmax,
-                w.codebook,
-                w.k,
-                w.K_dim,
-                w.N_padded,
-                w.N,
-                compute_dtype,
-            )
-        else:
-            # Prefill path (no grad): dequantize + cuBLAS matmul
-            n_elements = w.N_padded * w.K_dim
-            w_deq = bnb.functional.dequantize_kbit(
-                w.packed,
-                w.absmax,
-                w.codebook,
-                w.k,
-                n_elements,
-                compute_dtype,
-            )
-            w_mat = w_deq[:n_elements].reshape(w.N_padded, w.K_dim)
-            out = torch.nn.functional.linear(x_2d, w_mat[: w.N, :])
-
-        # Slice off N-padding (MatMulKbit handles this internally)
-        if w.N_padded != w.N and not x.requires_grad:
-            out = out[:, : w.N]
-
-        # Add bias
-        if self.bias is not None:
-            out = out + self.bias.to(compute_dtype)
-
-        # Restore batch dimensions
-        out = out.reshape(*orig_shape[:-1], w.N)
-        return out.to(inp_dtype)
-
-
-def prepare_model_for_kbit_training(
-    model: torch.nn.Module,
-    use_gradient_checkpointing: bool = True,
-    gradient_checkpointing_kwargs: Optional[dict] = None,
-) -> torch.nn.Module:
-    """Prepare a model with LinearKbit layers for QLoRA-style training.
-
-    This function:
-    1. Freezes all base model parameters (requires_grad=False)
-    2. Casts LayerNorm and other normalization layers to float32
-    3. Enables gradient checkpointing if requested
-    4. Registers the global weight buffer size from the model's largest layer
-
-    After calling this, add LoRA adapters (or any trainable parameters) and
-    those will be the only parameters that receive gradients.
-
-    Args:
-        model: A model containing LinearKbit layers.
-        use_gradient_checkpointing: Enable gradient checkpointing for memory savings.
-        gradient_checkpointing_kwargs: Kwargs passed to model.gradient_checkpointing_enable().
-
-    Returns:
-        The modified model (in-place).
-    """
-    # Freeze all parameters
-    for param in model.parameters():
-        param.requires_grad = False
-
-    # Cast normalization layers to float32 for training stability
-    for module in model.modules():
-        if isinstance(module, (torch.nn.LayerNorm, torch.nn.RMSNorm)):
-            module.float()
-
-    # Enable gradient checkpointing
-    if use_gradient_checkpointing:
-        if hasattr(model, "gradient_checkpointing_enable"):
-            kwargs = gradient_checkpointing_kwargs or {}
-            model.gradient_checkpointing_enable(**kwargs)
-        elif hasattr(model, "enable_input_require_grads"):
-            model.enable_input_require_grads()
-        model.is_gradient_checkpointing = True
-
-    # Register global weight buffer for the largest LinearKbit layer
-    max_elements = 0
-    compute_dtype = torch.float16
-    device = None
-    for module in model.modules():
-        if isinstance(module, LinearKbit) and module.weight.kbit_quantized:
-            w = module.weight
-            n = w.N_padded * w.K_dim
-            if n > max_elements:
-                max_elements = n
-                device = w.packed.device
-            if module.compute_dtype is not None:
-                compute_dtype = module.compute_dtype
-
-    if max_elements > 0 and device is not None:
-        _GlobalWeightBuffer.get_buffer(device, max_elements, compute_dtype)
-
-    return model
-
-
 class LinearNVFP4(nn.Linear):
     """NVFP4 (E2M1) quantized linear layer for Blackwell GPUs (SM_120).
 
@@ -1105,6 +739,383 @@ class LinearNVFP4(nn.Linear):
 
         return out.to(inp_dtype)
 
+
+class LinearNVFP4MoE(nn.Module):
+    """NVFP4 (E2M1) quantized MoE linear layer for Blackwell GPUs (SM_120).
+
+    Wraps multiple expert weight matrices and fuses their GEMMs into a single
+    grouped kernel launch. Each expert has shape (output_features, input_features).
+
+    Usage:
+        layer = LinearNVFP4MoE(num_experts=128, input_features=2048, output_features=1536)
+        # Load weights: layer.experts[i].weight = ...
+        # Or from an existing list of nn.Linear:
+        # layer = LinearNVFP4MoE.from_linear_experts(expert_linears)
+        out = layer(x, expert_offsets)
+
+    Args:
+        num_experts: Number of experts.
+        input_features: Input dimension (K) per expert.
+        output_features: Output dimension (N) per expert.
+        bias: Whether experts have bias. Defaults to False.
+        device: Device for initialization.
+    """
+
+    def __init__(
+        self,
+        num_experts: int,
+        input_features: int,
+        output_features: int,
+        bias: bool = False,
+        device=None,
+    ):
+        super().__init__()
+        self.num_experts = num_experts
+        self.input_features = input_features
+        self.output_features = output_features
+        self.has_bias = bias
+        self._quantized = False
+
+        # Store raw weights until first forward (or explicit quantize call)
+        self.weight = nn.Parameter(
+            torch.empty(num_experts, output_features, input_features, device=device, dtype=torch.bfloat16),
+            requires_grad=False,
+        )
+        if bias:
+            self.bias = nn.Parameter(
+                torch.zeros(num_experts, output_features, device=device, dtype=torch.bfloat16),
+                requires_grad=False,
+            )
+        else:
+            self.bias = None
+
+        # Quantized state (populated by _quantize_weights)
+        self.register_buffer("weight_packed", None)
+        self.register_buffer("weight_scales", None)
+        self.register_buffer("weight_scales_batched", None)
+        self.weight_tensor_scale: float = 1.0
+
+    @classmethod
+    def from_linear_experts(cls, experts: list[nn.Linear], device=None) -> "LinearNVFP4MoE":
+        """Create from a list of nn.Linear expert modules."""
+        num_experts = len(experts)
+        out_features, in_features = experts[0].weight.shape
+        has_bias = experts[0].bias is not None
+        dev = device or experts[0].weight.device
+
+        layer = cls(num_experts, in_features, out_features, bias=has_bias, device=dev)
+        with torch.no_grad():
+            for i, expert in enumerate(experts):
+                layer.weight.data[i] = expert.weight.data.to(torch.bfloat16)
+                if has_bias and expert.bias is not None:
+                    layer.bias.data[i] = expert.bias.data.to(torch.bfloat16)
+        return layer
+
+    def _quantize_weights(self):
+        """Quantize all expert weights to NVFP4 and stack into contiguous buffers."""
+        from bitsandbytes.functional import quantize_nvfp4
+
+        N, K = self.output_features, self.input_features
+
+        # Quantize all experts and find a shared tensor scale
+        all_packed = []
+        all_scales = []
+        all_scales_blocked = []
+        tensor_scales = []
+
+        for i in range(self.num_experts):
+            w = self.weight.data[i].to(torch.bfloat16).contiguous()
+            packed, state = quantize_nvfp4(w)
+            all_packed.append(state.packed_data)
+            all_scales.append(state.block_scales)
+            all_scales_blocked.append(state.block_scales_blocked)
+            tensor_scales.append(state.tensor_scale)
+
+        # Stack into contiguous buffers: [num_experts * N, K/2] packed data
+        self.weight_packed = torch.cat(all_packed, dim=0).contiguous()
+
+        # Globally-swizzled scales for grouped GEMM (SM_120)
+        weight_scales_flat = torch.cat(all_scales, dim=0).contiguous()
+        self.weight_scales = torch.ops.bitsandbytes.scale_to_blocked(
+            weight_scales_flat, self.num_experts * N, K // 16,
+        )
+
+        # Per-expert swizzled scales for batched GEMM (SM_100)
+        self.weight_scales_batched = torch.cat(all_scales_blocked, dim=0).contiguous()
+
+        self.weight_tensor_scale = max(tensor_scales)
+
+        self._quantized = True
+        # Free original weights
+        self.weight = nn.Parameter(
+            torch.empty(0, device=self.weight_packed.device, dtype=torch.bfloat16),
+            requires_grad=False,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        expert_offsets: torch.Tensor,
+        *,
+        token_ids: Optional[torch.Tensor] = None,
+        gating_weights: Optional[torch.Tensor] = None,
+        num_dest_tokens: Optional[int] = None,
+    ) -> torch.Tensor:
+        """Run NVFP4 GEMM across all experts.
+
+        Uses batched GEMM on SM_100 (datacenter Blackwell) or grouped GEMM
+        on SM_120 (consumer Blackwell).
+
+        Args:
+            x: Concatenated activations from all experts [total_tokens, K] in token order.
+                Tokens for expert 0 come first, then expert 1, etc.
+            expert_offsets: Cumulative token offsets [num_experts + 1], int32.
+                expert_offsets[i] is the starting token index for expert i.
+                expert_offsets[-1] = total_tokens.
+            token_ids: Optional mapping from assignment index to output token index
+                [total_tokens] (int32). Required for weighted gather.
+            gating_weights: Optional per-assignment gating weights [total_tokens] (float32).
+                Required for weighted gather.
+            num_dest_tokens: Number of unique destination tokens in the output.
+                Required when token_ids and gating_weights are provided.
+
+        Returns:
+            If token_ids and gating_weights are provided:
+                Weighted output tensor [num_dest_tokens, N] with fused gather + weight + sum.
+            Otherwise:
+                Output tensor [total_tokens, N] with per-assignment expert results.
+        """
+        if not self._quantized:
+            self._quantize_weights()
+
+        major, _ = torch.cuda.get_device_capability(x.device)
+        from bitsandbytes.cextension import lib
+        if major == 10 and hasattr(lib, "cgemm_nvfp4_moe_sm100_init"):
+            return self._forward_batched(
+                x, expert_offsets,
+                token_ids=token_ids, gating_weights=gating_weights,
+                num_dest_tokens=num_dest_tokens,
+            )
+        return self._forward_grouped(x, expert_offsets)
+
+    def _forward_grouped(self, x: torch.Tensor, expert_offsets: torch.Tensor) -> torch.Tensor:
+        """Grouped GEMM path (SM_120 consumer Blackwell)."""
+        from bitsandbytes.functional import gemm_nvfp4_grouped, quantize_nvfp4
+
+        inp_dtype = x.dtype
+        N, K = self.output_features, self.input_features
+
+        x_2d = x.reshape(-1, K).to(torch.bfloat16).contiguous()
+        x_packed, x_state = quantize_nvfp4(x_2d)
+
+        out = gemm_nvfp4_grouped(
+            x_packed,
+            x_state,
+            self.weight_packed,
+            self.weight_scales,
+            self.weight_tensor_scale,
+            expert_offsets.to(torch.int32),
+            N,
+            K,
+        )
+
+        if self.bias is not None:
+            expert_offsets_i32 = expert_offsets.to(torch.int32)
+            tokens_per_expert = expert_offsets_i32[1:] - expert_offsets_i32[:-1]
+            bias_expanded = torch.repeat_interleave(self.bias, tokens_per_expert, dim=0)
+            out = out + bias_expanded.to(out.dtype)
+
+        return out.to(inp_dtype)
+
+    def _forward_batched(
+        self,
+        x: torch.Tensor,
+        expert_offsets: torch.Tensor,
+        *,
+        token_ids: Optional[torch.Tensor] = None,
+        gating_weights: Optional[torch.Tensor] = None,
+        num_dest_tokens: Optional[int] = None,
+    ) -> torch.Tensor:
+        """Batched GEMM path (SM_100 datacenter Blackwell).
+
+        Pipeline with init/run split for CUDA graph compatibility:
+          1. abs().max()              — compute tensor scale (device-side)
+          2. quantize_nvfp4_raw       — quantize all tokens in one launch
+          3. cmoe_scatter_nvfp4       — FP4 data → persistent padded buffer
+          4. scale_to_blocked_batched — scales → persistent swizzled buffer
+          5. batched GEMM run()       — init-if-needed, then just run(stream)
+          6. gather                   — weighted or unweighted depending on args
+
+        All persistent buffers (A, SFA, D, alpha, gather workspace) are cached
+        in the module so their addresses are stable for the CUTLASS init/run split.
+        No .item() GPU-CPU sync on the common (decode) path.
+        """
+        import ctypes as ct
+
+        from bitsandbytes.backends.cuda.ops import _gemm_nvfp4_batched_moe_sm100_raw
+        from bitsandbytes.cextension import lib
+        from bitsandbytes.functional import (
+            _get_tensor_stream,
+            get_ptr,
+            quantize_nvfp4_raw,
+        )
+
+        inp_dtype = x.dtype
+        N, K = self.output_features, self.input_features
+        num_experts = self.num_experts
+        total_tokens = x.shape[0]  # CPU int, no GPU sync
+        use_weighted = token_ids is not None and gating_weights is not None
+        dev = x.device
+
+        expert_offsets_i32 = expert_offsets.to(torch.int32)
+        tokens_per_expert = expert_offsets_i32[1:] - expert_offsets_i32[:-1]
+
+        # Determine max_M without GPU sync on common path.
+        # If cache exists and allocated_max_M >= total_tokens (upper bound on
+        # any single expert's count), the buffers are guaranteed sufficient.
+        if (hasattr(self, "_batched_cache")
+                and total_tokens <= self._batched_cache.get("allocated_max_M", 0)):
+            max_M = self._batched_cache["allocated_max_M"]
+        else:
+            # First call or total_tokens exceeds allocation: sync once
+            raw_max_M = tokens_per_expert.max().item()
+            max_M = ((raw_max_M + 127) // 128) * 128
+
+        x_2d = x.reshape(-1, K).to(torch.bfloat16).contiguous()
+
+        # 1. Compute tensor scale on GPU (no .item(), stays as device tensor)
+        act_tensor_scale_dev = x_2d.abs().max()
+        global_scale_dev = (1.0 / act_tensor_scale_dev).to(torch.float32)
+
+        # 2. Quantize ALL concatenated tokens in one launch
+        packed_all, scales_all = quantize_nvfp4_raw(x_2d, global_scale_dev)
+
+        # 3. Ensure persistent cached buffers exist (stable pointers for init/run)
+        cache_key = (max_M, N, K, num_experts)
+        if not hasattr(self, "_batched_cache") or self._batched_cache.get("key") != cache_key:
+            W = K // 16
+            n_col_blocks = (W + 3) // 4
+            n_row_blocks = (max_M + 127) // 128
+            sfa_per_expert = n_row_blocks * n_col_blocks * 512
+            sfa_total = num_experts * sfa_per_expert
+
+            self._batched_cache = {
+                "key": cache_key,
+                "allocated_max_M": max_M,
+                "A_batched": torch.empty(num_experts * max_M * (K // 2), dtype=torch.uint8, device=dev),
+                "SFA_batched": torch.zeros(sfa_total, dtype=torch.uint8, device=dev),
+                "D_out": torch.empty(num_experts * max_M, N, dtype=torch.bfloat16, device=dev),
+                "alpha_dev": torch.empty(1, dtype=torch.float32, device=dev),
+                # Pre-computed constants for scale swizzle
+                "sfa_per_expert": sfa_per_expert,
+                "n_row_blocks": n_row_blocks,
+                "W": W,
+                "expert_out_offsets": torch.arange(
+                    num_experts, dtype=torch.int32, device=dev,
+                ) * sfa_per_expert,
+            }
+        cache = self._batched_cache
+
+        # Ensure weighted gather buffers exist if needed
+        if use_weighted and num_dest_tokens is not None:
+            if cache.get("gather_num_dest") != num_dest_tokens:
+                cache["gather_workspace"] = torch.empty(
+                    num_dest_tokens * N, dtype=torch.float32, device=dev,
+                )
+                cache["gather_output"] = torch.empty(
+                    num_dest_tokens, N, dtype=torch.bfloat16, device=dev,
+                )
+                cache["gather_num_dest"] = num_dest_tokens
+
+        stream = _get_tensor_stream(x_2d)
+
+        # 4. Scatter FP4 data into persistent buffer
+        lib.cmoe_scatter_nvfp4(
+            get_ptr(packed_all),
+            get_ptr(cache["A_batched"]),
+            get_ptr(expert_offsets_i32),
+            ct.c_int(max_M),
+            ct.c_int(K),
+            ct.c_int(num_experts),
+            stream,
+        )
+
+        # 5. Swizzle scales per-expert into persistent buffer
+        cache["SFA_batched"].zero_()
+        lib.cscale_to_blocked_batched(
+            get_ptr(scales_all),
+            get_ptr(cache["SFA_batched"]),
+            get_ptr(expert_offsets_i32[:-1]),
+            get_ptr(tokens_per_expert),
+            get_ptr(cache["expert_out_offsets"]),
+            ct.c_int(cache["W"]),
+            ct.c_int(num_experts),
+            ct.c_int(cache["n_row_blocks"]),
+            stream,
+        )
+
+        # 6. Set alpha (device-side, no .item() sync)
+        cache["alpha_dev"].copy_(
+            (act_tensor_scale_dev * self.weight_tensor_scale).to(torch.float32).reshape(1)
+        )
+
+        # 7. Batched GEMM (init-if-needed, then just run(stream))
+        _gemm_nvfp4_batched_moe_sm100_raw(
+            cache["A_batched"],
+            self.weight_packed,
+            cache["SFA_batched"],
+            self.weight_scales_batched,
+            cache["D_out"],
+            cache["alpha_dev"],
+            max_M, N, K, num_experts,
+        )
+
+        # 8. Add bias to GEMM output (before gather, included in weighted sum)
+        if self.bias is not None:
+            D_out_3d = cache["D_out"].view(num_experts, max_M, N)
+            D_out_3d += self.bias.unsqueeze(1).to(D_out_3d.dtype)
+
+        # 9. Gather: padded per-expert → output
+        if use_weighted and num_dest_tokens is not None:
+            # Derive expert_ids and slot_ids from expert_offsets (all on GPU)
+            expert_ids = torch.repeat_interleave(
+                torch.arange(num_experts, device=dev, dtype=torch.int32),
+                tokens_per_expert,
+            )
+            starts_expanded = torch.repeat_interleave(
+                expert_offsets_i32[:-1], tokens_per_expert,
+            )
+            slot_ids = (
+                torch.arange(total_tokens, device=dev, dtype=torch.int32)
+                - starts_expanded
+            )
+
+            # Fused weighted gather: gather + weight + FP32 accumulate + BF16 convert
+            lib.cmoe_weighted_gather_bf16(
+                get_ptr(cache["D_out"]),
+                get_ptr(cache["gather_output"]),
+                get_ptr(cache["gather_workspace"]),
+                get_ptr(token_ids.to(torch.int32)),
+                get_ptr(expert_ids),
+                get_ptr(slot_ids),
+                get_ptr(gating_weights.to(torch.float32)),
+                ct.c_int(total_tokens),
+                ct.c_int(num_dest_tokens),
+                ct.c_int(max_M),
+                ct.c_int(N),
+                stream,
+            )
+            out = cache["gather_output"]
+        else:
+            # Unweighted gather (backwards compatible path)
+            from bitsandbytes.functional import moe_gather_bf16
+            out = moe_gather_bf16(
+                cache["D_out"].view(-1), expert_offsets_i32,
+                max_M, N, num_experts, total_tokens,
+            )
+            out = out.view(total_tokens, N)
+
+        return out.to(inp_dtype)
 
 
 class Int8Params(torch.nn.Parameter):
@@ -1647,3 +1658,374 @@ class SwitchBackLinearBnb(nn.Linear):
             self.init_8bit_state()
 
         return bnb.matmul_mixed(x.half(), self.weight.half(), bias=None, state=self.state) + self.bias
+
+
+# ============================================================================
+# K-bit Training Classes (from QLORA-2 branch)
+# ============================================================================
+
+# K-bit quantization (generalized 2-5 bit, blocksize 32, E4M4 absmax)
+# ---------------------------------------------------------------------------
+
+KBIT_BLOCKSIZE = 32
+KBIT_TILE_N = 128
+
+
+def _pad_to_multiple(n: int, m: int) -> int:
+    """Round *n* up to the next multiple of *m*."""
+    return ((n + m - 1) // m) * m
+
+
+class _GlobalWeightBuffer:
+    """Per-device pre-allocated buffer for dequantized weights.
+
+    Avoids repeated allocation/deallocation on every forward and backward call
+    through kbit linear layers.  The buffer is lazily created and grows as
+    needed but never shrinks.
+
+    Thread-safety: PyTorch guarantees only one forward/backward is active per
+    device at a time, so a single buffer per device suffices.
+    """
+
+    _buffers: dict[torch.device, torch.Tensor] = {}
+
+    @classmethod
+    def get_buffer(cls, device: torch.device, min_elements: int, dtype: torch.dtype) -> torch.Tensor:
+        """Return a buffer with at least *min_elements* on *device*."""
+        key = device
+        buf = cls._buffers.get(key)
+        if buf is None or buf.numel() < min_elements or buf.dtype != dtype:
+            cls._buffers[key] = torch.empty(min_elements, dtype=dtype, device=device)
+        return cls._buffers[key][:min_elements]
+
+    @classmethod
+    def clear(cls):
+        cls._buffers.clear()
+
+
+class ParamsKbit(torch.nn.Parameter):
+    """Parameter subclass for k-bit blockwise quantized weights.
+
+    Stores weights in bit-plane packed int32 format with E4M4 absmax scaling.
+    Quantization and (optional) repacking happen lazily on the first
+    ``.to(device)`` call, mirroring the ``Params4bit`` pattern.
+
+    Attributes:
+        k: Bit width (2-5).
+        K_dim: Inner (reduction) dimension of the weight matrix.
+        N: Output (row) dimension of the weight matrix.
+        N_padded: N rounded up to the next multiple of 128.
+        packed: int32 bit-plane packed data (flat layout).
+        absmax: float32 per-block absmax values (flat layout).
+        codebook: float32 codebook tensor (2^k entries).
+        original_dtype: The dtype of the weight before quantization.
+        kbit_quantized: Whether quantization has been applied.
+    """
+
+    def __new__(
+        cls,
+        data: Optional[torch.Tensor] = None,
+        requires_grad: bool = False,
+        k: int = 4,
+        module: Optional["LinearKbit"] = None,
+    ) -> "ParamsKbit":
+        if data is None:
+            data = torch.empty(0)
+        self = torch.Tensor._make_subclass(cls, data, requires_grad)
+        self.k = k
+        self.module = module
+        self.kbit_quantized = False
+        # Populated during _quantize:
+        self.packed = None
+        self.absmax = None
+        self.codebook = None
+        self.K_dim = 0
+        self.N = 0
+        self.N_padded = 0
+        self.original_dtype = data.dtype
+        return self
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["data"] = self.data
+        state["requires_grad"] = self.requires_grad
+        return state
+
+    def __setstate__(self, state):
+        self.requires_grad = state["requires_grad"]
+        self.k = state["k"]
+        self.module = state["module"]
+        self.kbit_quantized = state["kbit_quantized"]
+        self.packed = state["packed"]
+        self.absmax = state["absmax"]
+        self.codebook = state["codebook"]
+        self.K_dim = state["K_dim"]
+        self.N = state["N"]
+        self.N_padded = state["N_padded"]
+        self.original_dtype = state["original_dtype"]
+        self.data = state["data"]
+
+    def __deepcopy__(self, memo):
+        import copy as _copy
+
+        new_instance = type(self).__new__(type(self))
+        state = self.__getstate__()
+        new_instance.__setstate__(state)
+        new_instance.packed = _copy.deepcopy(state["packed"])
+        new_instance.absmax = _copy.deepcopy(state["absmax"])
+        new_instance.codebook = _copy.deepcopy(state["codebook"])
+        new_instance.data = _copy.deepcopy(state["data"])
+        return new_instance
+
+    def __copy__(self):
+        new_instance = type(self).__new__(type(self))
+        state = self.__getstate__()
+        new_instance.__setstate__(state)
+        return new_instance
+
+    def _quantize(self, device):
+        """Quantize fp16/bf16 weight to kbit format on *device*.
+
+        The weight tensor ``self.data`` is expected to be shape ``(N, K_dim)``
+        (standard ``nn.Linear`` weight layout: ``out_features × in_features``).
+        """
+        w = self.data.contiguous().to(device)
+        N, K_dim = w.shape
+        self.original_dtype = w.dtype
+        self.N = N
+        self.K_dim = K_dim
+        self.N_padded = _pad_to_multiple(N, KBIT_TILE_N)
+
+        # Pad N dimension to multiple of 128 for kernel alignment
+        if self.N_padded != N:
+            w = torch.nn.functional.pad(w, (0, 0, 0, self.N_padded - N))
+
+        packed, absmax, codebook = bnb.functional.quantize_kbit(
+            w.reshape(-1).float(),  # quantize_kbit expects flat input
+            k=self.k,
+            absmax_format="fp32",  # keep float32 for GEMV; E4M4 applied at repack
+        )
+
+        self.packed = packed
+        self.absmax = absmax
+        self.codebook = codebook
+        self.kbit_quantized = True
+
+        # Store a small sentinel in self.data so the Parameter has the right device
+        self.data = torch.empty(0, device=device, dtype=self.original_dtype)
+
+        if self.module is not None:
+            self.module._sync_kbit_state(self)
+
+        return self
+
+    def cpu(self):
+        return self.to(device="cpu")
+
+    def cuda(self, device: Optional[int | device | str] = None, non_blocking: bool = False):
+        return self.to(device="cuda" if device is None else device, non_blocking=non_blocking)
+
+    @overload
+    def to(
+        self: T,
+        device: Optional[int | device] = ...,
+        dtype: Optional[dtype | str] = ...,
+        non_blocking: bool = ...,
+    ) -> T: ...
+
+    @overload
+    def to(self: T, dtype: dtype | str, non_blocking: bool = ...) -> T: ...
+
+    @overload
+    def to(self: T, tensor: Tensor, non_blocking: bool = ...) -> T: ...
+
+    def to(self, *args, **kwargs):
+        device, dtype, non_blocking, _ = torch._C._nn._parse_to(*args, **kwargs)
+
+        if device is not None and device.type != "meta" and not self.kbit_quantized:
+            return self._quantize(device)
+        else:
+            # Already quantized — move packed data to new device
+            new_param = ParamsKbit(
+                super().to(device=device, dtype=dtype, non_blocking=non_blocking),
+                requires_grad=self.requires_grad,
+                k=self.k,
+                module=self.module,
+            )
+            new_param.kbit_quantized = self.kbit_quantized
+            new_param.packed = self.packed.to(device) if self.packed is not None else None
+            new_param.absmax = self.absmax.to(device) if self.absmax is not None else None
+            new_param.codebook = self.codebook.to(device) if self.codebook is not None else None
+            new_param.K_dim = self.K_dim
+            new_param.N = self.N
+            new_param.N_padded = self.N_padded
+            new_param.original_dtype = self.original_dtype
+            return new_param
+
+
+class LinearKbit(nn.Linear):
+    """Linear layer using k-bit blockwise quantization.
+
+    Supports generalized k-bit widths (k=2,3,4,5) with blocksize 32 and
+    E4M4 absmax encoding.  Inference uses automatic kernel dispatch:
+
+    - M <= 4 (decode): ``kbit_scalar_gemv`` (flat-layout, float32 absmax)
+    - M > 4 (prefill/training): ``dequantize_kbit`` + ``torch.mm``
+
+    Example::
+
+        layer = LinearKbit(4096, 4096, k=4)
+        layer.load_state_dict(fp16_layer.state_dict())
+        layer = layer.to("cuda")  # quantization happens here
+        out = layer(x)            # dispatches to optimal kernel
+    """
+
+    def __init__(
+        self,
+        input_features: int,
+        output_features: int,
+        bias: bool = True,
+        k: int = 4,
+        compute_dtype: Optional[torch.dtype] = None,
+        device=None,
+    ):
+        super().__init__(input_features, output_features, bias, device)
+        self.weight = ParamsKbit(self.weight.data, requires_grad=False, k=k, module=self)
+        self.k = k
+        self.compute_dtype = compute_dtype
+
+    def _sync_kbit_state(self, params: ParamsKbit):
+        """Called by ParamsKbit after quantization to sync module metadata."""
+        pass  # reserved for future use (e.g., registering buffer sizes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        from bitsandbytes.autograd._functions import MatMulKbit
+
+        w = self.weight
+        if not w.kbit_quantized:
+            raise RuntimeError("LinearKbit weight not quantized. Call .to(device) first.")
+
+        inp_dtype = x.dtype
+        compute_dtype = self.compute_dtype or x.dtype
+        if compute_dtype not in (torch.float16, torch.bfloat16):
+            compute_dtype = torch.float16
+        x = x.to(compute_dtype)
+
+        # Flatten batch dimensions: (*, K_dim) -> (M, K_dim)
+        orig_shape = x.shape
+        x_2d = x.reshape(-1, x.shape[-1])
+        M = x_2d.shape[0]
+
+        if M <= 4 and not self.training and not x.requires_grad:
+            # Decode path: scalar GEMV (flat layout, float32 absmax)
+            out = torch.ops.bitsandbytes.kbit_scalar_gemv(
+                x_2d,
+                w.packed,
+                w.absmax,
+                w.codebook,
+                w.K_dim,
+                w.N_padded,
+                w.k,
+            )
+        elif x.requires_grad:
+            # Training path: use autograd-aware MatMulKbit
+            out = MatMulKbit.apply(
+                x_2d,
+                w.packed,
+                w.absmax,
+                w.codebook,
+                w.k,
+                w.K_dim,
+                w.N_padded,
+                w.N,
+                compute_dtype,
+            )
+        else:
+            # Prefill path (no grad): dequantize + cuBLAS matmul
+            n_elements = w.N_padded * w.K_dim
+            w_deq = bnb.functional.dequantize_kbit(
+                w.packed,
+                w.absmax,
+                w.codebook,
+                w.k,
+                n_elements,
+                compute_dtype,
+            )
+            w_mat = w_deq[:n_elements].reshape(w.N_padded, w.K_dim)
+            out = torch.nn.functional.linear(x_2d, w_mat[: w.N, :])
+
+        # Slice off N-padding (MatMulKbit handles this internally)
+        if w.N_padded != w.N and not x.requires_grad:
+            out = out[:, : w.N]
+
+        # Add bias
+        if self.bias is not None:
+            out = out + self.bias.to(compute_dtype)
+
+        # Restore batch dimensions
+        out = out.reshape(*orig_shape[:-1], w.N)
+        return out.to(inp_dtype)
+
+
+def prepare_model_for_kbit_training(
+    model: torch.nn.Module,
+    use_gradient_checkpointing: bool = True,
+    gradient_checkpointing_kwargs: Optional[dict] = None,
+) -> torch.nn.Module:
+    """Prepare a model with LinearKbit layers for QLoRA-style training.
+
+    This function:
+    1. Freezes all base model parameters (requires_grad=False)
+    2. Casts LayerNorm and other normalization layers to float32
+    3. Enables gradient checkpointing if requested
+    4. Registers the global weight buffer size from the model's largest layer
+
+    After calling this, add LoRA adapters (or any trainable parameters) and
+    those will be the only parameters that receive gradients.
+
+    Args:
+        model: A model containing LinearKbit layers.
+        use_gradient_checkpointing: Enable gradient checkpointing for memory savings.
+        gradient_checkpointing_kwargs: Kwargs passed to model.gradient_checkpointing_enable().
+
+    Returns:
+        The modified model (in-place).
+    """
+    # Freeze all parameters
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # Cast normalization layers to float32 for training stability
+    for module in model.modules():
+        if isinstance(module, (torch.nn.LayerNorm, torch.nn.RMSNorm)):
+            module.float()
+
+    # Enable gradient checkpointing
+    if use_gradient_checkpointing:
+        if hasattr(model, "gradient_checkpointing_enable"):
+            kwargs = gradient_checkpointing_kwargs or {}
+            model.gradient_checkpointing_enable(**kwargs)
+        elif hasattr(model, "enable_input_require_grads"):
+            model.enable_input_require_grads()
+        model.is_gradient_checkpointing = True
+
+    # Register global weight buffer for the largest LinearKbit layer
+    max_elements = 0
+    compute_dtype = torch.float16
+    device = None
+    for module in model.modules():
+        if isinstance(module, LinearKbit) and module.weight.kbit_quantized:
+            w = module.weight
+            n = w.N_padded * w.K_dim
+            if n > max_elements:
+                max_elements = n
+                device = w.packed.device
+            if module.compute_dtype is not None:
+                compute_dtype = module.compute_dtype
+
+    if max_elements > 0 and device is not None:
+        _GlobalWeightBuffer.get_buffer(device, max_elements, compute_dtype)
+
+    return model
+
+

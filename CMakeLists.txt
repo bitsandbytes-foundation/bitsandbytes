@@ -248,11 +248,9 @@ if(BUILD_CUDA)
         if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8" AND EXISTS "${CMAKE_SOURCE_DIR}/third_party/cutlass/include")
             list(APPEND _NVFP4_SM120_SOURCES
                 csrc/qutlass/gemm_nvfp4_sm120.cu
-                csrc/qutlass/scale_reorder.cu
-                csrc/qutlass/fused_quantize_nv.cu
             )
             set(_HAS_CUTLASS_NVFP4 TRUE)
-            message(STATUS "CUTLASS NVFP4 SM_120a GEMM + fused quantize enabled")
+            message(STATUS "CUTLASS NVFP4 SM_120a GEMM enabled")
         else()
             set(_HAS_CUTLASS_NVFP4 FALSE)
             message(STATUS "CUTLASS NVFP4 GEMM disabled (needs CUDA >= 12.8 and third_party/cutlass)")
@@ -284,6 +282,88 @@ if(BUILD_CUDA)
         endif()
 
         message(STATUS "NVFP4 SM_120a GEMM kernel enabled")
+    endif()
+
+    # SM_100a NVFP4 GEMM kernel: requires compute_100a for block-scaled MMA
+    # Only include if 100 or 101 is in the target architectures
+    set(_HAS_SM100 FALSE)
+    foreach(_cap IN LISTS COMPUTE_CAPABILITY)
+        if(_cap MATCHES "^10[01]$")
+            set(_HAS_SM100 TRUE)
+        endif()
+    endforeach()
+    if(_LATEST_CAPABILITY MATCHES "^10[01]$")
+        set(_HAS_SM100 TRUE)
+    endif()
+    if(_HAS_SM100)
+        # CUTLASS-based NVFP4 GEMM for SM_100 (requires CUDA 12.8+)
+        if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8" AND EXISTS "${CMAKE_SOURCE_DIR}/third_party/cutlass/include")
+            set(_NVFP4_SM100_SOURCES
+                csrc/qutlass/gemm_nvfp4_sm100.cu
+                csrc/qutlass/gemm_nvfp4_moe_sm100.cu
+            )
+
+            add_library(nvfp4_sm100a OBJECT ${_NVFP4_SM100_SOURCES})
+            set_target_properties(nvfp4_sm100a PROPERTIES
+                CUDA_ARCHITECTURES "100a"
+                POSITION_INDEPENDENT_CODE ON
+                CUDA_SEPARABLE_COMPILATION OFF
+            )
+            target_compile_options(nvfp4_sm100a PRIVATE
+                $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math>
+                $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+                $<$<COMPILE_LANGUAGE:CUDA>:-std=c++17>
+                $<$<COMPILE_LANGUAGE:CUDA>:-O3>
+                $<$<COMPILE_LANGUAGE:CUDA>:-DNDEBUG>
+                $<$<COMPILE_LANGUAGE:CUDA>:-DQUTLASS_DISABLE_PYBIND>
+            )
+            target_include_directories(nvfp4_sm100a PRIVATE
+                "${CMAKE_SOURCE_DIR}/third_party/cutlass/include"
+                "${CMAKE_SOURCE_DIR}/third_party/cutlass/tools/util/include"
+                "${CMAKE_SOURCE_DIR}/csrc/qutlass/include"
+            )
+            message(STATUS "CUTLASS NVFP4 SM_100a GEMM enabled")
+        else()
+            message(STATUS "CUTLASS NVFP4 SM_100a GEMM disabled (needs CUDA >= 12.8 and third_party/cutlass)")
+        endif()
+    endif()
+
+    # Common CUTLASS utilities (scale_reorder, fused_quantize) compiled for
+    # ALL enabled Blackwell architectures. Kept in one library to avoid
+    # duplicate C symbol errors from the extern "C" wrappers.
+    if(_HAS_CUTLASS_NVFP4 OR _HAS_SM100)
+        set(_NVFP4_COMMON_ARCHS "")
+        if(_HAS_SM120 AND _HAS_CUTLASS_NVFP4)
+            list(APPEND _NVFP4_COMMON_ARCHS "120a")
+        endif()
+        if(_HAS_SM100)
+            list(APPEND _NVFP4_COMMON_ARCHS "100a")
+        endif()
+
+        add_library(nvfp4_common OBJECT
+            csrc/qutlass/scale_reorder.cu
+            csrc/qutlass/fused_quantize_nv.cu
+            csrc/qutlass/moe_scatter_gather.cu
+        )
+        set_target_properties(nvfp4_common PROPERTIES
+            CUDA_ARCHITECTURES "${_NVFP4_COMMON_ARCHS}"
+            POSITION_INDEPENDENT_CODE ON
+            CUDA_SEPARABLE_COMPILATION OFF
+        )
+        target_include_directories(nvfp4_common PRIVATE
+            "${CMAKE_SOURCE_DIR}/third_party/cutlass/include"
+            "${CMAKE_SOURCE_DIR}/third_party/cutlass/tools/util/include"
+            "${CMAKE_SOURCE_DIR}/csrc/qutlass/include"
+        )
+        target_compile_options(nvfp4_common PRIVATE
+            $<$<COMPILE_LANGUAGE:CUDA>:--use_fast_math>
+            $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+            $<$<COMPILE_LANGUAGE:CUDA>:-std=c++17>
+            $<$<COMPILE_LANGUAGE:CUDA>:-O3>
+            $<$<COMPILE_LANGUAGE:CUDA>:-DNDEBUG>
+            $<$<COMPILE_LANGUAGE:CUDA>:-DQUTLASS_DISABLE_PYBIND>
+        )
+        message(STATUS "CUTLASS common utilities (scale_reorder, fused_quantize) for archs: ${_NVFP4_COMMON_ARCHS}")
     endif()
 
     string(APPEND BNB_OUTPUT_NAME "_cuda${CUDA_VERSION_SHORT}")
@@ -377,6 +457,16 @@ target_include_directories(bitsandbytes PUBLIC csrc)
 # Link NVFP4 SM_120a object library if available
 if(TARGET nvfp4_sm120a)
     target_sources(bitsandbytes PRIVATE $<TARGET_OBJECTS:nvfp4_sm120a>)
+endif()
+
+# Link NVFP4 SM_100a object library if available
+if(TARGET nvfp4_sm100a)
+    target_sources(bitsandbytes PRIVATE $<TARGET_OBJECTS:nvfp4_sm100a>)
+endif()
+
+# Link common CUTLASS utilities (scale_reorder, fused_quantize) if available
+if(TARGET nvfp4_common)
+    target_sources(bitsandbytes PRIVATE $<TARGET_OBJECTS:nvfp4_common>)
 endif()
 
 if (BUILD_CPU)
