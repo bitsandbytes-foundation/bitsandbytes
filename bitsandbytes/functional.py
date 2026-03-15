@@ -1625,6 +1625,171 @@ def create_normal_float_codebook(k: int, device=None) -> torch.Tensor:
     return values
 
 
+# Block-Normalized Normal Float (BNF) codebooks for blocksize 32
+# Generated via Lloyd-Max optimization on block-normalized Gaussian (30k trials)
+# BNF minimizes inner product error in quantized matrix multiplication by optimizing
+# for the actual block-normalized distribution rather than raw Gaussian.
+#
+# Free boundaries (k=2: ±0.664, k=3: ±0.883) place the outermost codewords at the
+# conditional mean of their quantization bin rather than forcing them to ±1.0.
+# At k≥4, the optimizer naturally converges to ~±1.0.
+
+_BNF_CODEBOOKS_BS32 = {
+    2: [
+        -0.6642, -0.1964,  0.1964,  0.6642
+    ],
+    3: [
+        -0.8827, -0.5583, -0.3141, -0.1018,  0.1018,  0.3141,  0.5583,  0.8827
+    ],
+    4: [
+        -0.9686, -0.7739, -0.6179, -0.4846, -0.3652, -0.2551, -0.1509, -0.0499,
+         0.0499,  0.1509,  0.2551,  0.3652,  0.4846,  0.6179,  0.7739,  0.9686
+    ],
+    5: [
+        -0.9920, -0.8850, -0.7913, -0.7078, -0.6321, -0.5625, -0.4977, -0.4369,
+        -0.3791, -0.3239, -0.2707, -0.2193, -0.1692, -0.1201, -0.0718, -0.0239,
+         0.0239,  0.0718,  0.1201,  0.1692,  0.2193,  0.2707,  0.3239,  0.3791,
+         0.4369,  0.4977,  0.5625,  0.6321,  0.7078,  0.7913,  0.8850,  0.9920
+    ],
+}
+
+# Cache for BNF codebooks (k -> Tensor on each device)
+_bnf_codebook_cache: dict[tuple[int, torch.device], torch.Tensor] = {}
+
+
+def create_bnf_codebook(k: int, device=None) -> torch.Tensor:
+    """Create Block-Normalized Normal Float codebook with free boundaries.
+
+    BNF is the Lloyd-Max quantizer for block-normalized distributions,
+    minimizing inner product error in quantized matrix multiplication.
+    Generated via Lloyd-Max on block-normalized Gaussian (blocksize=32).
+
+    Free boundaries place the outermost codewords at the conditional mean
+    of their quantization bin:
+    - k=2: endpoints at ±0.664 (not ±1.0)
+    - k=3: endpoints at ±0.883 (not ±1.0)
+    - k≥4: endpoints naturally converge to ~±1.0
+
+    Args:
+        k: Bit width (2-5).
+        device: Target device. Defaults to "cuda".
+
+    Returns:
+        Float32 tensor of shape (2^k,) with values in ~[-1, 1].
+
+    References:
+        See baselines/opt_sym/ANALYSIS.md for full theoretical analysis
+        and perplexity evaluation results showing BNF wins at k=2-3 with
+        Hadamard rotation.
+    """
+    if device is None:
+        device = torch.device("cuda")
+    device = torch.device(device)
+
+    cache_key = (k, device)
+    if cache_key in _bnf_codebook_cache:
+        return _bnf_codebook_cache[cache_key]
+
+    if k not in _BNF_CODEBOOKS_BS32:
+        raise ValueError(f"BNF codebook not available for k={k}. Supported: 2-5.")
+
+    values = torch.tensor(_BNF_CODEBOOKS_BS32[k], dtype=torch.float32, device=device)
+    _bnf_codebook_cache[cache_key] = values
+    return values
+
+
+def lloyd_max_gpu(
+    values: Tensor,
+    n_codewords: int,
+    max_iter: int = 300,
+    force_boundary: float | None = None,
+    device=None,
+) -> Tensor:
+    """GPU-accelerated Lloyd-Max codebook optimization.
+
+    Generates optimal reconstruction levels for a given distribution by
+    iteratively refining codewords to minimize MSE. Each codeword is
+    placed at the conditional mean of its assigned values.
+
+    This function is provided for replication and research. The BNF codebooks
+    in bitsandbytes are pre-computed using this algorithm on block-normalized
+    Gaussian data with blocksize=32.
+
+    Args:
+        values: 1D tensor of samples from the target distribution (on GPU).
+                For BNF codebooks, generate these by block-normalizing random weights
+                with your chosen blocksize (default 32).
+        n_codewords: Number of reconstruction levels to generate.
+        max_iter: Maximum Lloyd-Max iterations. Converges when shift < 1e-8.
+        force_boundary: If not None, fixes the outermost codeword at this value.
+                       For symmetric codebooks, run on positive samples only and
+                       mirror the result.
+        device: Target device. Uses values.device if None.
+
+    Returns:
+        Tensor of shape (n_codewords,) containing the optimized codewords, sorted.
+
+    Example:
+        >>> # Replicate k=2 BNF codebook with blocksize=32 (default)
+        >>> blocksize = 32
+        >>> W = torch.randn(30000, 512, device='cuda')
+        >>> W_blocks = W.reshape(-1, blocksize)
+        >>> absmax = W_blocks.abs().amax(dim=1, keepdim=True).clamp_(min=1e-12)
+        >>> W_norm = (W_blocks / absmax).flatten()
+        >>> pos_vals = W_norm[W_norm > 0]
+        >>> pos_cw = lloyd_max_gpu(pos_vals, n_codewords=2, force_boundary=None)
+        >>> bnf_k2 = torch.sort(torch.cat([-pos_cw, pos_cw])).values
+        >>> # bnf_k2 ≈ [-0.664, -0.196, +0.196, +0.664]
+        >>>
+        >>> # For different blocksize, just change the reshape:
+        >>> # W_blocks = W.reshape(-1, 64)  # blocksize=64
+    """
+    if device is None:
+        device = values.device
+
+    # Initialize with quantile spacing
+    n = values.numel()
+    indices = torch.linspace(0, n - 1, n_codewords + 2, device=device).long()[1:-1]
+    sorted_vals = values.sort().values
+    codewords = sorted_vals[indices].clone()
+
+    for _ in range(max_iter):
+        # Force boundary if specified
+        if force_boundary is not None:
+            if force_boundary > 0:
+                codewords[-1] = force_boundary
+            else:
+                codewords[0] = force_boundary
+
+        # Assign: find nearest codeword for each value
+        midpoints = (codewords[:-1] + codewords[1:]) / 2
+        assignments = torch.bucketize(values, midpoints)
+
+        # Update: conditional mean per bin
+        new_codewords = torch.zeros_like(codewords)
+        for i in range(n_codewords):
+            mask = assignments == i
+            count = mask.sum()
+            if count > 0:
+                new_codewords[i] = values[mask].mean()
+            else:
+                new_codewords[i] = codewords[i]
+
+        shift = (new_codewords - codewords).abs().max().item()
+        codewords = new_codewords
+        if shift < 1e-8:
+            break
+
+    # Final boundary fix
+    if force_boundary is not None:
+        if force_boundary > 0:
+            codewords[-1] = force_boundary
+        else:
+            codewords[0] = force_boundary
+
+    return codewords.sort().values
+
+
 # Precomputed VQ codebooks (k-means on N(0,1)^p, normalized to [-1,1]).
 # Generated via k-means++ on 1M standard Gaussian samples, 200 iterations.
 # Stored as base64-encoded fp16 bytes for instant loading.
@@ -1837,7 +2002,8 @@ def quantize_kbit(
         A: Input tensor. Supports float16, bfloat16, or float32.
         k: Bit width (2, 3, 4, or 5). Defaults to 4.
         codebook: Optional float32 codebook tensor with 2^k entries in [-1, 1], sorted ascending.
-            If None, uses a precomputed normal-float codebook.
+            If None, uses BNF (Block-Normalized Normal Float) codebooks with free boundaries.
+            BNF minimizes inner product error and outperforms NF at k=2-3 with Hadamard rotation.
         absmax_format: Format for absmax storage. "e4m4" (default, uint8) or "fp32".
 
     Returns:
@@ -1847,7 +2013,7 @@ def quantize_kbit(
         - codebook: The codebook tensor used (useful when auto-generated).
     """
     if codebook is None:
-        codebook = create_normal_float_codebook(k, device=A.device)
+        codebook = create_bnf_codebook(k, device=A.device)
     else:
         codebook = codebook.to(device=A.device, dtype=torch.float32)
 

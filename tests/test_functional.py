@@ -1505,3 +1505,97 @@ def test_normal_map_tree():
         for i in idx:
             pivots.append((values[i - 1] + values[i]) / 2)
         # print(pivots)
+
+
+class TestBNFCodebooks:
+    """Test that BNF codebooks outperform NF codebooks at k=2 and k=3."""
+
+    def quantize_blockwise_simple(self, W, codebook, blocksize=32):
+        """Simple blockwise quantization for testing."""
+        W_blocks = W.reshape(-1, blocksize)
+        absmax = W_blocks.abs().amax(dim=1, keepdim=True).clamp_(min=1e-12)
+        W_norm = W_blocks / absmax
+        
+        # Quantize: find nearest codebook entry
+        W_flat = W_norm.flatten().unsqueeze(1)  # (N, 1)
+        cb = codebook.unsqueeze(0)  # (1, 2^k)
+        dists = (W_flat - cb).abs()
+        indices = dists.argmin(dim=1)
+        
+        # Dequantize
+        W_quant = codebook[indices].reshape(-1, blocksize)
+        W_dequant = W_quant * absmax
+        
+        return W_dequant.flatten()
+
+    @pytest.mark.parametrize("k", [2, 3])
+    def test_bnf_better_than_nf(self, k):
+        """Test that BNF has lower reconstruction error than NF at k=2 and k=3.
+        
+        BNF (Block-Normalized Normal Float) with free boundaries optimizes for
+        the actual block-normalized distribution, giving 21% improvement at k=2
+        and ~2% at k=3 compared to NF with forced ±1.0 boundaries.
+        """
+        # Generate random Gaussian weights
+        torch.manual_seed(42)
+        n_samples = 100000
+        W = torch.randn(n_samples, dtype=torch.float32)
+        
+        # Get codebooks
+        bnf_cb = F.create_bnf_codebook(k, device='cpu')
+        nf_cb = F.create_normal_float_codebook(k, device='cpu')
+        
+        # Quantize and dequantize
+        W_bnf = self.quantize_blockwise_simple(W, bnf_cb, blocksize=32)
+        W_nf = self.quantize_blockwise_simple(W, nf_cb, blocksize=32)
+        
+        # Compute absolute errors
+        abs_err_bnf = (W - W_bnf).abs().mean().item()
+        abs_err_nf = (W - W_nf).abs().mean().item()
+        
+        # BNF should have lower error
+        assert abs_err_bnf < abs_err_nf, (
+            f"BNF should have lower error than NF at k={k}. "
+            f"Got BNF={abs_err_bnf:.6f}, NF={abs_err_nf:.6f}"
+        )
+        
+        # Check improvement percentage
+        improvement = (abs_err_nf - abs_err_bnf) / abs_err_nf * 100
+        
+        if k == 2:
+            # k=2 should have at least 15% improvement (empirically ~21%)
+            assert improvement > 15.0, (
+                f"BNF at k=2 should have >15% improvement over NF. "
+                f"Got {improvement:.2f}%"
+            )
+        elif k == 3:
+            # k=3 should have at least 0.5% improvement (empirically ~2%)
+            assert improvement > 0.5, (
+                f"BNF at k=3 should have >0.5% improvement over NF. "
+                f"Got {improvement:.2f}%"
+            )
+
+    def test_bnf_free_boundaries(self):
+        """Test that BNF codebooks have free boundaries (not forced to ±1.0)."""
+        # k=2 should have boundary at ~0.664, not 1.0
+        bnf_k2 = F.create_bnf_codebook(2, device='cpu')
+        assert abs(bnf_k2[-1].item() - 0.6642) < 0.001, (
+            f"BNF k=2 should have free boundary at ~0.664, got {bnf_k2[-1].item()}"
+        )
+        
+        # k=3 should have boundary at ~0.883, not 1.0
+        bnf_k3 = F.create_bnf_codebook(3, device='cpu')
+        assert abs(bnf_k3[-1].item() - 0.8827) < 0.001, (
+            f"BNF k=3 should have free boundary at ~0.883, got {bnf_k3[-1].item()}"
+        )
+        
+        # NF should have boundaries forced to 1.0
+        nf_k2 = F.create_normal_float_codebook(2, device='cpu')
+        assert abs(nf_k2[-1].item() - 1.0) < 0.001, (
+            f"NF k=2 should have boundary forced to 1.0, got {nf_k2[-1].item()}"
+        )
+        
+        nf_k3 = F.create_normal_float_codebook(3, device='cpu')
+        assert abs(nf_k3[-1].item() - 1.0) < 0.001, (
+            f"NF k=3 should have boundary forced to 1.0, got {nf_k3[-1].item()}"
+        )
