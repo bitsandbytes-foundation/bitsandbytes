@@ -318,6 +318,9 @@ class MatMul4Bit(torch.autograd.Function):
         # 1. Dequantize
         # 2. MatmulnN
         output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
+        if out is not None:
+            out.copy_(output)
+            output = out
 
         # 3. Save state
         ctx.state = quant_state
