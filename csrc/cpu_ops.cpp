@@ -204,60 +204,108 @@ void dequantizeBlockwise8bitCpu(
     }
 }
 
-void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
+// Precomputed direct lookup table: maps quantized uint16 index [0..65535] to codebook index.
+// Replaces binary search per element with a single array access.
+static constexpr int kLUTSize = 65536;
 
+static void build_quantize_lut(const float* codebook, unsigned char* lut) {
+    // codebook has 256 sorted entries in [-1, 1].
+    // We discretize the [-1, 1] range into 65536 bins and find the nearest codebook entry for each.
+    // Precompute midpoints between consecutive codebook entries for nearest-neighbor lookup.
+    float midpoints[kCodebookSize - 1];
+    for (int i = 0; i < kCodebookSize - 1; ++i) {
+        midpoints[i] = 0.5f * (codebook[i] + codebook[i + 1]);
+    }
+
+    int code_idx = 0;
+    for (int i = 0; i < kLUTSize; ++i) {
+        // Map LUT index to normalized value in [-1, 1]
+        float val = -1.0f + (2.0f * i) / (kLUTSize - 1);
+        // Advance code_idx while the next midpoint is still below val
+        while (code_idx < kCodebookSize - 1 && midpoints[code_idx] < val) {
+            ++code_idx;
+        }
+        lut[i] = static_cast<unsigned char>(code_idx);
+    }
+}
+
+// Convert a normalized value in [-1, 1] to LUT index [0, 65535]
+static inline uint16_t norm_to_lut_index(float val) {
+    // Clamp to [-1, 1], then map to [0, 65535]
+    val = std::clamp(val, -1.0f, 1.0f);
+    return static_cast<uint16_t>((val + 1.0f) * 0.5f * (kLUTSize - 1) + 0.5f);
+}
+
+template <typename T>
+void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
     if (blocksize <= 0 || n <= 0)
         return;
 
     // Ensure we cover the full expected dynamic range of the codebook.
     code[0] = -1.0f;
 
-    const auto process_block = [&](long long block_start, long long block_end) {
+    // Build LUT once (thread-safe via local static)
+    static thread_local unsigned char lut[kLUTSize];
+    static thread_local const float* cached_code = nullptr;
+    if (cached_code != code) {
+        build_quantize_lut(code, lut);
+        cached_code = code;
+    }
+
+    const long long num_blocks = (n + blocksize - 1) / blocksize;
+
+    BNB_OMP_PARALLEL_FOR
+    for (long long b = 0; b < num_blocks; ++b) {
+        const long long block_start = b * blocksize;
+        const long long block_end = std::min(block_start + blocksize, n);
+
+        // Compute absmax for this block
         float absmax_block = 0.0f;
         for (long long i = block_start; i < block_end; ++i) {
-            absmax_block = std::max(absmax_block, std::fabs(A[i]));
+            float val;
+            if constexpr (std::is_same<T, float>::value) {
+                val = A[i];
+            } else if constexpr (std::is_same<T, bf16_t>::value) {
+                val = bf16_to_float(A[i].v);
+            } else if constexpr (std::is_same<T, fp16_t>::value) {
+                val = fp16_to_float(A[i].v);
+            }
+            absmax_block = std::max(absmax_block, std::fabs(val));
         }
 
-        long long absmax_idx = block_start / blocksize;
-        absmax[absmax_idx] = absmax_block;
+        absmax[b] = absmax_block;
 
         if (absmax_block == 0.0f) {
             std::fill(out + block_start, out + block_end, 0);
-            return;
+            continue;
         }
 
         const float inv_absmax = 1.0f / absmax_block;
         for (long long i = block_start; i < block_end; ++i) {
-            float normed_value = A[i] * inv_absmax;
-            out[i] = lookup_code_index(code, normed_value);
-        }
-    };
-
-    const long long num_blocks = (n + blocksize - 1) / blocksize;
-    const int thread_wave_size = 256;
-
-    // We chunk the threads into waves of 256 since the max limit is between 16k and 64k on Linux
-    // (we reach this when running BLOOM-176B with a large batch size).
-    for (long long offset = 0; offset < num_blocks; offset += thread_wave_size) {
-        const long long wave_blocks = std::min<long long>(thread_wave_size, num_blocks - offset);
-        std::vector<std::thread> threads;
-        threads.reserve(wave_blocks);
-
-        const long long first_block_start = offset * blocksize;
-        for (long long b = 0; b < wave_blocks; ++b) {
-            const long long block_start = first_block_start + b * blocksize;
-            if (block_start >= n)
-                break;
-            const long long block_end = std::min(block_start + blocksize, n);
-            threads.emplace_back(process_block, block_start, block_end);
-        }
-
-        for (auto& thread : threads) {
-            if (thread.joinable()) {
-                thread.join();
+            float val;
+            if constexpr (std::is_same<T, float>::value) {
+                val = A[i];
+            } else if constexpr (std::is_same<T, bf16_t>::value) {
+                val = bf16_to_float(A[i].v);
+            } else if constexpr (std::is_same<T, fp16_t>::value) {
+                val = fp16_to_float(A[i].v);
             }
+            float normed_value = val * inv_absmax;
+            out[i] = lut[norm_to_lut_index(normed_value)];
         }
     }
+}
+
+void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
+    quantize_cpu_impl<float>(code, A, absmax, out, blocksize, n);
+}
+
+void quantize_cpu_bf16(float* code, bf16_t* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
+    quantize_cpu_impl<bf16_t>(code, A, absmax, out, blocksize, n);
+}
+
+void quantize_cpu_fp16(float* code, fp16_t* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
+    quantize_cpu_impl<fp16_t>(code, A, absmax, out, blocksize, n);
 }
 
 #if defined(__AVX512F__) && defined(__AVX512BF16__)

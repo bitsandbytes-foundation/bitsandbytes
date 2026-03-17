@@ -129,6 +129,9 @@ struct bf16_t {
     uint16_t v;
 };
 
+void quantize_cpu_bf16(float* code, bf16_t* A, float* absmax, unsigned char* out, long long blocksize, long long n);
+void quantize_cpu_fp16(float* code, fp16_t* A, float* absmax, unsigned char* out, long long blocksize, long long n);
+
 static inline bf16_t float_to_bf16(float x) {
     uint32_t bits;
     std::memcpy(&bits, &x, 4);
@@ -183,6 +186,36 @@ static inline fp16_t float_to_fp16(float x) {
         h = (sign << 15) | ((uint16_t)exp_h << 10) | ((uint16_t)(mant_rounded >> 13));
     }
     return fp16_t{h};
+}
+
+static inline float fp16_to_float(uint16_t h) {
+    uint32_t sign = (h >> 15) & 0x1;
+    uint32_t exp = (h >> 10) & 0x1F;
+    uint32_t mant = h & 0x3FF;
+    uint32_t bits;
+
+    if (exp == 0) {
+        if (mant == 0) {
+            bits = sign << 31;  // zero
+        } else {
+            // subnormal fp16 -> normal fp32
+            exp = 1;
+            while (!(mant & 0x400)) {
+                mant <<= 1;
+                exp--;
+            }
+            mant &= 0x3FF;
+            bits = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13);
+        }
+    } else if (exp == 0x1F) {
+        bits = (sign << 31) | (0xFF << 23) | (mant ? (mant << 13) : 0);  // Inf or NaN
+    } else {
+        bits = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13);
+    }
+
+    float f;
+    std::memcpy(&f, &bits, sizeof(f));
+    return f;
 }
 
 inline float dDequantizeFP4(unsigned char val) {

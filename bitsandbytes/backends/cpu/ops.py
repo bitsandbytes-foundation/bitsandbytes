@@ -38,14 +38,12 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         torch._check_is_size(blocksize)
 
         n = A.numel()
+        blocks = -(n // -blocksize)
 
-        # Only FP32 has c++ kernrl
+        absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
+        out = torch.empty(A.shape, device=A.device, dtype=torch.uint8)
+
         if A.dtype == torch.float32:
-            blocks = -(n // -blocksize)
-
-            absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
-            out = torch.empty_like(A, dtype=torch.uint8)
-
             lib.cquantize_blockwise_cpu_fp32(
                 get_ptr(code),
                 get_ptr(A),
@@ -54,20 +52,37 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 ct.c_longlong(blocksize),
                 ct.c_longlong(n),
             )
+        elif A.dtype == torch.bfloat16:
+            lib.cquantize_blockwise_cpu_bf16(
+                get_ptr(code),
+                get_ptr(A),
+                get_ptr(absmax),
+                get_ptr(out),
+                ct.c_longlong(blocksize),
+                ct.c_longlong(n),
+            )
+        elif A.dtype == torch.float16:
+            lib.cquantize_blockwise_cpu_fp16(
+                get_ptr(code),
+                get_ptr(A),
+                get_ptr(absmax),
+                get_ptr(out),
+                ct.c_longlong(blocksize),
+                ct.c_longlong(n),
+            )
         else:
+            # Generic fallback for other dtypes
+            A_flat = A.reshape(n).float()
             rem = n % blocksize
             has_rem = rem > 0
-            blocks = n // blocksize + has_rem
-            absmax = torch.zeros((blocks,), device=A.device, dtype=torch.float32)
-            A_reshaped = A.reshape(n)
-            A_com = A_reshaped[: n - rem]
+            A_com = A_flat[: n - rem]
             A_com_reshaped = A_com.reshape(n // blocksize, blocksize)
             absmax[: blocks - has_rem] = torch.abs(A_com_reshaped).max(dim=-1)[0]
             scaled_A = torch.clamp(A_com_reshaped * (1 / absmax[: blocks - has_rem].view(-1, 1)), -1, 1)
             scaled_A = scaled_A.reshape(-1)
             if has_rem:
-                absmax[-1] = torch.abs(A_reshaped[n - rem :]).max()
-                scaled_A_rem = torch.clamp(A_reshaped[n - rem :] * (1 / absmax[-1]), -1, 1)
+                absmax[-1] = torch.abs(A_flat[n - rem :]).max()
+                scaled_A_rem = torch.clamp(A_flat[n - rem :] * (1 / absmax[-1]), -1, 1)
                 scaled_A = torch.cat([scaled_A, scaled_A_rem], dim=0)
 
             diff = torch.abs(scaled_A.unsqueeze(-1) - code.to(scaled_A.device))
@@ -431,6 +446,29 @@ register_kernel("bitsandbytes::optimizer_update_32bit", "cpu")(_optimizer_update
 
 
 @torch.no_grad()
+def _dequant_blockwise_fp32_direct(A_uint8: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor,
+                                    blocksize: int) -> torch.Tensor:
+    """Dequantize blockwise via direct C lib call, avoiding torch.ops dispatch overhead."""
+    n = A_uint8.numel()
+    out = torch.empty(n, dtype=torch.float32, device=A_uint8.device)
+    lib.cdequantize_blockwise_cpu_fp32(
+        get_ptr(code), get_ptr(A_uint8.reshape(-1)), get_ptr(absmax),
+        get_ptr(out), ct.c_longlong(blocksize), ct.c_longlong(n),
+    )
+    return out.reshape(A_uint8.shape)
+
+
+def _quant_blockwise_fp32_direct(A_fp32: torch.Tensor, code: torch.Tensor,
+                                  absmax_out: torch.Tensor, out_uint8: torch.Tensor,
+                                  blocksize: int) -> None:
+    """Quantize blockwise via direct C lib call, writing into existing buffers (zero-alloc)."""
+    n = A_fp32.numel()
+    lib.cquantize_blockwise_cpu_fp32(
+        get_ptr(code), get_ptr(A_fp32.reshape(-1)), get_ptr(absmax_out),
+        get_ptr(out_uint8.reshape(-1)), ct.c_longlong(blocksize), ct.c_longlong(n),
+    )
+
+
 def _optimizer_update_8bit_blockwise_cpu(
     optimizer_name: str,
     g: torch.Tensor,
@@ -452,19 +490,19 @@ def _optimizer_update_8bit_blockwise_cpu(
     gnorm_scale: float,
     skip_zeros: bool = False,
 ) -> None:
-    # Dequantize states
     blocksize = 256
 
+    # Dequantize states — direct C lib calls (no torch.ops dispatch overhead)
     if optimizer_name == "ademamix" and absmax1.ndim == 2:
-        s1_1 = torch.ops.bitsandbytes.dequantize_blockwise(state1[0], absmax1[0], qmap1, blocksize, torch.float32)
-        s1_2 = torch.ops.bitsandbytes.dequantize_blockwise(state1[1], absmax1[1], qmap1, blocksize, torch.float32)
+        s1_1 = _dequant_blockwise_fp32_direct(state1[0], absmax1[0], qmap1, blocksize)
+        s1_2 = _dequant_blockwise_fp32_direct(state1[1], absmax1[1], qmap1, blocksize)
         state1_fp32 = torch.stack([s1_1, s1_2])
     else:
-        state1_fp32 = torch.ops.bitsandbytes.dequantize_blockwise(state1, absmax1, qmap1, blocksize, torch.float32)
+        state1_fp32 = _dequant_blockwise_fp32_direct(state1, absmax1, qmap1, blocksize)
 
     state2_fp32 = None
     if state2 is not None and qmap2 is not None and absmax2 is not None:
-        state2_fp32 = torch.ops.bitsandbytes.dequantize_blockwise(state2, absmax2, qmap2, blocksize, torch.float32)
+        state2_fp32 = _dequant_blockwise_fp32_direct(state2, absmax2, qmap2, blocksize)
 
     grad = g.float() * gnorm_scale
     p_fp32 = p.data.float()
@@ -531,27 +569,15 @@ def _optimizer_update_8bit_blockwise_cpu(
 
     p.data.copy_(p_fp32)
 
-    # Re-quantize states
+    # Re-quantize states — direct C lib calls, zero-alloc (write into existing buffers)
     if optimizer_name == "ademamix":
-        new_s1_0, new_abs1_0 = torch.ops.bitsandbytes.quantize_blockwise(state1_fp32[0], qmap1, blocksize)
-        new_s1_1, new_abs1_1 = torch.ops.bitsandbytes.quantize_blockwise(state1_fp32[1], qmap1, blocksize)
-        state1[0].copy_(new_s1_0)
-        state1[1].copy_(new_s1_1)
-        absmax1[0].copy_(new_abs1_0)
-        absmax1[1].copy_(new_abs1_1)
-
-        new_s2, new_abs2 = torch.ops.bitsandbytes.quantize_blockwise(state2_fp32, qmap2, blocksize)
-        state2.copy_(new_s2)
-        absmax2.copy_(new_abs2)
+        _quant_blockwise_fp32_direct(state1_fp32[0], qmap1, absmax1[0], state1[0], blocksize)
+        _quant_blockwise_fp32_direct(state1_fp32[1], qmap1, absmax1[1], state1[1], blocksize)
+        _quant_blockwise_fp32_direct(state2_fp32, qmap2, absmax2, state2, blocksize)
     else:
-        new_s1, new_abs1 = torch.ops.bitsandbytes.quantize_blockwise(state1_fp32, qmap1, blocksize)
-        state1.copy_(new_s1)
-        absmax1.copy_(new_abs1)
-
+        _quant_blockwise_fp32_direct(state1_fp32, qmap1, absmax1, state1, blocksize)
         if state2_fp32 is not None:
-            new_s2, new_abs2 = torch.ops.bitsandbytes.quantize_blockwise(state2_fp32, qmap2, blocksize)
-            state2.copy_(new_s2)
-            absmax2.copy_(new_abs2)
+            _quant_blockwise_fp32_direct(state2_fp32, qmap2, absmax2, state2, blocksize)
 
 
 register_kernel("bitsandbytes::optimizer_update_8bit_blockwise", "cpu")(_optimizer_update_8bit_blockwise_cpu)

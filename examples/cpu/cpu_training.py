@@ -56,7 +56,7 @@ def get_args():
     parser.add_argument("--log_interval", type=int, default=5)
     parser.add_argument("--compare", action="store_true", help="Compare bnb AdamW vs torch AdamW")
     parser.add_argument("--use_trainer", action="store_true", help="Use HF Trainer instead of manual training loop")
-    parser.add_argument("--dtype", type=str, default="fp32", choices=["bf16", "fp32"])
+    parser.add_argument("--dtype", type=str, default="bf16", choices=["bf16", "fp32"])
     return parser.parse_args()
 
 
