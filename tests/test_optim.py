@@ -176,11 +176,10 @@ optimizer_names_32bit = [
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [32, 1024, 4097, 1], ids=id_formatter("dim2"))
-@pytest.mark.parametrize("device", get_available_devices(no_cpu=True), ids=id_formatter("device"))
-@pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No device")
+@pytest.mark.parametrize("device", get_available_devices(), ids=id_formatter("device"))
 def test_optimizer32bit(dim1, dim2, gtype, optim_name, device):
-    if device not in ["cuda", "xpu"]:
-        pytest.skip("Optimizers are only supported on CUDA and XPU")
+    if device == "cpu" and optim_name.startswith("paged_"):
+        pytest.skip("Paged optimizers are not meaningful on CPU")
 
     if optim_name.startswith("paged_") and sys.platform == "win32":
         pytest.skip("Paged optimizers can have issues on Windows.")
@@ -353,12 +352,8 @@ optimizer_names_8bit = [
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
-@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
-@pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No device")
+@pytest.mark.parametrize("device", get_available_devices())
 def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
-    if device not in ["cuda", "xpu"]:
-        pytest.skip("8-bit optimizers are only supported on CUDA and XPU")
-
     torch.set_printoptions(precision=6)
 
     if dim1 == 1 and dim2 == 1:

@@ -2,12 +2,16 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
+import logging
 from collections import abc as container_abcs, defaultdict
 from copy import deepcopy
 from itertools import chain
 from typing import Optional
+import warnings
 
 import torch
+
+logger = logging.getLogger(__name__)
 
 import bitsandbytes.functional as F
 from bitsandbytes.utils import sync_gpu
@@ -269,6 +273,8 @@ class Optimizer8bit(torch.optim.Optimizer):
     def to_gpu(self):
         for gindex, group in enumerate(self.param_groups):
             for pindex, p in enumerate(group["params"]):
+                if p.device.type == "cpu":
+                    continue
                 if p in self.state:
                     values = self.state[p]
                     for k, v in values.items():
@@ -366,6 +372,15 @@ class Optimizer8bit(torch.optim.Optimizer):
         raise NotImplementedError("The update_step method needs to be overridden")
 
     def get_state_buffer(self, p, dtype=torch.float32):
+        if p.device.type == "cpu":
+            if self.is_paged and not getattr(self, "_cpu_paged_warned", False):
+                warnings.warn(
+                    "Paged optimizers are not supported on CPU. "
+                    "Falling back to non-paged optimizer behavior.",
+                    stacklevel=2,
+                )
+                self._cpu_paged_warned = True
+            return torch.zeros_like(p, dtype=dtype, device=p.device)
         if not self.is_paged or p.numel() < 1e5:
             return torch.zeros_like(p, dtype=dtype, device=p.device)
         else:
