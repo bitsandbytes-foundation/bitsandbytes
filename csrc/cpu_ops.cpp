@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -207,6 +208,7 @@ void dequantizeBlockwise8bitCpu(
 // Precomputed direct lookup table: maps quantized uint16 index [0..65535] to codebook index.
 // Replaces binary search per element with a single array access.
 static constexpr int kLUTSize = 65536;
+static constexpr int kLUTCacheSlots = 4;
 
 static void build_quantize_lut(const float* codebook, unsigned char* lut) {
     // codebook has 256 sorted entries in [-1, 1].
@@ -229,9 +231,36 @@ static void build_quantize_lut(const float* codebook, unsigned char* lut) {
     }
 }
 
+// Per-thread LUT cache with multiple slots to avoid rebuilding when alternating codebooks
+struct LUTCache {
+    unsigned char luts[kLUTCacheSlots][kLUTSize];
+    const float* cached_codes[kLUTCacheSlots] = {};
+    int next_slot = 0;
+
+    const unsigned char* get_lut(const float* code) {
+        for (int i = 0; i < kLUTCacheSlots; ++i) {
+            if (cached_codes[i] == code) return luts[i];
+        }
+        // Cache miss: build and store in next slot (round-robin)
+        int slot = next_slot;
+        next_slot = (next_slot + 1) % kLUTCacheSlots;
+        build_quantize_lut(code, luts[slot]);
+        cached_codes[slot] = code;
+        return luts[slot];
+    }
+};
+
+// Single global LUT cache (protected by mutex for thread safety during build)
+static LUTCache g_lut_cache;
+static std::mutex g_lut_mutex;
+
+static const unsigned char* get_global_lut(const float* code) {
+    std::lock_guard<std::mutex> lock(g_lut_mutex);
+    return g_lut_cache.get_lut(code);
+}
+
 // Convert a normalized value in [-1, 1] to LUT index [0, 65535]
 static inline uint16_t norm_to_lut_index(float val) {
-    // Clamp to [-1, 1], then map to [0, 65535]
     val = std::clamp(val, -1.0f, 1.0f);
     return static_cast<uint16_t>((val + 1.0f) * 0.5f * (kLUTSize - 1) + 0.5f);
 }
@@ -241,16 +270,8 @@ void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* ou
     if (blocksize <= 0 || n <= 0)
         return;
 
-    // Ensure we cover the full expected dynamic range of the codebook.
-    code[0] = -1.0f;
-
-    // Build LUT once (thread-safe via local static)
-    static thread_local unsigned char lut[kLUTSize];
-    static thread_local const float* cached_code = nullptr;
-    if (cached_code != code) {
-        build_quantize_lut(code, lut);
-        cached_code = code;
-    }
+    // Get LUT from global cache (built once per codebook, shared by all OMP threads)
+    const unsigned char* lut = get_global_lut(code);
 
     const long long num_blocks = (n + blocksize - 1) / blocksize;
 
