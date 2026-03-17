@@ -333,6 +333,19 @@ void gemv_4bit_inference_fp32(
 
 #endif
 
+#if BUILD_XPU
+// Helper: get default SYCL queue for XPU paged memory operations.
+// SYCL USM (Unified Shared Memory) provides equivalent functionality to:
+//   - CUDA's cudaMallocManaged / Level Zero's zeMemAllocShared
+//   - CUDA's cudaMemPrefetchAsync / Level Zero's zeCommandListAppendMemoryPrefetch
+// Level Zero has no equivalent to cudaPeekAtLastError; each L0 call returns ze_result_t.
+// SYCL wraps L0 and uses exceptions for error reporting.
+static sycl::queue& xpu_default_queue() {
+    static sycl::queue q{sycl::gpu_selector_v, sycl::property::queue::in_order{}};
+    return q;
+}
+#endif
+
 extern "C" {
 #if BUILD_CUDA || BUILD_HIP
 
@@ -685,6 +698,55 @@ void cgemv_4bit_inference_fp32(
     int ldc, int blocksize, sycl::queue* stream
 ) {
     gemv_4bit_inference_fp32(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, stream);
+}
+
+// XPU Paged Memory Support using SYCL USM (Unified Shared Memory)
+// Equivalent CUDA APIs -> SYCL/Level Zero APIs:
+//   cudaMallocManaged     -> sycl::malloc_shared / zeMemAllocShared
+//   cudaMemPrefetchAsync  -> sycl::queue::prefetch / zeCommandListAppendMemoryPrefetch
+//   cudaPeekAtLastError   -> N/A (SYCL uses exceptions; L0 returns ze_result_t per call)
+
+void* cget_managed_ptr(size_t bytes) {
+    try {
+        auto& q = xpu_default_queue();
+        void* ptr = sycl::malloc_shared(bytes, q);
+        if (ptr == nullptr) {
+            fprintf(stderr, "XPU Error: sycl::malloc_shared returned nullptr for %zu bytes\n", bytes);
+        }
+        return ptr;
+    } catch (const sycl::exception& e) {
+        fprintf(stderr, "XPU SYCL Error in cget_managed_ptr: %s\n", e.what());
+        return nullptr;
+    }
+}
+
+void cprefetch(void* ptr, size_t bytes, int device) {
+    // device == -1 means prefetch to host; for SYCL we skip in that case
+    // since SYCL prefetch targets the device associated with the queue.
+    if (device < 0)
+        return;
+    try {
+        auto& q = xpu_default_queue();
+        q.prefetch(ptr, bytes);
+    } catch (const sycl::exception& e) {
+        fprintf(stderr, "XPU Warning: sycl::queue::prefetch failed: %s\n", e.what());
+    }
+}
+
+void cfill_fp32(float* A, float* B, float value, long n) {
+    try {
+        auto& q = xpu_default_queue();
+        q.fill(A, value, static_cast<size_t>(n)).wait();
+    } catch (const sycl::exception& e) {
+        fprintf(stderr, "XPU Error in cfill_fp32: %s\n", e.what());
+    }
+}
+
+void cfill_uint8(unsigned char* A, unsigned char* B, unsigned char value, long n) {
+    // Use host-side memset instead of sycl::queue::fill<unsigned char>
+    // which segfaults on certain Intel GPU drivers (e.g. Max 1550).
+    // USM shared memory is host-accessible, so memset works directly.
+    memset(A, value, static_cast<size_t>(n));
 }
 
 #endif
