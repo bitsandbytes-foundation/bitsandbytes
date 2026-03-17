@@ -160,7 +160,7 @@ def run_single(args):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype)
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype)
 
     ds = prepare_data(tokenizer, args.dataset, args.max_length)
     dataloader = torch.utils.data.DataLoader(
@@ -208,7 +208,7 @@ def run_compare(args):
     ]:
         print(f"\n>> {label}")
         torch.manual_seed(42)
-        model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype)
+        model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype)
         optimizer = make_opt(model)
         history = train_loop(model, optimizer, dataloader, args.steps, args.log_interval)
         results[label] = history
@@ -242,7 +242,7 @@ def run_with_trainer(args):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype)
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype)
 
     ds = prepare_data(tokenizer, args.dataset, args.max_length)
 
@@ -257,7 +257,7 @@ def run_with_trainer(args):
         save_total_limit=1,
         report_to="none",
         bf16=(args.dtype == "bf16"),
-        no_cuda=True,
+        use_cpu=True,
         dataloader_pin_memory=False,
     )
 
@@ -288,7 +288,7 @@ def run_with_trainer(args):
 
     # Verify saved model can be loaded back
     print("Verifying saved model loads correctly ...")
-    loaded_model = AutoModelForCausalLM.from_pretrained(save_dir, torch_dtype=dtype)
+    loaded_model = AutoModelForCausalLM.from_pretrained(save_dir, dtype=dtype)
     loaded_tokenizer = AutoTokenizer.from_pretrained(save_dir)
     test_input = loaded_tokenizer("Hello", return_tensors="pt")
     with torch.no_grad():
@@ -311,3 +311,38 @@ def main():
 if __name__ == "__main__":
     set_seed(42)
     main()
+
+
+# python cpu_training.py --optimizer adamw8bit --steps 10 --log_interval 2
+# === Training with bnb adamw8bit on CPU (bf16) ===
+# Model: JackFram/llama-68m | Dataset: yahma/alpaca-cleaned
+# Steps: 10 | LR: 0.0002 | Batch: 2 | MaxLen: 128
+#   step    0 | loss 9.7052 | time 0.3s
+#   step    2 | loss 6.0319 | time 0.5s
+#   step    4 | loss 3.3827 | time 0.6s
+#   step    6 | loss 3.5486 | time 0.7s
+#   step    8 | loss 2.9490 | time 0.8s
+
+# --- Results ---
+# Loss: 9.7052 -> 2.6024 (delta=+7.1027)
+# Total time: 0.9s (11.7 steps/s)
+# Optimizer: bnb.optim.adamw8bit | Dtype: bf16
+# OK: Loss decreased as expected.
+
+
+# python cpu_training.py --compare
+#  Step |   bnb Loss |  torch Loss |       Diff
+# --------------------------------------------------
+#     0 |     4.9548 |      4.9548 |   0.000000
+#     5 |     5.0205 |      5.0042 |   0.016351
+#    10 |     2.7286 |      2.7247 |   0.003913
+#    15 |     1.7980 |      1.7925 |   0.005587
+#    20 |     2.8843 |      2.8811 |   0.003192
+#    25 |     2.6701 |      2.6717 |   0.001601
+
+# Final loss difference: 0.002704
+# OK: bnb and torch AdamW produce nearly identical results on CPU.
+
+
+# python cpu_training.py --use_trainer --optimizer adamw8bit
+
