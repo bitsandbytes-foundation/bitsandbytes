@@ -259,12 +259,9 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name, device):
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=describe_dtype)
-@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
-@pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No device")
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.skipif(not get_available_devices(), reason="No device")
 def test_global_config(dim1, dim2, gtype, device):
-    if device not in ["cuda", "xpu"]:
-        pytest.skip("Optimizers are only supported on CUDA and XPU")
-
     if dim1 == 1 and dim2 == 1:
         return
     p1 = torch.randn(dim1, dim2, device="cpu", dtype=gtype) * 0.1
@@ -305,12 +302,10 @@ def test_global_config(dim1, dim2, gtype, device):
         assert adam2.state[p3]["state2"].dtype == torch.uint8
 
 
-@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
-@pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No device")
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.skipif(not get_available_devices(), reason="No device")
 def test_override_config_after_register(device):
     """Test that override_config works when called after register_parameters (issue #1269)."""
-    if device not in ["cuda", "xpu"]:
-        pytest.skip("Optimizers are only supported on CUDA and XPU")
 
     mng = bnb.optim.GlobalOptimManager.get_instance()
     mng.initialize()
@@ -551,15 +546,13 @@ ademamix_state_dict_opts = [
     ademamix_state_dict_opts,
     ids=[x[0] for x in ademamix_state_dict_opts],
 )
-@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
-@pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No device")
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.skipif(not get_available_devices(), reason="No device")
 def test_ademamix_state_dict_no_nan(optim_name, optim_factory, device):
     """Test that AdEMAMix can save/load state_dict and continue training without NaN.
 
     Regression test for https://github.com/bitsandbytes-foundation/bitsandbytes/issues/1382
     """
-    if device not in ["cuda", "xpu"]:
-        pytest.skip("Optimizers are only supported on CUDA and XPU")
 
     import torch.nn as nn
 
