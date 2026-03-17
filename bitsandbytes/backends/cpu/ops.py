@@ -362,10 +362,9 @@ def _optimizer_update_32bit_cpu(
         p_float.add_(update, alpha=step_size * update_scale)
 
     elif optimizer_name == "ademamix":
-        # AdEMAMix (2-state with extra m2 in state1)
-        n = p.numel()
-        m1 = state1[:n]
-        m2 = state1[n:]
+        # AdEMAMix (2-state): state1 shape is (2, *p.shape), state1[0]=m1, state1[1]=m2
+        m1 = state1[0]
+        m2 = state1[1]
         nu = state2
 
         m1.mul_(beta1).add_(g_float, alpha=1.0 - beta1)
