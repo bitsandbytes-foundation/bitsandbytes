@@ -98,6 +98,15 @@ class CudaBNBNativeLibrary(BNBNativeLibrary):
         lib.cget_managed_ptr.restype = ct.c_void_p
 
 
+class XpuBNBNativeLibrary(BNBNativeLibrary):
+    """XPU native library with SYCL USM paged memory support."""
+
+    def __init__(self, lib: ct.CDLL):
+        super().__init__(lib)
+        if hasattr(lib, "cget_managed_ptr"):
+            lib.cget_managed_ptr.restype = ct.c_void_p
+
+
 def get_available_cuda_binary_versions() -> list[str]:
     """Get formatted CUDA versions from existing library files using cuda_specs logic"""
     lib_pattern = f"libbitsandbytes_{BNB_BACKEND.lower()}*{DYNAMIC_LIBRARY_SUFFIX}"
@@ -317,6 +326,9 @@ def get_native_library() -> BNBNativeLibrary:
 
     if hasattr(dll, "get_context"):  # only a CUDA-built library exposes this
         return CudaBNBNativeLibrary(dll)
+
+    if torch._C._has_xpu:
+        return XpuBNBNativeLibrary(dll)
 
     return BNBNativeLibrary(dll)
 
