@@ -345,4 +345,21 @@ if __name__ == "__main__":
 
 
 # python cpu_training.py --use_trainer --optimizer adamw8bit
+# === Trainer mode with bnb adamw8bit on CPU (bf16) ===
+# Model: JackFram/llama-68m | Dataset: yahma/alpaca-cleaned
+# Steps: 30 | LR: 0.0002 | Batch: 2 | MaxLen: 128
+
+# {'loss': '4.365', 'grad_norm': '21.5', 'learning_rate': '0.0002', 'epoch': '0.05'}
+# {'loss': '2.2', 'grad_norm': '10.56', 'learning_rate': '0.0002', 'epoch': '0.1'}
+# {'loss': '2.033', 'grad_norm': '7.812', 'learning_rate': '0.0002', 'epoch': '0.15'}
+# {'loss': '2.428', 'grad_norm': '9.062', 'learning_rate': '0.0002', 'epoch': '0.2'}
+# {'loss': '2.128', 'grad_norm': '3.812', 'learning_rate': '0.0002', 'epoch': '0.25'}
+# {'loss': '1.975', 'grad_norm': '9.438', 'learning_rate': '0.0002', 'epoch': '0.3'}
+# {'train_runtime': '3.153', 'train_samples_per_second': '19.03', 'train_steps_per_second': '9.514', 'train_loss': '2.522', 'epoch': '0.3'}
+
+# --- Trainer Results ---
+# Training loss: 2.5216
+# Training runtime: 3.2s
+# Steps/sec: 9.5
+# Optimizer: bnb.optim.adamw8bit | Dtype: bf16
 
