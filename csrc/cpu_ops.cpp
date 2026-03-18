@@ -252,11 +252,8 @@ struct LUTCache {
         float fp[4];
         compute_fingerprint(code, fp);
         for (int i = 0; i < kLUTCacheSlots; ++i) {
-            if (cached_codes[i] == code &&
-                cached_fingerprints[i][0] == fp[0] &&
-                cached_fingerprints[i][1] == fp[1] &&
-                cached_fingerprints[i][2] == fp[2] &&
-                cached_fingerprints[i][3] == fp[3]) {
+            if (cached_codes[i] == code && cached_fingerprints[i][0] == fp[0] && cached_fingerprints[i][1] == fp[1] &&
+                cached_fingerprints[i][2] == fp[2] && cached_fingerprints[i][3] == fp[3]) {
                 return luts[i];
             }
         }

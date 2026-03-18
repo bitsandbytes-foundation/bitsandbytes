@@ -196,7 +196,7 @@ static inline float fp16_to_float(uint16_t h) {
 
     if (exp == 0) {
         if (mant == 0) {
-            bits = sign << 31;  // zero
+            bits = sign << 31; // zero
         } else {
             // subnormal fp16 -> normal fp32
             exp = 1;
@@ -208,7 +208,7 @@ static inline float fp16_to_float(uint16_t h) {
             bits = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13);
         }
     } else if (exp == 0x1F) {
-        bits = (sign << 31) | (0xFF << 23) | (mant ? (mant << 13) : 0);  // Inf or NaN
+        bits = (sign << 31) | (0xFF << 23) | (mant ? (mant << 13) : 0); // Inf or NaN
     } else {
         bits = (sign << 31) | ((exp + 127 - 15) << 23) | (mant << 13);
     }

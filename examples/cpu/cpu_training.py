@@ -164,7 +164,10 @@ def run_single(args):
 
     ds = prepare_data(tokenizer, args.dataset, args.max_length)
     dataloader = torch.utils.data.DataLoader(
-        ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn,
+        ds,
+        batch_size=args.batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
     )
 
     optimizer = create_optimizer(model, args.optimizer, args.lr)
@@ -198,7 +201,10 @@ def run_compare(args):
 
     ds = prepare_data(tokenizer, args.dataset, args.max_length, num_samples=100)
     dataloader = torch.utils.data.DataLoader(
-        ds, batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn,
+        ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        collate_fn=collate_fn,
     )
 
     results = {}
@@ -362,4 +368,3 @@ if __name__ == "__main__":
 # Training runtime: 3.2s
 # Steps/sec: 9.5
 # Optimizer: bnb.optim.adamw8bit | Dtype: bf16
-

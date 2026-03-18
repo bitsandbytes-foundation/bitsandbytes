@@ -2,19 +2,19 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-import logging
 from collections import abc as container_abcs, defaultdict
 from copy import deepcopy
 from itertools import chain
+import logging
 from typing import Optional
 import warnings
 
 import torch
 
-logger = logging.getLogger(__name__)
-
 import bitsandbytes.functional as F
 from bitsandbytes.utils import sync_gpu
+
+logger = logging.getLogger(__name__)
 
 
 class MockArgs:
@@ -375,8 +375,7 @@ class Optimizer8bit(torch.optim.Optimizer):
         if p.device.type == "cpu":
             if self.is_paged and not getattr(self, "_cpu_paged_warned", False):
                 warnings.warn(
-                    "Paged optimizers are not supported on CPU. "
-                    "Falling back to non-paged optimizer behavior.",
+                    "Paged optimizers are not supported on CPU. Falling back to non-paged optimizer behavior.",
                     stacklevel=2,
                 )
                 self._cpu_paged_warned = True

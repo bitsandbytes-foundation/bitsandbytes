@@ -425,8 +425,12 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
         else:
             assert err.mean() < 0.00006
             # Lion on CPU fp16 has slightly higher relative error due to sign-based updates at boundary
-            relerr_thr = 0.00062 if (device == "cpu" and optim_name == "lion8bit_blockwise" and gtype == torch.float16) else 0.0006
-            assert relerr.mean() < relerr_thr
+            relerr_the = (
+                0.00062
+                if (device == "cpu" and optim_name == "lion8bit_blockwise" and gtype == torch.float16)
+                else 0.0006
+            )
+            assert relerr.mean() < relerr_the
 
         errors.append(err.mean().item())
         relerrors.append(relerr.mean().item())

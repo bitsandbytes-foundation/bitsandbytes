@@ -322,7 +322,10 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
 
 
 def _compute_update_norm_and_scale(
-    update: torch.Tensor, unorm_vec: Optional[torch.Tensor], max_unorm: float, param_norm: float,
+    update: torch.Tensor,
+    unorm_vec: Optional[torch.Tensor],
+    max_unorm: float,
+    param_norm: float,
 ) -> float:
     """Compute trust-ratio scaling factor for LAMB/LARS and store update norm."""
     if max_unorm <= 0.0:
@@ -446,26 +449,35 @@ register_kernel("bitsandbytes::optimizer_update_32bit", "cpu")(_optimizer_update
 
 
 @torch.no_grad()
-def _dequant_blockwise_fp32_direct(A_uint8: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor,
-                                    blocksize: int) -> torch.Tensor:
+def _dequant_blockwise_fp32_direct(
+    A_uint8: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int
+) -> torch.Tensor:
     """Dequantize blockwise via direct C lib call, avoiding torch.ops dispatch overhead."""
     n = A_uint8.numel()
     out = torch.empty(n, dtype=torch.float32, device=A_uint8.device)
     lib.cdequantize_blockwise_cpu_fp32(
-        get_ptr(code), get_ptr(A_uint8.reshape(-1)), get_ptr(absmax),
-        get_ptr(out), ct.c_longlong(blocksize), ct.c_longlong(n),
+        get_ptr(code),
+        get_ptr(A_uint8.reshape(-1)),
+        get_ptr(absmax),
+        get_ptr(out),
+        ct.c_longlong(blocksize),
+        ct.c_longlong(n),
     )
     return out.reshape(A_uint8.shape)
 
 
-def _quant_blockwise_fp32_direct(A_fp32: torch.Tensor, code: torch.Tensor,
-                                  absmax_out: torch.Tensor, out_uint8: torch.Tensor,
-                                  blocksize: int) -> None:
+def _quant_blockwise_fp32_direct(
+    A_fp32: torch.Tensor, code: torch.Tensor, absmax_out: torch.Tensor, out_uint8: torch.Tensor, blocksize: int
+) -> None:
     """Quantize blockwise via direct C lib call, writing into existing buffers (zero-alloc)."""
     n = A_fp32.numel()
     lib.cquantize_blockwise_cpu_fp32(
-        get_ptr(code), get_ptr(A_fp32.reshape(-1)), get_ptr(absmax_out),
-        get_ptr(out_uint8.reshape(-1)), ct.c_longlong(blocksize), ct.c_longlong(n),
+        get_ptr(code),
+        get_ptr(A_fp32.reshape(-1)),
+        get_ptr(absmax_out),
+        get_ptr(out_uint8.reshape(-1)),
+        ct.c_longlong(blocksize),
+        ct.c_longlong(n),
     )
 
 
