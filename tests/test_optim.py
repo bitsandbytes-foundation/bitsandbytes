@@ -372,6 +372,10 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
         atol, rtol = 3e-3, 1e-3
         patol, prtol = 1e-5, 1e-3
 
+    # CPU 8-bit blockwise kernels have slightly lower precision than GPU
+    if device == "cpu":
+        atol, rtol = max(atol, 5e-3), max(rtol, 2e-3)
+
     errors = []
     relerrors = []
 
@@ -420,11 +424,14 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
         err = torch.abs(p1 - p2)
         relerr = err / (torch.abs(p1) + 1e-9)
         if g.dtype == torch.bfloat16:
-            assert err.mean() <= 0.00017
-            assert relerr.mean() <= 0.0016
+            err_threshold, relerr_threshold = 0.00017, 0.0016
         else:
-            assert err.mean() < 0.00006
-            assert relerr.mean() < 0.0006
+            err_threshold, relerr_threshold = 0.00006, 0.0006
+        if device == "cpu":
+            err_threshold = max(err_threshold, 0.0001)
+            relerr_threshold = max(relerr_threshold, 0.001)
+        assert err.mean() <= err_threshold
+        assert relerr.mean() <= relerr_threshold
 
         errors.append(err.mean().item())
         relerrors.append(relerr.mean().item())
