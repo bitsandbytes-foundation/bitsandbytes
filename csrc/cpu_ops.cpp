@@ -235,17 +235,37 @@ static void build_quantize_lut(const float* codebook, unsigned char* lut) {
 struct LUTCache {
     unsigned char luts[kLUTCacheSlots][kLUTSize];
     const float* cached_codes[kLUTCacheSlots] = {};
+    // Store fingerprint to detect pointer reuse (ABA problem):
+    // when a tensor is freed and a new one reuses the same address,
+    // the pointer matches but the codebook content may differ.
+    float cached_fingerprints[kLUTCacheSlots][4] = {};
     int next_slot = 0;
 
+    static void compute_fingerprint(const float* code, float* fp) {
+        fp[0] = code[0];
+        fp[1] = code[1];
+        fp[2] = code[127];
+        fp[3] = code[255];
+    }
+
     const unsigned char* get_lut(const float* code) {
+        float fp[4];
+        compute_fingerprint(code, fp);
         for (int i = 0; i < kLUTCacheSlots; ++i) {
-            if (cached_codes[i] == code) return luts[i];
+            if (cached_codes[i] == code &&
+                cached_fingerprints[i][0] == fp[0] &&
+                cached_fingerprints[i][1] == fp[1] &&
+                cached_fingerprints[i][2] == fp[2] &&
+                cached_fingerprints[i][3] == fp[3]) {
+                return luts[i];
+            }
         }
         // Cache miss: build and store in next slot (round-robin)
         int slot = next_slot;
         next_slot = (next_slot + 1) % kLUTCacheSlots;
         build_quantize_lut(code, luts[slot]);
         cached_codes[slot] = code;
+        std::memcpy(cached_fingerprints[slot], fp, sizeof(fp));
         return luts[slot];
     }
 };
