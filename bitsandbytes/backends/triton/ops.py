@@ -18,7 +18,7 @@ def quantize_blockwise(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> t
     torch._check_is_size(blocksize)
     # torch._check(A.dtype == torch.float32, lambda: f"A must be float32 on xpu, got {A.dtype}")
     with torch_accelerator_module.device(A.device):
-        out, absmax = kernels_8bit_quant.quantize_blockwise_triton(A, code, blocksize)
+        out, absmax = kernels_8bit_quant.quantize_blockwise_triton(A.contiguous(), code, blocksize)
         return out, absmax.float()
 
 
@@ -30,7 +30,7 @@ def dequantize_blockwise(
     # torch._check(dtype == torch.float32, lambda: f"dtype must be float32 on xpu, got {dtype}")
     with torch_accelerator_module.device(A.device):
         out = kernels_8bit_quant.dequant_8bit_blockwise(
-            A,
+            A.contiguous(),
             absmax,
             code,
             blocksize,
