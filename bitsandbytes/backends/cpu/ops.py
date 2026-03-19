@@ -265,12 +265,15 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             code: torch.Tensor,
             blocksize: int,
         ) -> torch.Tensor:
-            assert B.dtype == torch.uint8, "Only support uint8 qweight"
+            if B.dtype != torch.uint8:
+                B = B.view(torch.uint8)
             dtype = A.dtype
             quant_type = "fp4" if code[1] > 0 else "nf4"
             # cpu fused op only support bf16 for now.
             if dtype != torch.bfloat16:
                 A = A.to(torch.bfloat16)
+            if absmax.dtype != torch.bfloat16:
+                absmax = absmax.to(torch.bfloat16)
 
             final_out_shape = (*A.shape[:-1], shapeB[0])
             A = A.reshape(-1, A.shape[-1])
