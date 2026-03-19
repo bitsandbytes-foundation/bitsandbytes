@@ -266,7 +266,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             blocksize: int,
         ) -> torch.Tensor:
             if B.dtype != torch.uint8:
-                B = B.view(torch.uint8)
+                B = B.contiguous().view(torch.uint8)
             dtype = A.dtype
             quant_type = "fp4" if code[1] > 0 else "nf4"
             # cpu fused op only support bf16 for now.
@@ -280,7 +280,9 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             out_shape = (*A.shape[:-1], shapeB[0])
             if gemm_4bit_forward_kernel is not None:
                 quant_type_num = 1 if quant_type == "fp4" else 0
-                out = gemm_4bit_forward_kernel(A, B, absmax, blocksize, quant_type_num)
+                # C++ kernel expects weight shape (N, K_packed), ensure 2D contiguous
+                B_2d = B.reshape(shapeB[0], -1).contiguous()
+                out = gemm_4bit_forward_kernel(A, B_2d, absmax, blocksize, quant_type_num)
             else:
                 out = torch.empty(out_shape, dtype=A.dtype, device=A.device)
                 M = A.shape[0]
