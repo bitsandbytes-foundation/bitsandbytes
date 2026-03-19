@@ -24,9 +24,11 @@ ADEMAMIX = 5
 
 name2optimizer_id = {
     "momentum": MOMENTUM,
+    "lars": MOMENTUM,
     "rmsprop": RMSPROP,
     "adagrad": ADAGRAD,
     "adam": ADAM,
+    "lamb": ADAM,
     "lion": LION,
     "ademamix": ADEMAMIX,
 }
@@ -313,11 +315,19 @@ name2optimizer_32bit_fn = {
         "preprocess": _optimizer_precondition_2state_32bit,
         "update": _optimizer_update_2state_32bit_triton_kernel,
     },
+    "lamb": {
+        "preprocess": _optimizer_precondition_2state_32bit,
+        "update": _optimizer_update_2state_32bit_triton_kernel,
+    },
     "ademamix": {
         "preprocess": _optimizer_precondition_2state_32bit,
         "update": _optimizer_update_2state_32bit_triton_kernel,
     },
     "momentum": {
+        "preprocess": _optimizer_precondition_1state_32bit,
+        "update": _optimizer_update_1state_32bit_triton_kernel,
+    },
+    "lars": {
         "preprocess": _optimizer_precondition_1state_32bit,
         "update": _optimizer_update_1state_32bit_triton_kernel,
     },
@@ -1065,9 +1075,11 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
 
 name2optimizer_fn = {
     "momentum": _optimizer_update_1state_8bit_blockwise_triton_kernel,
+    "lars": _optimizer_update_1state_8bit_blockwise_triton_kernel,
     "rmsprop": _optimizer_update_1state_8bit_blockwise_triton_kernel,
     "adagrad": _optimizer_update_1state_8bit_blockwise_triton_kernel,
     "adam": _optimizer_update_2state_8bit_blockwise_triton_kernel,
+    "lamb": _optimizer_update_2state_8bit_blockwise_triton_kernel,
     "lion": _optimizer_update_1state_8bit_blockwise_triton_kernel,
     "ademamix": _optimizer_update_2state_8bit_blockwise_triton_kernel,
 }
