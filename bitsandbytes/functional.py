@@ -351,6 +351,7 @@ def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
     """Verifies that the input tensors are all on the same device.
 
     An input tensor may also be marked as `paged`, in which case the device placement is ignored.
+    CPU tensors are allowed and checked for consistency among themselves.
 
     Args:
         tensors (`Iterable[Optional[torch.Tensor]]`): A list of tensors to verify.
@@ -362,25 +363,30 @@ def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
         `Literal[True]`
     """
 
-    on_gpu = True
-    gpu_ids = set()
+    devices = set()
 
     for t in tensors:
         # NULL pointers and paged tensors are OK.
         if t is not None and not getattr(t, "is_paged", False):
-            on_gpu &= t.device.type != "cpu"
-            gpu_ids.add((t.device.type, t.device.index))
+            devices.add((t.device.type, t.device.index))
 
-    if not on_gpu:
+    # All tensors on CPU is valid
+    if devices == {("cpu", None)}:
+        return True
+
+    # Check that no CPU tensors are mixed with GPU tensors
+    has_cpu = ("cpu", None) in devices
+    if has_cpu and len(devices) > 1:
         raise RuntimeError(
-            f"All input tensors need to be on the same GPU, but found some tensors to not be on a GPU:\n {[(t.shape, t.device) for t in tensors]}",
+            f"Input tensors need to be on the same device, but found the following tensor and device combinations:\n {[(t.shape, t.device) for t in tensors if t is not None]}",
         )
 
-    if len(gpu_ids) > 1:
+    # GPU path: all tensors must be on the same single GPU
+    if len(devices) > 1:
         raise RuntimeError(
-            f"Input tensors need to be on the same GPU, but found the following tensor and device combinations:\n {[(t.shape, t.device) for t in tensors]}",
+            f"Input tensors need to be on the same GPU, but found the following tensor and device combinations:\n {[(t.shape, t.device) for t in tensors if t is not None]}",
         )
-    return on_gpu
+    return True
 
 
 def _get_tensor_stream(tensor: Tensor) -> ct.c_void_p:
