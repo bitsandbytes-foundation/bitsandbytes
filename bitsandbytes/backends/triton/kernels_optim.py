@@ -123,7 +123,8 @@ def _optimizer_precondition_1state_32bit(
 
     if OPTIMIZER_ID == 0:  # MOMENTUM
         if step == 1:
-            s1_vals = g_vals
+            # Cast to fp32 to avoid type mismatch: s1_vals is fp32 but g_vals may be fp16.
+            s1_vals = g_vals.to(tl.float32)
         else:
             s1_vals = s1_vals * beta1 + g_vals
         update_norm = s1_vals * s1_vals
