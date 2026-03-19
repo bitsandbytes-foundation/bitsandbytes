@@ -31,7 +31,7 @@ if torch.__version__ >= (2, 6):
         ).reshape(*A.shape[:-1], B.shape[0])
 
 
-if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
+if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary) and _has_avx512:
 
     @register_kernel("bitsandbytes::quantize_blockwise", "cpu")
     def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -457,33 +457,15 @@ register_kernel("bitsandbytes::optimizer_update_32bit", "cpu")(_optimizer_update
 def _dequant_blockwise_fp32_direct(
     A_uint8: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int
 ) -> torch.Tensor:
-    """Dequantize blockwise via direct C lib call, avoiding torch.ops dispatch overhead."""
-    n = A_uint8.numel()
-    out = torch.empty(n, dtype=torch.float32, device=A_uint8.device)
-    lib.cdequantize_blockwise_cpu_fp32(
-        get_ptr(code),
-        get_ptr(A_uint8.reshape(-1)),
-        get_ptr(absmax),
-        get_ptr(out),
-        ct.c_longlong(blocksize),
-        ct.c_longlong(n),
-    )
-    return out.reshape(A_uint8.shape)
+    return torch.ops.bitsandbytes.dequantize_blockwise(A_uint8, absmax, code, blocksize, torch.float32)
 
 
 def _quant_blockwise_fp32_direct(
     A_fp32: torch.Tensor, code: torch.Tensor, absmax_out: torch.Tensor, out_uint8: torch.Tensor, blocksize: int
 ) -> None:
-    """Quantize blockwise via direct C lib call, writing into existing buffers (zero-alloc)."""
-    n = A_fp32.numel()
-    lib.cquantize_blockwise_cpu_fp32(
-        get_ptr(code),
-        get_ptr(A_fp32.reshape(-1)),
-        get_ptr(absmax_out),
-        get_ptr(out_uint8.reshape(-1)),
-        ct.c_longlong(blocksize),
-        ct.c_longlong(n),
-    )
+    out, absmax = torch.ops.bitsandbytes.quantize_blockwise(A_fp32, code, blocksize)
+    out_uint8.copy_(out)
+    absmax_out.copy_(absmax)
 
 
 def _optimizer_update_8bit_blockwise_cpu(
@@ -509,7 +491,7 @@ def _optimizer_update_8bit_blockwise_cpu(
 ) -> None:
     blocksize = 256
 
-    # Dequantize states — direct C lib calls (no torch.ops dispatch overhead)
+    # Dequantize states
     if optimizer_name == "ademamix" and absmax1.ndim == 2:
         s1_1 = _dequant_blockwise_fp32_direct(state1[0], absmax1[0], qmap1, blocksize)
         s1_2 = _dequant_blockwise_fp32_direct(state1[1], absmax1[1], qmap1, blocksize)
@@ -586,7 +568,7 @@ def _optimizer_update_8bit_blockwise_cpu(
 
     p.data.copy_(p_fp32)
 
-    # Re-quantize states — direct C lib calls, zero-alloc (write into existing buffers)
+    # Re-quantize states
     if optimizer_name == "ademamix":
         _quant_blockwise_fp32_direct(state1_fp32[0], qmap1, absmax1[0], state1[0], blocksize)
         _quant_blockwise_fp32_direct(state1_fp32[1], qmap1, absmax1[1], state1[1], blocksize)
