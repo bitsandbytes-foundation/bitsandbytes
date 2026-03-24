@@ -222,6 +222,7 @@ class Params4bit(torch.nn.Parameter):
         quant_storage: torch.dtype = torch.uint8,
         module: Optional["Linear4bit"] = None,
         bnb_quantized: bool = False,
+        **kwargs,
     ) -> "Params4bit":
         if data is None:
             data = torch.empty(0)
@@ -680,6 +681,7 @@ class Int8Params(torch.nn.Parameter):
         has_fp16_weights=False,
         CB: Optional[torch.Tensor] = None,
         SCB: Optional[torch.Tensor] = None,
+        **kwargs,
     ):
         if data is None:
             data = torch.empty(0)
