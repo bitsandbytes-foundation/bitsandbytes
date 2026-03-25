@@ -1,6 +1,7 @@
 import dataclasses
 from functools import lru_cache
 import logging
+import os
 import platform
 import re
 import subprocess
@@ -97,6 +98,14 @@ def get_rocm_gpu_arch() -> str:
             if match:
                 return "gfx" + match.group(1)
             else:
+                override = os.environ.get("BNB_ROCM_GPU_ARCH")
+                if override:
+                    override = override.strip()
+                    if override:
+                        if not override.startswith("gfx"):
+                            override = f"gfx{override}"
+                        logger.info("Using ROCm GPU arch override: %s", override)
+                        return override
                 return "unknown"
         else:
             return "unknown"
@@ -108,6 +117,14 @@ def get_rocm_gpu_arch() -> str:
 ROCm GPU architecture detection failed despite ROCm being available.
                 """,
             )
+        override = os.environ.get("BNB_ROCM_GPU_ARCH")
+        if override:
+            override = override.strip()
+            if override:
+                if not override.startswith("gfx"):
+                    override = f"gfx{override}"
+                logger.info("Using ROCm GPU arch override: %s", override)
+                return override
         return "unknown"
 
 
