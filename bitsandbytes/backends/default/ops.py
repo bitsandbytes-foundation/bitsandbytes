@@ -357,9 +357,11 @@ ADEMAMIX = 5
 
 name2optimizer_id = {
     "momentum": MOMENTUM,
+    "lars": MOMENTUM,
     "rmsprop": RMSPROP,
     "adagrad": ADAGRAD,
     "adam": ADAM,
+    "lamb": ADAM,
     "lion": LION,
     "ademamix": ADEMAMIX,
 }
