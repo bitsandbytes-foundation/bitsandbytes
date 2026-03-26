@@ -31,7 +31,7 @@ if torch.__version__ >= (2, 6):
         ).reshape(*A.shape[:-1], B.shape[0])
 
 
-if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary) and _has_avx512:
+if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
 
     @register_kernel("bitsandbytes::quantize_blockwise", "cpu")
     def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
