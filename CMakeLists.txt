@@ -3,7 +3,7 @@
 #   For  GCC: `cmake -B build . && cmake --build build`
 #   For MSVC: `cmake -B build . && cmake --build build --config Release`
 # You can also use the following options and variables
-#  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, or `mps` to select the backend
+#  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, `rocm` or `mps` to select the backend
 #  - CUDA_VERSION: The expected CUDA version, for sanity checking. The actual version
 #                  is whatever CMake finds on your path.
 #  - COMPUTE_CAPABILITY: Which GPU Arch/Compute codes to provide to NVCC.
@@ -16,8 +16,8 @@
 #                  libbitsandbytes_rocm70.so even if the system has ROCm 7.2.
 cmake_minimum_required(VERSION 3.22.1)
 
-# On Windows with HIP backend, auto-detect compilers from ROCM_PATH before project()
-if(WIN32 AND COMPUTE_BACKEND STREQUAL "hip")
+# On Windows with ROCm backend, auto-detect compilers from ROCM_PATH before project()
+if(WIN32 AND COMPUTE_BACKEND STREQUAL "rocm")
     if(DEFINED ENV{ROCM_PATH})
         set(ROCM_PATH $ENV{ROCM_PATH})
     endif()
@@ -61,8 +61,8 @@ set(XPU_FILES csrc/xpu_ops.cpp csrc/xpu_kernels.cpp)
 # C++ sources are always included
 list(APPEND SRC_FILES ${CPP_FILES})
 
-set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, hip, mps, xpu)")
-set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip mps xpu)
+set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, rocm, mps, xpu)")
+set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda rocm mps xpu)
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
 if(APPLE)
@@ -78,33 +78,33 @@ if(${COMPUTE_BACKEND} STREQUAL "cuda")
         message(FATAL_ERROR "CUDA is not supported on macOS" )
     endif()
     set(BUILD_CUDA ON)
-    set(BUILD_HIP OFF)
+    set(BUILD_ROCM OFF)
     set(BUILD_MPS OFF)
-elseif(${COMPUTE_BACKEND} STREQUAL "hip")
+elseif(${COMPUTE_BACKEND} STREQUAL "rocm")
     if(APPLE)
-        message(FATAL_ERROR "HIP is not supported on macOS" )
+        message(FATAL_ERROR "ROCm is not supported on macOS" )
     endif()
     set(BUILD_CUDA OFF)
-    set(BUILD_HIP ON)
+    set(BUILD_ROCM ON)
     set(BUILD_MPS OFF)
 elseif(${COMPUTE_BACKEND} STREQUAL "mps")
     if(NOT APPLE)
         message(FATAL_ERROR "MPS is only supported on macOS" )
     endif()
     set(BUILD_CUDA OFF)
-    set(BUILD_HIP OFF)
+    set(BUILD_ROCM OFF)
     set(BUILD_MPS ON)
 elseif(${COMPUTE_BACKEND} STREQUAL "xpu")
     if(APPLE)
         message(FATAL_ERROR "XPU is not supported on macOS" )
     endif()
     set(BUILD_CUDA OFF)
-    set(BUILD_HIP OFF)
+    set(BUILD_ROCM OFF)
     set(BUILD_MPS OFF)
     set(BUILD_XPU ON)
 else()
     set(BUILD_CUDA OFF)
-    set(BUILD_HIP OFF)
+    set(BUILD_ROCM OFF)
     set(BUILD_MPS OFF)
     set(BUILD_XPU OFF)
     set(BUILD_CPU ON)
@@ -228,7 +228,7 @@ if(BUILD_CUDA)
 
     string(APPEND BNB_OUTPUT_NAME "_cuda${CUDA_VERSION_SHORT}")
     add_compile_definitions(BUILD_CUDA)
-elseif(BUILD_HIP)
+elseif(BUILD_ROCM)
     # Set target architectures before enable_language(HIP), which would otherwise
     # auto-detect a single GPU and override the defaults.
     if(DEFINED BNB_ROCM_ARCH)
@@ -247,23 +247,96 @@ elseif(BUILD_HIP)
 
     string(APPEND BNB_OUTPUT_NAME "_rocm")
 
-    # get hip version
-    execute_process(COMMAND hipconfig --version OUTPUT_VARIABLE HIP_CONFIG_VERSION)
-    string(REGEX MATCH "[0-9]+\\.[0-9]+" HIP_VERSION "${HIP_CONFIG_VERSION}")
-    string(REPLACE "." "" HIP_VERSION_SHORT "${HIP_VERSION}")
+    # Always initialize this so downstream version checks are deterministic.
+    set(_DETECTED_ROCM_VERSION "0.0")
+    set(_ROCM_VERSION_SHORT "")
 
-    # Expose a cache variable that the user can set to override the ROCm version in the library name
-    set(ROCM_VERSION "${HIP_VERSION_SHORT}" CACHE STRING "Expected ROCm Version Shortcode")
+    # Allow the user to skip all version detection by passing -DROCM_VERSION=<shortcode>
+    if(DEFINED ROCM_VERSION)
+        message(STATUS "ROCm Version: ${ROCM_VERSION} (user-supplied via -DROCM_VERSION)")
+        # Assume user-supplied ROCM_VERSION is a shortcode (e.g. 71).
+        set(_ROCM_VERSION_SHORT "${ROCM_VERSION}")
+        string(LENGTH "${ROCM_VERSION}" _ROCM_VERSION_LEN)
+        if(_ROCM_VERSION_LEN GREATER 1)
+            math(EXPR _ROCM_MAJOR_LEN "${_ROCM_VERSION_LEN} - 1")
+            string(SUBSTRING "${ROCM_VERSION}" 0 ${_ROCM_MAJOR_LEN} _ROCM_MAJOR)
+            string(SUBSTRING "${ROCM_VERSION}" ${_ROCM_MAJOR_LEN} 1 _ROCM_MINOR)
+            set(_DETECTED_ROCM_VERSION "${_ROCM_MAJOR}.${_ROCM_MINOR}")
+        else()
+            message(WARNING
+                "ROCM_VERSION='${ROCM_VERSION}' looks like a single digit. "
+                "Expected a two-digit shortcode (e.g. 71 for ROCm 7.1). "
+                "Interpreting as ${ROCM_VERSION}.0."
+            )
+            set(_DETECTED_ROCM_VERSION "${ROCM_VERSION}.0")
+        endif()
+    else()
+        # Detect the actual ROCm version.
+        # Prefer the .info/version file (the canonical ROCm version) because the
+        # HIP SDK version diverged from the ROCm version starting with ROCm 7.x
+        set(_DETECTED_ROCM_VERSION "")
 
-    message(STATUS "ROCm Version: ${HIP_VERSION_SHORT} (from hipconfig)")
-    if(NOT ROCM_VERSION STREQUAL "${HIP_VERSION_SHORT}")
-        message(WARNING "Overriding ROCm version in library name: ${HIP_VERSION_SHORT} -> ${ROCM_VERSION}")
+        # Resolve the ROCm installation root (same logic used later for find_package)
+        if(DEFINED ENV{ROCM_PATH})
+            set(_ROCM_ROOT "$ENV{ROCM_PATH}")
+        else()
+            if(WIN32)
+                message(WARNING
+                    "ROCM_PATH environment variable is not set. "
+                    "On Windows this is the primary way to locate the ROCm installation.\n"
+                    "Falling back to C:/opt/rocm. Set ROCM_PATH if ROCm is installed elsewhere."
+                )
+                set(_ROCM_ROOT "C:/opt/rocm")
+            else()
+                set(_ROCM_ROOT "/opt/rocm")
+            endif()
+        endif()
+
+        # Try <rocm_root>/.info/version
+        if(_ROCM_ROOT AND EXISTS "${_ROCM_ROOT}/.info/version")
+            file(READ "${_ROCM_ROOT}/.info/version" _ROCM_INFO_CONTENT)
+            string(STRIP "${_ROCM_INFO_CONTENT}" _ROCM_INFO_CONTENT)
+            string(REGEX MATCH "[0-9]+\\.[0-9]+" _DETECTED_ROCM_VERSION "${_ROCM_INFO_CONTENT}")
+            if(_DETECTED_ROCM_VERSION)
+                message(STATUS "ROCm Version: ${_DETECTED_ROCM_VERSION} (from ${_ROCM_ROOT}/.info/version)")
+            endif()
+        endif()
+
+        # Fall back to hipconfig --version (HIP SDK version) for older installs
+        if(NOT _DETECTED_ROCM_VERSION)
+            execute_process(COMMAND hipconfig --version OUTPUT_VARIABLE HIP_CONFIG_VERSION)
+            string(REGEX MATCH "[0-9]+\\.[0-9]+" _DETECTED_ROCM_VERSION "${HIP_CONFIG_VERSION}")
+
+            if(_DETECTED_ROCM_VERSION)
+                message(WARNING
+                    "Could not read ROCm version from ${_ROCM_ROOT}/.info/version; "
+                    "falling back to hipconfig (${_DETECTED_ROCM_VERSION}).\n"
+                    "Starting with ROCm 7.x the HIP SDK version diverges from the ROCm version, "
+                    "which may produce a misnamed library.\n"
+                    "To fix this you can either:\n"
+                    "  - At build time: cmake -DROCM_VERSION=<shortcode> (e.g. -DROCM_VERSION=71 for ROCm 7.1)\n"
+                    "  - At runtime:    export BNB_ROCM_VERSION=<shortcode> (e.g. BNB_ROCM_VERSION=71)"
+                )
+            else()
+                message(FATAL_ERROR
+                    "Could not detect the ROCm version.\n"
+                    "Checked:\n"
+                    "  1. ${_ROCM_ROOT}/.info/version — not found or not readable\n"
+                    "  2. hipconfig --version — not found or returned no version\n"
+                    "Please install ROCm and ensure ROCM_PATH is set correctly, or\n"
+                )
+            endif()
+        endif()
+
+        string(REPLACE "." "" _DETECTED_ROCM_VERSION_SHORT "${_DETECTED_ROCM_VERSION}")
+        set(_ROCM_VERSION_SHORT "${_DETECTED_ROCM_VERSION_SHORT}")
+        set(ROCM_VERSION "${_DETECTED_ROCM_VERSION_SHORT}" CACHE STRING "Expected ROCm Version Shortcode")
     endif()
 
-    string(APPEND BNB_OUTPUT_NAME "${ROCM_VERSION}")
+    string(APPEND BNB_OUTPUT_NAME "${_ROCM_VERSION_SHORT}")
     add_compile_definitions(__HIP_PLATFORM_AMD__)
     add_compile_definitions(__HIP_PLATFORM_HCC__)
-    add_compile_definitions(BUILD_HIP)
+    add_compile_definitions(BUILD_ROCM)
 elseif(BUILD_MPS)
     if(NOT APPLE)
         message(FATAL_ERROR "MPS is only supported on macOS" )
@@ -354,7 +427,7 @@ if(BUILD_CUDA)
             CUDA_SEPARABLE_COMPILATION ON
     )
 endif()
-if(BUILD_HIP)
+if(BUILD_ROCM)
     # Determine ROCM_PATH from environment variable, fallback to /opt/rocm on Linux
     if(DEFINED ENV{ROCM_PATH})
       set(ROCM_PATH $ENV{ROCM_PATH})
@@ -391,7 +464,7 @@ if(BUILD_HIP)
     set_source_files_properties(${GPU_FILES} PROPERTIES LANGUAGE HIP)
     set_target_properties(bitsandbytes PROPERTIES LINKER_LANGUAGE CXX)
 
-    if(HIP_VERSION VERSION_LESS "6.1")
+    if(_DETECTED_ROCM_VERSION VERSION_LESS "6.1")
 	target_compile_definitions(bitsandbytes PUBLIC NO_HIPBLASLT)
     else()
 	find_package(hipblaslt)
