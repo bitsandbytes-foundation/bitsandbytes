@@ -2569,6 +2569,7 @@ void chadamard_rotate_full_bf16(
 #endif
 }
 
+#if BUILD_CUDA || BUILD_HIP
 // ============================================================================
 // Training Kernel Bindings (from QLORA-2 branch)
 // ============================================================================
@@ -2675,42 +2676,6 @@ void ccross_entropy_backward_bf16(
 
 extern "C" {
 #if BUILD_CUDA || BUILD_HIP
-void cquantize(float* code, float* A, unsigned char* out, int n) { quantize(code, A, out, n); }
-
-void cdequantize(float* code, unsigned char* A, float* out, int n, cudaStream_t stream) {
-    dequantize(code, A, out, n, stream);
-}
-
-void cdequantize_blockwise_fp16_fp4(
-    float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, cudaStream_t stream
-) {
-    dequantizeBlockwise_fp16_fp4(code, A, absmax, out, blocksize, n, stream);
-}
-
-void cdequantize_blockwise_fp16(
-    float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, cudaStream_t stream
-) {
-    dequantizeBlockwise_fp16(code, A, absmax, out, blocksize, n, stream);
-}
-
-void cdequantize_blockwise_fp16_nf4(
-    float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, cudaStream_t stream
-) {
-    dequantizeBlockwise_fp16_nf4(code, A, absmax, out, blocksize, n, stream);
-}
-
-void cquantize_blockwise_fp16(float* code, half* A, float* absmax, unsigned char* out, int blocksize, const int n) {
-    quantizeBlockwise_fp16(code, A, absmax, out, blocksize, n);
-}
-
-void cquantize_blockwise_fp16_fp4(float* code, half* A, float* absmax, unsigned char* out, int blocksize, const int n) {
-    quantizeBlockwise_fp16_fp4(code, A, absmax, out, blocksize, n);
-}
-
-void cquantize_blockwise_fp16_nf4(float* code, half* A, float* absmax, unsigned char* out, int blocksize, const int n) {
-    quantizeBlockwise_fp16_nf4(code, A, absmax, out, blocksize, n);
-}
-
 // Training kernel extern C wrappers
 void cswiglu_forward_fp16_c(const half* gate, const half* up, half* out, int n) {
     cswiglu_forward_fp16(gate, up, out, n);
