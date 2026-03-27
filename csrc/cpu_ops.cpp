@@ -208,7 +208,7 @@ void dequantizeBlockwise8bitCpu(
 // Prevent GCC/Clang from emitting EVEX-encoded AVX512 instructions in plain scalar code.
 // The global -mavx512vl flag can cause GCC to fold broadcasts into EVEX encoding (e.g. vmulps {1to4})
 // which would SIGILL on non-AVX512 CPUs like Zen3. These functions are scalar C++ and don't need AVX512.
-#ifdef __GNUC__
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 #pragma GCC push_options
 #pragma GCC target("no-avx512f")
 #endif
@@ -354,7 +354,7 @@ void quantize_cpu_fp16(float* code, fp16_t* A, float* absmax, unsigned char* out
     quantize_cpu_impl<fp16_t>(code, A, absmax, out, blocksize, n);
 }
 
-#ifdef __GNUC__
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 #pragma GCC pop_options
 #endif
 
