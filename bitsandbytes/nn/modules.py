@@ -1174,3 +1174,477 @@ class OutlierAwareLinear(nn.Linear):
             w = self.quantize_weight(self.weight, self.outlier_dim)
             self.weight.data.copy_(w)
             self.is_quantized = True
+
+class Conv4bit(nn.Module):
+    """Base class for 4-bit quantized convolutional layers.
+
+    Weights are stored in a compressed 4-bit format via :class:`Params4bit`.
+    During the forward pass the weights are dequantized on-the-fly and the
+    standard PyTorch ``F.conv*d`` functional API is used for computation.
+
+    This is an abstract base class — use :class:`Conv1d4bit`, :class:`Conv2d4bit`,
+    or :class:`Conv3d4bit` (and their FP4 / NF4 convenience aliases) instead.
+
+    The approach mirrors how :class:`Embedding4bit` handles non-linear layers:
+    dequantize the packed weights, reshape to the original kernel shape, and
+    delegate to the highly-optimised cuDNN convolution kernels.
+    """
+
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError("Conv4bit is an abstract base class. Use Conv1d4bit, Conv2d4bit, or Conv3d4bit.")
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        """Save weight and bias, then append quant_state components."""
+        if getattr(self.weight, "quant_state", None) is not None and getattr(
+            self.weight.quant_state, "packing_format_for_cpu", False
+        ):
+            self.weight.data, self.weight.quant_state = _convert_weight_packed_for_cpu_inverse(
+                self.weight.data, self.weight.quant_state
+            )
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        if getattr(self.weight, "quant_state", None) is not None:
+            for k, v in self.weight.quant_state.as_dict(packed=True).items():
+                destination[prefix + "weight." + k] = v if keep_vars else v.detach()
+
+    def _setup_4bit(self, compress_statistics, quant_type, quant_storage):
+        self.compute_dtype = None
+        self.compute_type_is_set = False
+        self.quant_state = None
+        self.quant_storage = quant_storage
+        self.support_avx512bf16_for_cpu = has_avx512bf16()
+
+        # Remember the original weight shape so we can restore it after dequantization.
+        # kernel_size is always a tuple from nn.Conv*d; include it explicitly for clarity.
+        self._weight_shape = (
+            self.out_channels,
+            self.in_channels // self.groups,
+            *self.kernel_size,
+        )
+
+        # Flatten kernel dimensions into a 2-D matrix for the block-wise quantiser.
+        weight_flat = self.weight.data.reshape(self.out_channels, -1)
+        self.weight = Params4bit(
+            weight_flat,
+            requires_grad=False,
+            compress_statistics=compress_statistics,
+            quant_type=quant_type,
+            quant_storage=quant_storage,
+            module=self,
+        )
+
+    def set_compute_type(self, x):
+        if x.dtype in [torch.float32, torch.bfloat16]:
+            self.compute_dtype = x.dtype
+        elif x.dtype == torch.float16:
+            if self.compute_dtype in [None, torch.float32]:
+                logger.warning(
+                    f"Input type into {self.__class__.__name__} is torch.float16, but "
+                    "bnb_4bit_compute_dtype=torch.float32 (default). "
+                    "This will lead to slow inference or training speed.",
+                )
+
+    def _get_dequantized_weight(self):
+        """Dequantize the packed 4-bit weights back to the original kernel shape."""
+        fix_4bit_weight_quant_state_from_module(self)
+        quant_state = self.weight.quant_state
+
+        if (
+            not getattr(quant_state, "packing_format_for_cpu", False)
+            and self.weight.device.type == "cpu"
+            and self.support_avx512bf16_for_cpu
+            and not self.training
+        ):
+            self.weight.data, quant_state = _convert_weight_packed_for_cpu(
+                self.weight.data, quant_state
+            )
+
+        dequantized_weight = bnb.functional.dequantize_4bit(self.weight.data, quant_state)
+        return dequantized_weight.reshape(self._weight_shape)
+
+    def _forward_impl(self, x: torch.Tensor, conv_fn):
+        """Shared forward logic for all Conv*d4bit subclasses."""
+        if not self.compute_type_is_set:
+            self.set_compute_type(x)
+            self.compute_type_is_set = True
+
+        inp_dtype = x.dtype
+        if self.compute_dtype is not None:
+            x = x.to(self.compute_dtype)
+
+        if self.bias is not None and self.bias.dtype != x.dtype:
+            self.bias.data = self.bias.data.to(x.dtype)
+
+        w = self._get_dequantized_weight().to(x.dtype)
+        bias = None if self.bias is None else self.bias.to(x.dtype)
+
+        out = conv_fn(x, w, bias, self.stride, self.padding, self.dilation, self.groups)
+        return out.to(inp_dtype)
+
+
+class Conv1d4bit(Conv4bit, nn.Conv1d):
+    """4-bit quantized 1-D convolution.
+
+    Drop-in replacement for :class:`torch.nn.Conv1d`.  Weights are quantized to
+    4 bits on ``.to(device)`` and dequantized during each forward pass.
+
+    Example::
+
+        import bitsandbytes as bnb
+
+        fp_conv = torch.nn.Conv1d(64, 128, 3, padding=1)
+        q_conv  = bnb.nn.Conv1d4bit(64, 128, 3, padding=1)
+        q_conv.load_state_dict(fp_conv.state_dict(), strict=False)
+        q_conv = q_conv.to("cuda")  # quantization happens here
+    """
+
+    _conv_dims = 1
+
+    def __init__(
+        self, in_channels, out_channels, kernel_size, stride=1, padding=0,
+        dilation=1, groups=1, bias=True, padding_mode="zeros",
+        compute_dtype=None, compress_statistics=True, quant_type="fp4",
+        quant_storage=torch.uint8, device=None, dtype=None,
+    ):
+        nn.Conv1d.__init__(
+            self, in_channels, out_channels, kernel_size,
+            stride, padding, dilation, groups, bias, padding_mode, device, dtype,
+        )
+        self._setup_4bit(compress_statistics, quant_type, quant_storage)
+        if compute_dtype is not None:
+            self.compute_dtype = compute_dtype
+            self.compute_type_is_set = True
+
+    def forward(self, x: torch.Tensor):
+        return self._forward_impl(x, F.conv1d)
+
+
+class Conv2d4bit(Conv4bit, nn.Conv2d):
+    """4-bit quantized 2-D convolution.
+
+    Drop-in replacement for :class:`torch.nn.Conv2d`.  Weights are quantized to
+    4 bits on ``.to(device)`` and dequantized during each forward pass.
+
+    Example::
+
+        import bitsandbytes as bnb
+
+        fp_conv = torch.nn.Conv2d(3, 64, 3, padding=1)
+        q_conv  = bnb.nn.Conv2d4bit(3, 64, 3, padding=1, quant_type="nf4")
+        q_conv.load_state_dict(fp_conv.state_dict(), strict=False)
+        q_conv = q_conv.to("cuda")  # quantization happens here
+    """
+
+    _conv_dims = 2
+
+    def __init__(
+        self, in_channels, out_channels, kernel_size, stride=1, padding=0,
+        dilation=1, groups=1, bias=True, padding_mode="zeros",
+        compute_dtype=None, compress_statistics=True, quant_type="fp4",
+        quant_storage=torch.uint8, device=None, dtype=None,
+    ):
+        nn.Conv2d.__init__(
+            self, in_channels, out_channels, kernel_size,
+            stride, padding, dilation, groups, bias, padding_mode, device, dtype,
+        )
+        self._setup_4bit(compress_statistics, quant_type, quant_storage)
+        if compute_dtype is not None:
+            self.compute_dtype = compute_dtype
+            self.compute_type_is_set = True
+
+    def forward(self, x: torch.Tensor):
+        return self._forward_impl(x, F.conv2d)
+
+
+class Conv3d4bit(Conv4bit, nn.Conv3d):
+    """4-bit quantized 3-D convolution.
+
+    Drop-in replacement for :class:`torch.nn.Conv3d`.  Weights are quantized to
+    4 bits on ``.to(device)`` and dequantized during each forward pass.
+
+    Example::
+
+        import bitsandbytes as bnb
+
+        q_conv = bnb.nn.Conv3d4bit(3, 64, 3, padding=1, quant_type="nf4")
+        q_conv = q_conv.to("cuda")  # quantization happens here
+    """
+
+    _conv_dims = 3
+
+    def __init__(
+        self, in_channels, out_channels, kernel_size, stride=1, padding=0,
+        dilation=1, groups=1, bias=True, padding_mode="zeros",
+        compute_dtype=None, compress_statistics=True, quant_type="fp4",
+        quant_storage=torch.uint8, device=None, dtype=None,
+    ):
+        nn.Conv3d.__init__(
+            self, in_channels, out_channels, kernel_size,
+            stride, padding, dilation, groups, bias, padding_mode, device, dtype,
+        )
+        self._setup_4bit(compress_statistics, quant_type, quant_storage)
+        if compute_dtype is not None:
+            self.compute_dtype = compute_dtype
+            self.compute_type_is_set = True
+
+    def forward(self, x: torch.Tensor):
+        return self._forward_impl(x, F.conv3d)
+
+
+class Conv1dFP4(Conv1d4bit):
+    """``Conv1d4bit`` pre-configured with ``quant_type='fp4'``."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs["quant_type"] = "fp4"
+        super().__init__(*args, **kwargs)
+
+
+class Conv1dNF4(Conv1d4bit):
+    """``Conv1d4bit`` pre-configured with ``quant_type='nf4'``."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs["quant_type"] = "nf4"
+        super().__init__(*args, **kwargs)
+
+
+class Conv2dFP4(Conv2d4bit):
+    """``Conv2d4bit`` pre-configured with ``quant_type='fp4'``."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs["quant_type"] = "fp4"
+        super().__init__(*args, **kwargs)
+
+
+class Conv2dNF4(Conv2d4bit):
+    """``Conv2d4bit`` pre-configured with ``quant_type='nf4'``."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs["quant_type"] = "nf4"
+        super().__init__(*args, **kwargs)
+
+
+class Conv3dFP4(Conv3d4bit):
+    """``Conv3d4bit`` pre-configured with ``quant_type='fp4'``."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs["quant_type"] = "fp4"
+        super().__init__(*args, **kwargs)
+
+
+class Conv3dNF4(Conv3d4bit):
+    """``Conv3d4bit`` pre-configured with ``quant_type='nf4'``."""
+
+    def __init__(self, *args, **kwargs):
+        kwargs["quant_type"] = "nf4"
+        super().__init__(*args, **kwargs)
+
+
+class Conv8bitLt(nn.Module):
+    """Base class for 8-bit quantized convolutional layers.
+
+    Weights are stored as ``Int8Params`` (row-wise absmax-quantized int8).
+    During the forward pass the weights are dequantized and the standard
+    PyTorch ``F.conv*d`` functional API is used for computation.
+
+    This is an abstract base class — use :class:`Conv1d8bitLt`,
+    :class:`Conv2d8bitLt`, or :class:`Conv3d8bitLt` instead.
+    """
+
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError("Conv8bitLt is an abstract base class. Use Conv1d8bitLt, Conv2d8bitLt, or Conv3d8bitLt.")
+
+    def _setup_8bit(self, has_fp16_weights):
+        self.state = bnb.MatmulLtState()
+        self.state.has_fp16_weights = has_fp16_weights
+
+        # Remember original kernel shape for reshape after dequantization.
+        self._weight_shape = (
+            self.out_channels,
+            self.in_channels // self.groups,
+            *self.kernel_size,
+        )
+
+        self.weight = Int8Params(
+            self.weight.data.reshape(self.out_channels, -1),
+            has_fp16_weights=has_fp16_weights,
+            requires_grad=has_fp16_weights,
+        )
+        self._register_load_state_dict_pre_hook(maybe_rearrange_weight)
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        scb_name = "SCB"
+        param_from_weight = getattr(self.weight, scb_name)
+        param_from_state = getattr(self.state, scb_name)
+        key_name = prefix + f"{scb_name}"
+        format_name = prefix + "weight_format"
+
+        if not self.state.has_fp16_weights:
+            if param_from_weight is not None:
+                destination[key_name] = param_from_weight if keep_vars else param_from_weight.detach()
+                destination[format_name] = torch.tensor(0, dtype=torch.uint8)
+            elif param_from_state is not None:
+                destination[key_name] = param_from_state if keep_vars else param_from_state.detach()
+                destination[format_name] = torch.tensor(0, dtype=torch.uint8)
+
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict,
+        missing_keys, unexpected_keys, error_msgs,
+    ):
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict,
+            missing_keys, unexpected_keys, error_msgs,
+        )
+        unexpected_copy = list(unexpected_keys)
+        for key in unexpected_copy:
+            input_name = key[len(prefix):]
+            if input_name == "SCB":
+                if self.weight.SCB is None:
+                    raise RuntimeError(
+                        "Loading a quantized checkpoint into non-quantized Conv8bitLt is "
+                        "not supported. Please call module.cuda() before module.load_state_dict()",
+                    )
+                input_param = state_dict[key]
+                self.weight.SCB.copy_(input_param)
+                if self.state.SCB is not None:
+                    self.state.SCB = self.weight.SCB
+                unexpected_keys.remove(key)
+
+    def init_8bit_state(self):
+        self.state.CB = self.weight.CB
+        self.state.SCB = self.weight.SCB
+        self.weight.CB = None
+        self.weight.SCB = None
+
+    def to(self, *args, **kwargs):
+        result = super().to(*args, **kwargs)
+        device, _, _, _ = torch._C._nn._parse_to(*args, **kwargs)
+        if device is not None:
+            if result.state.CB is not None:
+                result.state.CB = result.state.CB.to(device)
+            if result.state.SCB is not None:
+                result.state.SCB = result.state.SCB.to(device)
+        return result
+
+    def _get_dequantized_weight(self, x_dtype):
+        """Dequantize Int8 weights back to the original kernel shape."""
+        if self.state.has_fp16_weights:
+            return self.weight.data.reshape(self._weight_shape).to(x_dtype)
+
+        if self.weight.CB is not None:
+            self.init_8bit_state()
+
+        if self.state.CB is None:
+            w = self.weight.data
+        else:
+            # row-wise dequantization: w_fp = CB_int8 * (SCB / 127)
+            w = self.state.CB.to(x_dtype) * (self.state.SCB.to(x_dtype) / 127.0).unsqueeze(1)
+
+        return w.reshape(self._weight_shape)
+
+    def _forward_impl(self, x: torch.Tensor, conv_fn):
+        """Shared forward logic for all Conv*d8bitLt subclasses."""
+        self.state.is_training = self.training
+
+        if self.bias is not None and self.bias.dtype != x.dtype:
+            self.bias.data = self.bias.data.to(x.dtype)
+
+        w = self._get_dequantized_weight(x.dtype)
+        bias = None if self.bias is None else self.bias.to(x.dtype)
+
+        out = conv_fn(x, w, bias, self.stride, self.padding, self.dilation, self.groups)
+
+        if not self.state.has_fp16_weights and self.state.CB is not None:
+            self.weight.data = self.state.CB
+
+        return out
+
+
+class Conv1d8bitLt(Conv8bitLt, nn.Conv1d):
+    """8-bit quantized 1-D convolution (LLM.int8()-style).
+
+    Drop-in replacement for :class:`torch.nn.Conv1d`.
+
+    Example::
+
+        import bitsandbytes as bnb
+
+        q_conv = bnb.nn.Conv1d8bitLt(64, 128, 3, padding=1, has_fp16_weights=False)
+        q_conv = q_conv.to("cuda")  # quantization happens here
+    """
+
+    _conv_dims = 1
+
+    def __init__(
+        self, in_channels, out_channels, kernel_size, stride=1, padding=0,
+        dilation=1, groups=1, bias=True, padding_mode="zeros",
+        has_fp16_weights=True, device=None, dtype=None,
+    ):
+        nn.Conv1d.__init__(
+            self, in_channels, out_channels, kernel_size,
+            stride, padding, dilation, groups, bias, padding_mode, device, dtype,
+        )
+        self._setup_8bit(has_fp16_weights)
+
+    def forward(self, x: torch.Tensor):
+        return self._forward_impl(x, F.conv1d)
+
+
+class Conv2d8bitLt(Conv8bitLt, nn.Conv2d):
+    """8-bit quantized 2-D convolution (LLM.int8()-style).
+
+    Drop-in replacement for :class:`torch.nn.Conv2d`.
+
+    Example::
+
+        import bitsandbytes as bnb
+
+        q_conv = bnb.nn.Conv2d8bitLt(3, 64, 3, padding=1, has_fp16_weights=False)
+        q_conv = q_conv.to("cuda")  # quantization happens here
+    """
+
+    _conv_dims = 2
+
+    def __init__(
+        self, in_channels, out_channels, kernel_size, stride=1, padding=0,
+        dilation=1, groups=1, bias=True, padding_mode="zeros",
+        has_fp16_weights=True, device=None, dtype=None,
+    ):
+        nn.Conv2d.__init__(
+            self, in_channels, out_channels, kernel_size,
+            stride, padding, dilation, groups, bias, padding_mode, device, dtype,
+        )
+        self._setup_8bit(has_fp16_weights)
+
+    def forward(self, x: torch.Tensor):
+        return self._forward_impl(x, F.conv2d)
+
+
+class Conv3d8bitLt(Conv8bitLt, nn.Conv3d):
+    """8-bit quantized 3-D convolution (LLM.int8()-style).
+
+    Drop-in replacement for :class:`torch.nn.Conv3d`.
+
+    Example::
+
+        import bitsandbytes as bnb
+
+        q_conv = bnb.nn.Conv3d8bitLt(3, 64, 3, padding=1, has_fp16_weights=False)
+        q_conv = q_conv.to("cuda")  # quantization happens here
+    """
+
+    _conv_dims = 3
+
+    def __init__(
+        self, in_channels, out_channels, kernel_size, stride=1, padding=0,
+        dilation=1, groups=1, bias=True, padding_mode="zeros",
+        has_fp16_weights=True, device=None, dtype=None,
+    ):
+        nn.Conv3d.__init__(
+            self, in_channels, out_channels, kernel_size,
+            stride, padding, dilation, groups, bias, padding_mode, device, dtype,
+        )
+        self._setup_8bit(has_fp16_weights)
+
+    def forward(self, x: torch.Tensor):
+        return self._forward_impl(x, F.conv3d)
+
