@@ -61,6 +61,7 @@ def test_get_rocm_bnb_library_path(monkeypatch, rocm70_spec):
 def test_get_rocm_bnb_library_path_override(monkeypatch, rocm70_spec, caplog):
     """BNB_ROCM_VERSION=72 overrides to load the ROCm 7.2 library instead of 7.0."""
     monkeypatch.setenv("BNB_ROCM_VERSION", "72")
+    assert get_cuda_bnb_library_path(rocm70_spec).stem == "libbitsandbytes_rocm72"
     assert "BNB_ROCM_VERSION" in caplog.text
 
 
