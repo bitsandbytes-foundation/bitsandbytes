@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -204,61 +205,159 @@ void dequantizeBlockwise8bitCpu(
     }
 }
 
-void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
+// Prevent GCC/Clang from emitting EVEX-encoded AVX512 instructions in plain scalar code.
+// The global -mavx512vl flag can cause GCC to fold broadcasts into EVEX encoding (e.g. vmulps {1to4})
+// which would SIGILL on non-AVX512 CPUs like Zen3. These functions are scalar C++ and don't need AVX512.
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+#pragma GCC push_options
+#pragma GCC target("no-avx512f")
+#endif
 
+// Precomputed direct lookup table: maps quantized uint16 index [0..65535] to codebook index.
+// Replaces binary search per element with a single array access.
+static constexpr int kLUTSize = 65536;
+static constexpr int kLUTCacheSlots = 4;
+
+static void build_quantize_lut(const float* codebook, unsigned char* lut) {
+    // codebook has 256 sorted entries in [-1, 1].
+    // We discretize the [-1, 1] range into 65536 bins and find the nearest codebook entry for each.
+    // Precompute midpoints between consecutive codebook entries for nearest-neighbor lookup.
+    float midpoints[kCodebookSize - 1];
+    for (int i = 0; i < kCodebookSize - 1; ++i) {
+        midpoints[i] = 0.5f * (codebook[i] + codebook[i + 1]);
+    }
+
+    int code_idx = 0;
+    for (int i = 0; i < kLUTSize; ++i) {
+        // Map LUT index to normalized value in [-1, 1]
+        float val = -1.0f + (2.0f * i) / (kLUTSize - 1);
+        // Advance code_idx while the next midpoint is still below val
+        while (code_idx < kCodebookSize - 1 && midpoints[code_idx] < val) {
+            ++code_idx;
+        }
+        lut[i] = static_cast<unsigned char>(code_idx);
+    }
+}
+
+// Per-thread LUT cache with multiple slots to avoid rebuilding when alternating codebooks
+struct LUTCache {
+    unsigned char luts[kLUTCacheSlots][kLUTSize];
+    const float* cached_codes[kLUTCacheSlots] = {};
+    // Store fingerprint to detect pointer reuse (ABA problem):
+    // when a tensor is freed and a new one reuses the same address,
+    // the pointer matches but the codebook content may differ.
+    float cached_fingerprints[kLUTCacheSlots][4] = {};
+    int next_slot = 0;
+
+    static void compute_fingerprint(const float* code, float* fp) {
+        fp[0] = code[0];
+        fp[1] = code[1];
+        fp[2] = code[127];
+        fp[3] = code[255];
+    }
+
+    const unsigned char* get_lut(const float* code) {
+        float fp[4];
+        compute_fingerprint(code, fp);
+        for (int i = 0; i < kLUTCacheSlots; ++i) {
+            if (cached_codes[i] == code && cached_fingerprints[i][0] == fp[0] && cached_fingerprints[i][1] == fp[1] &&
+                cached_fingerprints[i][2] == fp[2] && cached_fingerprints[i][3] == fp[3]) {
+                return luts[i];
+            }
+        }
+        // Cache miss: build and store in next slot (round-robin)
+        int slot = next_slot;
+        next_slot = (next_slot + 1) % kLUTCacheSlots;
+        build_quantize_lut(code, luts[slot]);
+        cached_codes[slot] = code;
+        for (int j = 0; j < 4; ++j)
+            cached_fingerprints[slot][j] = fp[j];
+        return luts[slot];
+    }
+};
+
+// Single global LUT cache (protected by mutex for thread safety during build)
+static LUTCache g_lut_cache;
+static std::mutex g_lut_mutex;
+
+static const unsigned char* get_global_lut(const float* code) {
+    std::lock_guard<std::mutex> lock(g_lut_mutex);
+    return g_lut_cache.get_lut(code);
+}
+
+// Convert a normalized value in [-1, 1] to LUT index [0, 65535]
+static inline uint16_t norm_to_lut_index(float val) {
+    val = std::clamp(val, -1.0f, 1.0f);
+    return static_cast<uint16_t>((val + 1.0f) * 0.5f * (kLUTSize - 1) + 0.5f);
+}
+
+template <typename T>
+void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
     if (blocksize <= 0 || n <= 0)
         return;
 
-    // Ensure we cover the full expected dynamic range of the codebook.
-    code[0] = -1.0f;
+    // Get LUT from global cache (built once per codebook, shared by all OMP threads)
+    const unsigned char* lut = get_global_lut(code);
 
-    const auto process_block = [&](long long block_start, long long block_end) {
+    const long long num_blocks = (n + blocksize - 1) / blocksize;
+
+    BNB_OMP_PARALLEL_FOR
+    for (long long b = 0; b < num_blocks; ++b) {
+        const long long block_start = b * blocksize;
+        const long long block_end = std::min(block_start + blocksize, n);
+
+        // Compute absmax for this block
         float absmax_block = 0.0f;
         for (long long i = block_start; i < block_end; ++i) {
-            absmax_block = std::max(absmax_block, std::fabs(A[i]));
+            float val;
+            if constexpr (std::is_same<T, float>::value) {
+                val = A[i];
+            } else if constexpr (std::is_same<T, bf16_t>::value) {
+                val = bf16_to_float(A[i].v);
+            } else if constexpr (std::is_same<T, fp16_t>::value) {
+                val = fp16_to_float(A[i].v);
+            }
+            absmax_block = std::max(absmax_block, std::fabs(val));
         }
 
-        long long absmax_idx = block_start / blocksize;
-        absmax[absmax_idx] = absmax_block;
+        absmax[b] = absmax_block;
 
         if (absmax_block == 0.0f) {
             std::fill(out + block_start, out + block_end, 0);
-            return;
+            continue;
         }
 
         const float inv_absmax = 1.0f / absmax_block;
         for (long long i = block_start; i < block_end; ++i) {
-            float normed_value = A[i] * inv_absmax;
-            out[i] = lookup_code_index(code, normed_value);
-        }
-    };
-
-    const long long num_blocks = (n + blocksize - 1) / blocksize;
-    const int thread_wave_size = 256;
-
-    // We chunk the threads into waves of 256 since the max limit is between 16k and 64k on Linux
-    // (we reach this when running BLOOM-176B with a large batch size).
-    for (long long offset = 0; offset < num_blocks; offset += thread_wave_size) {
-        const long long wave_blocks = std::min<long long>(thread_wave_size, num_blocks - offset);
-        std::vector<std::thread> threads;
-        threads.reserve(wave_blocks);
-
-        const long long first_block_start = offset * blocksize;
-        for (long long b = 0; b < wave_blocks; ++b) {
-            const long long block_start = first_block_start + b * blocksize;
-            if (block_start >= n)
-                break;
-            const long long block_end = std::min(block_start + blocksize, n);
-            threads.emplace_back(process_block, block_start, block_end);
-        }
-
-        for (auto& thread : threads) {
-            if (thread.joinable()) {
-                thread.join();
+            float val;
+            if constexpr (std::is_same<T, float>::value) {
+                val = A[i];
+            } else if constexpr (std::is_same<T, bf16_t>::value) {
+                val = bf16_to_float(A[i].v);
+            } else if constexpr (std::is_same<T, fp16_t>::value) {
+                val = fp16_to_float(A[i].v);
             }
+            float normed_value = val * inv_absmax;
+            out[i] = lut[norm_to_lut_index(normed_value)];
         }
     }
 }
+
+void quantize_cpu(float* code, float* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
+    quantize_cpu_impl<float>(code, A, absmax, out, blocksize, n);
+}
+
+void quantize_cpu_bf16(float* code, bf16_t* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
+    quantize_cpu_impl<bf16_t>(code, A, absmax, out, blocksize, n);
+}
+
+void quantize_cpu_fp16(float* code, fp16_t* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
+    quantize_cpu_impl<fp16_t>(code, A, absmax, out, blocksize, n);
+}
+
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+#pragma GCC pop_options
+#endif
 
 #if defined(__AVX512F__) && defined(__AVX512BF16__)
 
