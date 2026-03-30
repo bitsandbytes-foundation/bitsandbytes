@@ -270,7 +270,8 @@ struct LUTCache {
         next_slot = (next_slot + 1) % kLUTCacheSlots;
         build_quantize_lut(code, luts[slot]);
         cached_codes[slot] = code;
-        std::memcpy(cached_fingerprints[slot], fp, sizeof(fp));
+        for (int j = 0; j < 4; ++j)
+            cached_fingerprints[slot][j] = fp[j];
         return luts[slot];
     }
 };
