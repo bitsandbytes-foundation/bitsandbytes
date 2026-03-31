@@ -8,23 +8,29 @@ Benchmarks:
 Measures:
   - Peak memory usage (GPU only, CPU uses system RAM)
   - Optimizer state memory (GPU vs CPU breakdown)
-  - Per-step training time
+  - Per-step training time (with warmup + device synchronization)
   - Total training time
 
 Usage:
     # Auto-detect device (prefers xpu > cuda > cpu)
     python benchmarking/optimizer_benchmark_comprehensive.py
 
-    # Specify device
+    # CUDA
     python benchmarking/optimizer_benchmark_comprehensive.py --device cuda
+
+    # XPU
     python benchmarking/optimizer_benchmark_comprehensive.py --device xpu
-    python benchmarking/optimizer_benchmark_comprehensive.py --device cpu
 
-    # Custom model size
-    python benchmarking/optimizer_benchmark_comprehensive.py --device cuda --hidden_size 2048 --num_layers 16
+    # CPU (bind to NUMA node 0 for stable benchmarks)
+    numactl --cpunodebind=0 --membind=0 python benchmarking/optimizer_benchmark_comprehensive.py --device cpu
 
-    # Use fp32 (default is bf16 for GPU, fp32 for CPU)
+    # Custom model (default: Qwen/Qwen2.5-1.5B-Instruct)
+    python benchmarking/optimizer_benchmark_comprehensive.py --device cuda --model meta-llama/Llama-3.2-1B
+
+    # Use fp32 (default is bf16)
     python benchmarking/optimizer_benchmark_comprehensive.py --device cuda --dtype fp32
+
+Requires: pip install transformers
 """
 
 import argparse
@@ -32,24 +38,23 @@ import gc
 import time
 
 import torch
+from transformers import AutoConfig, AutoModelForCausalLM
 
 import bitsandbytes as bnb
+
+DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 
 
 def get_args():
     parser = argparse.ArgumentParser(description="Comprehensive Optimizer Benchmark")
-    parser.add_argument("--device", type=str, default=None, help="Device: cuda, xpu, or cpu (auto-detect if omitted)")
-    parser.add_argument("--hidden_size", type=int, default=1024)
-    parser.add_argument("--num_layers", type=int, default=12)
-    parser.add_argument("--intermediate_size", type=int, default=2752)
-    parser.add_argument("--num_heads", type=int, default=16)
-    parser.add_argument("--vocab_size", type=int, default=32000)
+    parser.add_argument("--device", type=str, default="cuda", help="Device: cuda, xpu, or cpu (default: cuda)")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL, help=f"HuggingFace model name (default: {DEFAULT_MODEL})")
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--warmup_steps", type=int, default=3)
     parser.add_argument("--train_steps", type=int, default=10)
-    parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"],
-                        help="Training dtype (default: bf16 for GPU, fp32 for CPU)")
+    parser.add_argument("--dtype", type=str, default="bf16", choices=["bf16", "fp16", "fp32"],
+                        help="Training dtype (default: bf16)")
     return parser.parse_args()
 
 
@@ -86,23 +91,12 @@ def fmt_sec(t):
 
 
 def create_model(args):
-    """Create a simple transformer-like model without external dependencies."""
-    layers = []
-    # Embedding
-    layers.append(torch.nn.Embedding(args.vocab_size, args.hidden_size))
-    # Transformer-like blocks (simplified as linear layers to avoid dependency on transformers)
-    for _ in range(args.num_layers):
-        layers.append(torch.nn.Linear(args.hidden_size, args.intermediate_size))
-        layers.append(torch.nn.GELU())
-        layers.append(torch.nn.Linear(args.intermediate_size, args.hidden_size))
-    # Output head
-    layers.append(torch.nn.Linear(args.hidden_size, args.vocab_size))
-
-    model = torch.nn.Sequential(*layers)
-
+    """Create a causal LM from HuggingFace config (random weights, no download of weights)."""
+    config = AutoConfig.from_pretrained(args.model)
     dtype = get_torch_dtype(args.dtype)
-    model = model.to(dtype=dtype, device=args.device)
-    return model
+    model = AutoModelForCausalLM.from_config(config, dtype=dtype)
+    model = model.to(device=args.device)
+    return model, config.vocab_size
 
 
 def cleanup(device_type):
@@ -137,33 +131,25 @@ def run_benchmark_gpu(args, name, OptimizerClass):
 
     mem_before = acc.memory_allocated()
 
-    model = create_model(args)
+    model, vocab_size = create_model(args)
     acc.synchronize()
     mem_after_model = acc.memory_allocated()
 
     optimizer = OptimizerClass(model.parameters(), lr=2e-4)
-    dtype = get_torch_dtype(args.dtype)
     model.train()
 
     step_times = []
     total_steps = args.warmup_steps + args.train_steps
 
     for step in range(total_steps):
-        # Generate random data
-        input_ids = torch.randint(0, args.vocab_size, (args.batch_size, args.seq_len), device=args.device)
-        targets = torch.randint(0, args.vocab_size, (args.batch_size, args.seq_len), device=args.device)
+        input_ids = torch.randint(0, vocab_size, (args.batch_size, args.seq_len), device=args.device)
+        labels = input_ids.clone()
 
         acc.synchronize()
         t0 = time.perf_counter()
 
-        # Forward
-        embeds = model[0](input_ids)  # Embedding
-        x = embeds.mean(dim=1)  # Pool over seq_len -> (batch, hidden)
-        for layer in model[1:]:
-            x = layer(x)
-        loss = torch.nn.functional.cross_entropy(x, targets[:, 0])
-
-        # Backward
+        outputs = model(input_ids=input_ids, labels=labels)
+        loss = outputs.loss
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -201,11 +187,8 @@ def run_benchmark_cpu(args, name, OptimizerClass, is_pytorch=False):
 
     cleanup("cpu")
 
-    model = create_model(args)
-    if is_pytorch:
-        optimizer = OptimizerClass(model.parameters(), lr=2e-4)
-    else:
-        optimizer = OptimizerClass(model.parameters(), lr=2e-4)
+    model, vocab_size = create_model(args)
+    optimizer = OptimizerClass(model.parameters(), lr=2e-4)
 
     model.train()
 
@@ -213,21 +196,20 @@ def run_benchmark_cpu(args, name, OptimizerClass, is_pytorch=False):
     total_steps = args.warmup_steps + args.train_steps
 
     for step in range(total_steps):
-        input_ids = torch.randint(0, args.vocab_size, (args.batch_size, args.seq_len))
-        targets = torch.randint(0, args.vocab_size, (args.batch_size, args.seq_len))
+        input_ids = torch.randint(0, vocab_size, (args.batch_size, args.seq_len))
+        labels = input_ids.clone()
 
+        # Ensure all async ops are done before timing
+        torch.cpu.synchronize()
         t0 = time.perf_counter()
 
-        embeds = model[0](input_ids)
-        x = embeds.mean(dim=1)
-        for layer in model[1:]:
-            x = layer(x)
-        loss = torch.nn.functional.cross_entropy(x, targets[:, 0])
-
+        outputs = model(input_ids=input_ids, labels=labels)
+        loss = outputs.loss
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
 
+        torch.cpu.synchronize()
         t1 = time.perf_counter()
         if step >= args.warmup_steps:
             step_times.append(t1 - t0)
@@ -264,7 +246,7 @@ def print_gpu_results(results, args):
     names = [r["name"] for r in results]
 
     print("\n" + "=" * 100)
-    print("  RESULTS")
+    print(f"  RESULTS ({args.device.upper()})")
     print("=" * 100)
 
     # Header
@@ -279,15 +261,6 @@ def print_gpu_results(results, args):
         ("Optimizer State on CPU", "cpu_state"),
     ]:
         print(f"  {label:35s}" + "".join(f"  {fmt_mb(r[key]):>{col_w}s}" for r in results))
-
-    print(f"  {'-' * 35}" + "".join(f"  {'-' * col_w}" for _ in results))
-
-    # Time rows
-    for label, key in [
-        ("Avg Step Time", "avg_step_time"),
-        (f"Total Time ({args.train_steps} steps)", "total_time"),
-    ]:
-        print(f"  {label:35s}" + "".join(f"  {fmt_sec(r[key]):>{col_w}s}" for r in results))
 
     print(f"  {'-' * 35}" + "".join(f"  {'-' * col_w}" for _ in results))
 
@@ -341,8 +314,6 @@ def print_cpu_results(results, args):
     print(f"  {'-' * 30}" + "".join(f"  {'-' * col_w}" for _ in results))
 
     print(f"  {'Optimizer State Size':30s}" + "".join(f"  {fmt_mb(r['state_bytes']):>{col_w}s}" for r in results))
-    print(f"  {'Avg Step Time':30s}" + "".join(f"  {fmt_sec(r['avg_step_time']):>{col_w}s}" for r in results))
-    print(f"  {f'Total Time ({args.train_steps} steps)':30s}" + "".join(f"  {fmt_sec(r['total_time']):>{col_w}s}" for r in results))
 
     print(f"  {'-' * 30}" + "".join(f"  {'-' * col_w}" for _ in results))
 
@@ -385,11 +356,6 @@ def print_cpu_results(results, args):
 def main():
     args = get_args()
 
-    if args.device is None:
-        args.device = detect_device()
-    if args.dtype is None:
-        args.dtype = "fp32" if args.device == "cpu" else "bf16"
-
     is_gpu = args.device in ("cuda", "xpu")
 
     # Validate device
@@ -399,7 +365,7 @@ def main():
         assert torch.cuda.is_available(), "CUDA not available!"
 
     # Print configuration
-    model_tmp = create_model(args)
+    model_tmp, vocab_size = create_model(args)
     n_params = count_params(model_tmp)
     elem_size = 2 if args.dtype != "fp32" else 4
     del model_tmp
@@ -410,7 +376,7 @@ def main():
     print("=" * 100)
     print(f"  Device:         {args.device}")
     print(f"  Dtype:          {args.dtype}")
-    print(f"  Model:          Sequential (hidden={args.hidden_size}, layers={args.num_layers})")
+    print(f"  Model:          {args.model}")
     print(f"  Parameters:     {n_params:,} ({fmt_mb(n_params * elem_size)} in {args.dtype})")
     print(f"  Batch:          {args.batch_size} x {args.seq_len}")
     print(f"  Warmup steps:   {args.warmup_steps}")
