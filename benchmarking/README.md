@@ -157,3 +157,43 @@ For all hardware configurations, we used the following dependencies:
 * `bitsandbytes==0.45.0.dev`
 
 In the RTX 4090 setting, the CUDA 12.4 build of PyTorch is used. In the other settings we used the CUDA 12.1 build.
+
+## 8-bit Optimizers
+
+8-bit optimizers use block-wise quantization to maintain 32-bit optimizer performance at a fraction of the memory cost. Paged optimizers additionally offload optimizer states to CPU memory, further reducing GPU memory usage.
+
+Benchmark script: [optimizer_benchmark_comprehensive.py](optimizer_benchmark_comprehensive.py)
+
+**Model:** [Qwen/Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) (full-parameter fine-tuning, fp32)
+
+### NVIDIA A100 80GB
+
+| Metric | PyTorch AdamW | AdamW8bit | PagedAdamW | PagedAdamW8bit |
+|---|---|---|---|---|
+| Peak GPU Memory | 11609.8 MB | 7135.6 MB | 5975.0 MB | 5983.6 MB |
+| Model Memory | 2274.3 MB | 2275.1 MB | 2275.1 MB | 2275.1 MB |
+| Optimizer State on GPU | 4547.5 MB | 1155.4 MB | 0.5 MB | 18.6 MB |
+| Optimizer State on CPU | 0.0 MB | 0.0 MB | 4547.0 MB | 1136.8 MB |
+| **GPU Mem Saved vs baseline** | — | **4474.1 MB (38.5%)** | **5634.7 MB (48.5%)** | **5626.1 MB (48.5%)** |
+| Speed vs baseline | 1.00x | 0.95x | 1.00x | 0.88x |
+
+### Intel Data Center GPU Max 1550
+
+| Metric | PyTorch AdamW | AdamW8bit | PagedAdamW | PagedAdamW8bit |
+|---|---|---|---|---|
+| Peak GPU Memory | 11592.7 MB | 7121.3 MB | 5957.9 MB | 5972.5 MB |
+| Model Memory | 2274.3 MB | 2274.3 MB | 2274.3 MB | 2274.3 MB |
+| Optimizer State on GPU | 4547.5 MB | 1155.4 MB | 0.5 MB | 18.6 MB |
+| Optimizer State on CPU | 0.0 MB | 0.0 MB | 4547.0 MB | 1136.8 MB |
+| **GPU Mem Saved vs baseline** | — | **4471.5 MB (38.6%)** | **5634.8 MB (48.6%)** | **5620.2 MB (48.5%)** |
+| Speed vs baseline | 1.00x | 0.99x | 0.68x | 0.35x |
+
+### Intel Xeon 6 (single NUMA node)
+
+| Metric | PyTorch AdamW | AdamW8bit |
+|---|---|---|
+| Model Memory | 2273.8 MB | 2273.8 MB |
+| Optimizer State Size | 4547.5 MB | 1155.4 MB |
+| Total (Model + State) | 6821.3 MB | 3429.1 MB |
+| **Memory Saved vs baseline** | — | **3392.1 MB (49.7%)** |
+| Speed vs baseline | 1.00x | 0.75x |
