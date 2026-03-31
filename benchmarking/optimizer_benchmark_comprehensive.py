@@ -2,8 +2,8 @@
 Comprehensive Optimizer Benchmark: 8-bit vs 32-bit vs Paged
 
 Benchmarks:
-  - CUDA / XPU: AdamW (32-bit) vs AdamW8bit vs PagedAdamW vs PagedAdamW8bit
-  - CPU:        PyTorch AdamW (32-bit) vs bnb AdamW8bit
+  - CUDA / XPU: PyTorch AdamW vs AdamW8bit vs PagedAdamW vs PagedAdamW8bit
+  - CPU:        PyTorch AdamW vs AdamW8bit
 
 Measures:
   - Peak memory usage (GPU only, CPU uses system RAM)
@@ -27,8 +27,8 @@ Usage:
     # Custom model (default: Qwen/Qwen2.5-1.5B-Instruct)
     python benchmarking/optimizer_benchmark_comprehensive.py --device cuda --model meta-llama/Llama-3.2-1B
 
-    # Use fp32 (default is bf16)
-    python benchmarking/optimizer_benchmark_comprehensive.py --device cuda --dtype fp32
+    # Use bf16
+    python benchmarking/optimizer_benchmark_comprehensive.py --device cuda --dtype bf16
 
 Requires: pip install transformers
 """
@@ -53,8 +53,8 @@ def get_args():
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--warmup_steps", type=int, default=3)
     parser.add_argument("--train_steps", type=int, default=10)
-    parser.add_argument("--dtype", type=str, default="bf16", choices=["bf16", "fp16", "fp32"],
-                        help="Training dtype (default: bf16)")
+    parser.add_argument("--dtype", type=str, default="fp32", choices=["bf16", "fp16", "fp32"],
+                        help="Training dtype (default: fp32)")
     return parser.parse_args()
 
 
@@ -393,9 +393,9 @@ def main():
     print("=" * 100)
 
     if is_gpu:
-        # GPU benchmark: AdamW32bit vs AdamW8bit vs PagedAdamW vs PagedAdamW8bit
+        # GPU benchmark: PyTorch AdamW vs AdamW8bit vs PagedAdamW vs PagedAdamW8bit
         benchmarks = [
-            ("AdamW (32-bit)", bnb.optim.AdamW),
+            ("PyTorch AdamW", torch.optim.AdamW),
             ("AdamW8bit", bnb.optim.AdamW8bit),
             ("PagedAdamW", bnb.optim.PagedAdamW),
             ("PagedAdamW8bit", bnb.optim.PagedAdamW8bit),
@@ -414,10 +414,10 @@ def main():
         print_gpu_results(results, args)
 
     else:
-        # CPU benchmark: PyTorch AdamW vs bnb AdamW8bit
+        # CPU benchmark: PyTorch AdamW vs AdamW8bit
         benchmarks = [
-            ("PyTorch AdamW (32-bit)", torch.optim.AdamW, True),
-            ("bnb AdamW8bit", bnb.optim.AdamW8bit, False),
+            ("PyTorch AdamW", torch.optim.AdamW, True),
+            ("AdamW8bit", bnb.optim.AdamW8bit, False),
         ]
 
         results = []
