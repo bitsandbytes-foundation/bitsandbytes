@@ -214,6 +214,9 @@ def run_benchmark_cpu(args, name, OptimizerClass, is_pytorch=False):
         if step >= args.warmup_steps:
             step_times.append(t1 - t0)
 
+    # Measure model size
+    model_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
+
     # Measure optimizer state size
     state_bytes = 0
     for param in model.parameters():
@@ -233,6 +236,7 @@ def run_benchmark_cpu(args, name, OptimizerClass, is_pytorch=False):
 
     return {
         "name": name,
+        "model_bytes": model_bytes,
         "state_bytes": state_bytes,
         "avg_step_time": avg_step_time,
         "total_time": total_time,
@@ -313,6 +317,7 @@ def print_cpu_results(results, args):
     print(f"  {'Metric':30s}" + "".join(f"  {n:>{col_w}s}" for n in names))
     print(f"  {'-' * 30}" + "".join(f"  {'-' * col_w}" for _ in results))
 
+    print(f"  {'Model Memory':30s}" + "".join(f"  {fmt_mb(r['model_bytes']):>{col_w}s}" for r in results))
     print(f"  {'Optimizer State Size':30s}" + "".join(f"  {fmt_mb(r['state_bytes']):>{col_w}s}" for r in results))
 
     print(f"  {'-' * 30}" + "".join(f"  {'-' * col_w}" for _ in results))
