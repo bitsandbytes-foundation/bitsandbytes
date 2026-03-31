@@ -273,7 +273,7 @@ def print_gpu_results(results, args):
         if saved > 0:
             savings.append(f"{fmt_mb(saved)} ({pct:.1f}%)")
         else:
-            savings.append(f"{fmt_mb(base_peak)} (100%)")
+            savings.append("0 MB (baseline)")
     print(f"  {'GPU Mem Saved vs baseline':35s}" + "".join(f"  {s:>{col_w}s}" for s in savings))
 
     base_time = baseline["avg_step_time"]
