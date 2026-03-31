@@ -186,7 +186,7 @@ Benchmark script: [optimizer_benchmark_comprehensive.py](optimizer_benchmark_com
 | Optimizer State on GPU | 4547.5 MB | 1155.4 MB | 0.5 MB | 18.6 MB |
 | Optimizer State on CPU | 0.0 MB | 0.0 MB | 4547.0 MB | 1136.8 MB |
 | **GPU Mem Saved vs baseline** | — | **4471.5 MB (38.6%)** | **5634.8 MB (48.6%)** | **5620.2 MB (48.5%)** |
-| Speed vs baseline | 1.00x | 0.99x | 0.68x | 0.35x |
+| Speed vs baseline | 1.00x | 0.99x | 0.72x | 0.37x |
 
 ### Intel Xeon 6 (single NUMA node)
 
