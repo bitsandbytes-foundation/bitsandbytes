@@ -319,20 +319,23 @@ def print_cpu_results(results, args):
 
     print(f"  {'Model Memory':30s}" + "".join(f"  {fmt_mb(r['model_bytes']):>{col_w}s}" for r in results))
     print(f"  {'Optimizer State Size':30s}" + "".join(f"  {fmt_mb(r['state_bytes']):>{col_w}s}" for r in results))
+    total_key = lambda r: r['model_bytes'] + r['state_bytes']
+    print(f"  {'Total (Model + State)':30s}" + "".join(f"  {fmt_mb(total_key(r)):>{col_w}s}" for r in results))
 
     print(f"  {'-' * 30}" + "".join(f"  {'-' * col_w}" for _ in results))
 
-    # State size savings
-    base_state = baseline["state_bytes"]
+    # Total memory savings
+    base_total = total_key(baseline)
     savings = []
     for r in results:
-        saved = base_state - r["state_bytes"]
-        pct = (saved / base_state) * 100 if base_state > 0 else 0
+        cur_total = total_key(r)
+        saved = base_total - cur_total
+        pct = (saved / base_total) * 100 if base_total > 0 else 0
         if saved > 0:
             savings.append(f"{fmt_mb(saved)} ({pct:.1f}%)")
         else:
-            savings.append("baseline")
-    print(f"  {'State Size Saved':30s}" + "".join(f"  {s:>{col_w}s}" for s in savings))
+            savings.append("0 MB (baseline)")
+    print(f"  {'Memory Saved vs baseline':30s}" + "".join(f"  {s:>{col_w}s}" for s in savings))
 
     base_time = baseline["avg_step_time"]
     speedups = []
@@ -347,10 +350,11 @@ def print_cpu_results(results, args):
 
     print("\nKey Takeaways:")
     for r in results[1:]:
-        saved = base_state - r["state_bytes"]
+        cur_total = total_key(r)
+        saved = base_total - cur_total
         if saved > 0:
-            pct = (saved / base_state) * 100
-            print(f"  - {r['name']}: saves {fmt_mb(saved)} optimizer state ({pct:.1f}% reduction)")
+            pct = (saved / base_total) * 100
+            print(f"  - {r['name']}: saves {fmt_mb(saved)} total memory ({pct:.1f}% reduction)")
         speedup = base_time / r["avg_step_time"] if r["avg_step_time"] > 0 else 0
         if speedup > 1.05:
             print(f"    {speedup:.2f}x faster per step")
