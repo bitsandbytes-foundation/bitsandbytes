@@ -42,7 +42,7 @@ from transformers import AutoConfig, AutoModelForCausalLM
 
 import bitsandbytes as bnb
 
-DEFAULT_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
 
 
 def get_args():
