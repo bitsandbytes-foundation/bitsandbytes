@@ -1134,7 +1134,7 @@ class Linear8bitLt(nn.Linear):
 
     def forward(self, x: torch.Tensor):
         self.state.is_training = self.training
-        if getattr(self.weight, "CB", None) is not None:
+        if self.weight.CB is not None:
             self.init_8bit_state()
 
         # weights are cast automatically as Int8Params, but the bias has to be cast manually
@@ -1143,7 +1143,7 @@ class Linear8bitLt(nn.Linear):
 
         out = bnb.matmul(x, self.weight, bias=self.bias, state=self.state)
 
-        if not self.state.has_fp16_weights and self.state.CB is not None and hasattr(self.weight, "CB"):
+        if not self.state.has_fp16_weights and self.state.CB is not None:
             self.weight.data = self.state.CB
 
         return out
