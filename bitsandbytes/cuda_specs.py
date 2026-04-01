@@ -9,6 +9,9 @@ from typing import Optional
 
 import torch
 
+ROCM_GPU_ARCH_OVERRIDE_ENV = "BNB_ROCM_GPU_ARCH"
+ROCM_GPU_ARCH_PATTERN = re.compile(r"gfx[a-zA-Z0-9]+$")
+
 
 @dataclasses.dataclass(frozen=True)
 class CUDASpecs:
@@ -80,6 +83,46 @@ def get_cuda_specs() -> Optional[CUDASpecs]:
         return None
 
 
+def _get_rocm_gpu_arch_override(logger: logging.Logger) -> Optional[str]:
+    override = os.environ.get(ROCM_GPU_ARCH_OVERRIDE_ENV)
+    if override is None:
+        return None
+
+    override = override.strip()
+    if not override:
+        return None
+
+    if not override.startswith("gfx"):
+        override = f"gfx{override}"
+
+    if not ROCM_GPU_ARCH_PATTERN.fullmatch(override):
+        logger.warning(
+            "Ignoring invalid %s value %r. Expected a value like 'gfx90a'.",
+            ROCM_GPU_ARCH_OVERRIDE_ENV,
+            override,
+        )
+        return None
+
+    logger.info("Using ROCm GPU arch override from %s: %s", ROCM_GPU_ARCH_OVERRIDE_ENV, override)
+    return override
+
+
+def _handle_rocm_gpu_arch_detection_failure(logger: logging.Logger, exc: Optional[Exception] = None) -> str:
+    if exc is not None:
+        logger.error("Could not detect ROCm GPU architecture: %s", exc)
+
+    logger.warning(
+        "ROCm GPU architecture detection failed. Install rocminfo if possible; otherwise set %s to your GPU arch "
+        "(for example 'gfx90a').",
+        ROCM_GPU_ARCH_OVERRIDE_ENV,
+    )
+
+    override = _get_rocm_gpu_arch_override(logger)
+    if override is not None:
+        return override
+    return "unknown"
+
+
 def get_rocm_gpu_arch() -> str:
     """Get ROCm GPU architecture."""
     logger = logging.getLogger(__name__)
@@ -97,35 +140,11 @@ def get_rocm_gpu_arch() -> str:
             match = re.search(arch_pattern, result.stdout)
             if match:
                 return "gfx" + match.group(1)
-            else:
-                override = os.environ.get("BNB_ROCM_GPU_ARCH")
-                if override:
-                    override = override.strip()
-                    if override:
-                        if not override.startswith("gfx"):
-                            override = f"gfx{override}"
-                        logger.info("Using ROCm GPU arch override: %s", override)
-                        return override
-                return "unknown"
+            return _handle_rocm_gpu_arch_detection_failure(logger)
         else:
             return "unknown"
     except Exception as e:
-        logger.error(f"Could not detect ROCm GPU architecture: {e}")
-        if torch.cuda.is_available():
-            logger.warning(
-                """
-ROCm GPU architecture detection failed despite ROCm being available.
-                """,
-            )
-        override = os.environ.get("BNB_ROCM_GPU_ARCH")
-        if override:
-            override = override.strip()
-            if override:
-                if not override.startswith("gfx"):
-                    override = f"gfx{override}"
-                logger.info("Using ROCm GPU arch override: %s", override)
-                return override
-        return "unknown"
+        return _handle_rocm_gpu_arch_detection_failure(logger, e)
 
 
 def get_rocm_warpsize() -> int:
