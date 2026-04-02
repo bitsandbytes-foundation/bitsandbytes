@@ -57,7 +57,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>Minimum: AVX2<br>Optimized: AVX512F, AVX512BF16</td>
       <td>✅</td>
       <td>✅</td>
-      <td>❌</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
@@ -88,7 +88,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       </td>
       <td>✅</td>
       <td>✅</td>
-      <td>〰️</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
@@ -123,7 +123,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>AVX2</td>
       <td>✅</td>
       <td>✅</td>
-      <td>❌</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
@@ -142,7 +142,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       </td>
       <td>✅</td>
       <td>✅</td>
-      <td>〰️</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td colspan="6">🍎 <strong>macOS 14+</strong></td>
