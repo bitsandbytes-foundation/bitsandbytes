@@ -48,13 +48,16 @@ DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
 def get_args():
     parser = argparse.ArgumentParser(description="Comprehensive Optimizer Benchmark")
     parser.add_argument("--device", type=str, default="cuda", help="Device: cuda, xpu, or cpu (default: cuda)")
-    parser.add_argument("--model", type=str, default=DEFAULT_MODEL, help=f"HuggingFace model name (default: {DEFAULT_MODEL})")
+    parser.add_argument(
+        "--model", type=str, default=DEFAULT_MODEL, help=f"HuggingFace model name (default: {DEFAULT_MODEL})"
+    )
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--batch_size", type=int, default=2)
     parser.add_argument("--warmup_steps", type=int, default=3)
     parser.add_argument("--train_steps", type=int, default=10)
-    parser.add_argument("--dtype", type=str, default="fp32", choices=["bf16", "fp16", "fp32"],
-                        help="Training dtype (default: fp32)")
+    parser.add_argument(
+        "--dtype", type=str, default="fp32", choices=["bf16", "fp16", "fp32"], help="Training dtype (default: fp32)"
+    )
     return parser.parse_args()
 
 
@@ -302,7 +305,7 @@ def print_gpu_results(results, args):
         if speedup > 1.05:
             print(f"    {speedup:.2f}x faster per step")
         elif speedup < 0.95:
-            print(f"    {1/speedup:.2f}x slower per step (tradeoff for memory savings)")
+            print(f"    {1 / speedup:.2f}x slower per step (tradeoff for memory savings)")
 
 
 def print_cpu_results(results, args):
@@ -319,7 +322,7 @@ def print_cpu_results(results, args):
 
     print(f"  {'Model Memory':30s}" + "".join(f"  {fmt_mb(r['model_bytes']):>{col_w}s}" for r in results))
     print(f"  {'Optimizer State Size':30s}" + "".join(f"  {fmt_mb(r['state_bytes']):>{col_w}s}" for r in results))
-    total_key = lambda r: r['model_bytes'] + r['state_bytes']
+    total_key = lambda r: r["model_bytes"] + r["state_bytes"]
     print(f"  {'Total (Model + State)':30s}" + "".join(f"  {fmt_mb(total_key(r)):>{col_w}s}" for r in results))
 
     print(f"  {'-' * 30}" + "".join(f"  {'-' * col_w}" for _ in results))
@@ -359,7 +362,7 @@ def print_cpu_results(results, args):
         if speedup > 1.05:
             print(f"    {speedup:.2f}x faster per step")
         elif speedup < 0.95:
-            print(f"    {1/speedup:.2f}x slower per step (tradeoff for memory savings)")
+            print(f"    {1 / speedup:.2f}x slower per step (tradeoff for memory savings)")
 
 
 def main():
@@ -374,7 +377,7 @@ def main():
         assert torch.cuda.is_available(), "CUDA not available!"
 
     # Print configuration
-    model_tmp, vocab_size = create_model(args)
+    model_tmp, _vocab_size = create_model(args)
     n_params = count_params(model_tmp)
     elem_size = 2 if args.dtype != "fp32" else 4
     del model_tmp
@@ -391,7 +394,7 @@ def main():
     print(f"  Warmup steps:   {args.warmup_steps}")
     print(f"  Measured steps: {args.train_steps}")
     expected_32bit = n_params * 4 * 2  # fp32, 2 states for AdamW
-    expected_8bit = n_params * 1 * 2   # int8, 2 states
+    expected_8bit = n_params * 1 * 2  # int8, 2 states
     print(f"  Expected optimizer state (32-bit): {fmt_mb(expected_32bit)}")
     print(f"  Expected optimizer state (8-bit):  {fmt_mb(expected_8bit)}")
     print("=" * 100)
