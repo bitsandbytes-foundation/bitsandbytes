@@ -1,4 +1,4 @@
-import importlib
+from importlib.metadata import metadata
 
 from packaging import version
 import torch
@@ -69,7 +69,7 @@ def get_gaudi_sw_version():
     """
     try:
         # if we find the spec, examine the installed version
-        plugin_metadata = importlib.metadata.metadata("habana-torch-plugin")
+        plugin_metadata = metadata("habana-torch-plugin")
         plugin_version = plugin_metadata.get("Version")
         if plugin_version:
             gaudi_version = version.parse(plugin_version)
