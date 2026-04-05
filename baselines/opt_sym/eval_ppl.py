@@ -1405,11 +1405,13 @@ def main():
                             # Find nearest codewords (use _chunked_nearest like working BNF)
                             idx = _chunked_nearest(groups, q_cb.to(W.device), chunk_size=100000)
 
-                            # Dequantize
+                            # Dequantize (returns values on unit sphere)
                             dq_groups = d_cb.to(W.device)[idx]
                             dq_vq = dq_groups.reshape(normalized.shape[0], elems_per_p)
 
                             if rem > 0:
+                                # rem_part is normalized (unit scale), dq_vq is normalized
+                                # Both need to be multiplied by absmax to denormalize
                                 rem_part = normalized[:, elems_per_p:]
                                 dequantized = torch.cat([dq_vq, rem_part], dim=1) * absmax
                             else:
