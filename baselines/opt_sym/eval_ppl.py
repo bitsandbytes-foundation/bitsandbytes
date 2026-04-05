@@ -1402,12 +1402,11 @@ def main():
                             vq_part = normalized[:, :elems_per_p]
                             groups = vq_part.reshape(-1, p_dim)
 
-                            # Find nearest codewords
-                            dists = torch.cdist(groups, q_cb.float())
-                            idx = dists.argmin(dim=1)
+                            # Find nearest codewords (use _chunked_nearest like working BNF)
+                            idx = _chunked_nearest(groups, q_cb.to(W.device), chunk_size=100000)
 
                             # Dequantize
-                            dq_groups = d_cb[idx]
+                            dq_groups = d_cb.to(W.device)[idx]
                             dq_vq = dq_groups.reshape(normalized.shape[0], elems_per_p)
 
                             if rem > 0:
@@ -1422,9 +1421,8 @@ def main():
                     else:
                         # L2 norm
                         W_flat = W_rot.reshape(-1, p_dim)
-                        dists = torch.cdist(W_flat, q_cb.float())
-                        idx = dists.argmin(dim=1)
-                        W_q = d_cb[idx].reshape(W_rot.shape)
+                        idx = _chunked_nearest(W_flat, q_cb.to(W.device), chunk_size=100000)
+                        W_q = d_cb.to(W.device)[idx].reshape(W_rot.shape)
 
                     # Inverse Hadamard if needed
                     if p_dim > 1 or norm_type == 'l2':
