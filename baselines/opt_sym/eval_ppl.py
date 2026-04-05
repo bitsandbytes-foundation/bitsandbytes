@@ -1372,10 +1372,10 @@ def main():
                         torch.manual_seed(sign_seed)
                         had_sign = (2 * (torch.rand(actual_rot_bs, device=W.device) > 0.5).float() - 1).to(W.device)
 
-                        # Apply sign and Hadamard
+                        # Apply sign and Hadamard (match working BNF pattern)
                         W_signed = W_reshaped * had_sign.unsqueeze(0)
                         H = torch.tensor(hadamard(actual_rot_bs), dtype=torch.float32, device=W.device)
-                        W_rot = (W_signed @ H) / torch.sqrt(torch.tensor(actual_rot_bs, dtype=torch.float32))
+                        W_rot = W_signed @ H.T  # No normalization - BNF doesn't divide by sqrt(n)
                     else:
                         W_rot = W_float
                         n_rot = 1
@@ -1424,10 +1424,10 @@ def main():
                         idx = _chunked_nearest(W_flat, q_cb.to(W.device), chunk_size=100000)
                         W_q = d_cb.to(W.device)[idx].reshape(W_rot.shape)
 
-                    # Inverse Hadamard if needed
+                    # Inverse Hadamard if needed (match working BNF pattern)
                     if p_dim > 1 or norm_type == 'l2':
                         W_deshaped = W_q.reshape(out_dim * n_rot, actual_rot_bs)
-                        W_unrot = (W_deshaped @ H.T) * torch.sqrt(torch.tensor(actual_rot_bs, dtype=torch.float32))
+                        W_unrot = W_deshaped @ H  # No normalization - BNF doesn't multiply by sqrt(n)
                         W_unrot = W_unrot * had_sign.unsqueeze(0)
                         W_final = W_unrot.reshape(W.shape)
                     else:
