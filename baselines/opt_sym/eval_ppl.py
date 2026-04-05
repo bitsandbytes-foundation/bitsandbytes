@@ -1420,9 +1420,14 @@ def main():
                         dq_groups = d_cb[idx]
                         dq_vq = dq_groups.reshape(out_dim * n_rot, elems_per_p)
 
-                        # Denormalize - reshape absmax to match dq_vq shape
-                        absmax_reshaped = absmax_vals.reshape(out_dim * n_rot, -1)
-                        dq_vq_denorm = dq_vq * absmax_reshaped
+                        # Denormalize - absmax has one value per block of bs elements
+                        # absmax_vals: [out_dim * n_rot * elems_per_p / bs, 1]
+                        # dq_vq: [out_dim * n_rot, elems_per_p]
+                        # Need to reshape absmax to [out_dim * n_rot, elems_per_p / bs, 1] and broadcast
+                        n_blocks_per_row = elems_per_p // bs
+                        absmax_reshaped = absmax_vals.reshape(out_dim * n_rot, n_blocks_per_row, 1)
+                        dq_vq_reshaped = dq_vq.reshape(out_dim * n_rot, n_blocks_per_row, bs)
+                        dq_vq_denorm = (dq_vq_reshaped * absmax_reshaped).reshape(out_dim * n_rot, elems_per_p)
 
                         if rem > 0:
                             rem_part = W_rot_reshaped[:, elems_per_p:]
