@@ -1386,56 +1386,43 @@ def main():
 
                     # Quantization
                     if norm_type == 'absmax':
-                        # VQ quantization setup
-                        elems_per_p = (actual_rot_bs // p_dim) * p_dim
-                        rem = actual_rot_bs - elems_per_p
+                        # Flatten, pad, blockwise absmax quantization (same pattern as install_bnf_hooks)
+                        flat = W_rot.flatten()
+                        n = flat.numel()
+                        pad_n = (bs - n % bs) % bs
+                        if pad_n > 0:
+                            flat = torch.nn.functional.pad(flat, (0, pad_n))
 
-                        # Reshape for VQ: [out_dim * n_rot, actual_rot_bs]
-                        W_rot_reshaped = W_rot.reshape(out_dim * n_rot, actual_rot_bs)
+                        blocks = flat.reshape(-1, bs)
+                        absmax = blocks.abs().amax(dim=1, keepdim=True).clamp_(min=1e-12)
+                        normalized = blocks / absmax
 
-                        # Compute absmax on VQ-compatible portion (excluding remainder)
-                        if rem > 0:
-                            W_for_vq = W_rot_reshaped[:, :elems_per_p]
+                        # VQ quantization on normalized blocks
+                        elems_per_p = (bs // p_dim) * p_dim
+                        rem = bs - elems_per_p
+
+                        if elems_per_p > 0:
+                            vq_part = normalized[:, :elems_per_p]
+                            groups = vq_part.reshape(-1, p_dim)
+
+                            # Find nearest codewords
+                            dists = torch.cdist(groups, q_cb.float())
+                            idx = dists.argmin(dim=1)
+
+                            # Dequantize
+                            dq_groups = d_cb[idx]
+                            dq_vq = dq_groups.reshape(normalized.shape[0], elems_per_p)
+
+                            if rem > 0:
+                                rem_part = normalized[:, elems_per_p:]
+                                dequantized = torch.cat([dq_vq, rem_part], dim=1) * absmax
+                            else:
+                                dequantized = dq_vq * absmax
                         else:
-                            W_for_vq = W_rot_reshaped
+                            # p_dim > bs, can't do VQ - keep normalized
+                            dequantized = normalized * absmax
 
-                        # Reshape to blocks for absmax: [out_dim * n_rot * elems_per_p / bs, bs]
-                        W_blocks_vq = W_for_vq.reshape(-1, bs)
-                        absmax_vals = W_blocks_vq.abs().max(dim=1, keepdim=True)[0]
-                        absmax_vals = absmax_vals.clamp_min(1e-8)
-
-                        # Normalize
-                        W_unit_blocks = W_blocks_vq / absmax_vals
-                        W_unit = W_unit_blocks.reshape(out_dim * n_rot, elems_per_p)
-
-                        # VQ quantization
-                        groups = W_unit.reshape(-1, p_dim)
-
-                        # Find nearest codewords
-                        dists = torch.cdist(groups, q_cb.float())
-                        idx = dists.argmin(dim=1)
-                        q_groups = q_cb[idx]
-
-                        # Dequantize
-                        dq_groups = d_cb[idx]
-                        dq_vq = dq_groups.reshape(out_dim * n_rot, elems_per_p)
-
-                        # Denormalize - absmax has one value per block of bs elements
-                        # absmax_vals: [out_dim * n_rot * elems_per_p / bs, 1]
-                        # dq_vq: [out_dim * n_rot, elems_per_p]
-                        # Need to reshape absmax to [out_dim * n_rot, elems_per_p / bs, 1] and broadcast
-                        n_blocks_per_row = elems_per_p // bs
-                        absmax_reshaped = absmax_vals.reshape(out_dim * n_rot, n_blocks_per_row, 1)
-                        dq_vq_reshaped = dq_vq.reshape(out_dim * n_rot, n_blocks_per_row, bs)
-                        dq_vq_denorm = (dq_vq_reshaped * absmax_reshaped).reshape(out_dim * n_rot, elems_per_p)
-
-                        if rem > 0:
-                            rem_part = W_rot_reshaped[:, elems_per_p:]
-                            dq_blocks = torch.cat([dq_vq_denorm, rem_part], dim=1)
-                        else:
-                            dq_blocks = dq_vq_denorm
-
-                        W_q = dq_blocks.reshape(W_rot.shape)
+                        W_q = dequantized.flatten()[:n].reshape(W_rot.shape)
                     else:
                         # L2 norm - simpler case
                         W_flat = W_rot.reshape(-1, p_dim)
