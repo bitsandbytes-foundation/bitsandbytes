@@ -1343,113 +1343,104 @@ def main():
             key = (k, p)
             quant_cb, deq_cb = unique_configs[key]
 
-            # Use pre_hook (runs BEFORE forward) to quantize weights before use
-            # Then post_hook to restore original weights
-            def make_pre_hook(q_cb, d_cb, bs, rot_bs, sign_seed, norm_type, p_dim):
-                def pre_hook(mod, args_):
-                    if not _hooks_enabled:
-                        return
-                    # Save original weight
-                    mod._orig_weight = mod.weight.data.clone()
-                    W = mod.weight.data
-                    dtype = W.dtype
-                    W_float = W.float()
+            # Store per-layer config for custom BNF hook
+            module._higgs_quant_cb = quant_cb.to(device)
+            module._higgs_deq_cb = deq_cb.to(device)
+            module._higgs_p = p
 
-                    out_dim, in_dim = W.shape
+        # Install custom BNF hooks that check for per-layer codebooks
+        H_block = make_hadamard_block(args.rot_blocksize, device)
+        max_in = max(m.weight.shape[1] for m in model.modules()
+                     if isinstance(m, nn.Linear))
+        signs = make_random_signs(max_in, args.seed, device)
 
-                    # Apply Hadamard rotation
-                    if p_dim > 1 or norm_type == 'l2':
-                        n_rot = in_dim // rot_bs
-                        if n_rot == 0:
-                            n_rot = 1
-                            actual_rot_bs = in_dim
-                        else:
-                            actual_rot_bs = rot_bs
+        def make_higgs_pre_hook(bs, rot_bs, sign_seed, norm_type):
+            def hook(mod, args_):
+                if not _hooks_enabled:
+                    return
+                # Check if this module has HIGGS config
+                if not hasattr(mod, '_higgs_quant_cb'):
+                    return
 
-                        W_reshaped = W_float.reshape(out_dim * n_rot, actual_rot_bs)
+                q_cb = mod._higgs_quant_cb
+                d_cb = mod._higgs_deq_cb
+                p_dim = mod._higgs_p
 
-                        # Get or create sign vector
-                        torch.manual_seed(sign_seed)
-                        had_sign = (2 * (torch.rand(actual_rot_bs, device=W.device) > 0.5).float() - 1).to(W.device)
+                mod._orig_weight = mod.weight.data.clone()
+                W = mod.weight.data.float()
+                out_dim, in_dim = W.shape
 
-                        # Apply sign and Hadamard (match working BNF pattern)
-                        W_signed = W_reshaped * had_sign.unsqueeze(0)
-                        H = torch.tensor(hadamard(actual_rot_bs), dtype=torch.float32, device=W.device)
-                        W_rot = W_signed @ H.T  # No normalization - BNF doesn't divide by sqrt(n)
-                    else:
-                        W_rot = W_float
+                # Apply Hadamard rotation
+                if p_dim > 1 or norm_type == 'l2':
+                    n_rot = in_dim // rot_bs
+                    if n_rot == 0:
                         n_rot = 1
                         actual_rot_bs = in_dim
-
-                    # Quantization
-                    if norm_type == 'absmax':
-                        # Flatten, pad, blockwise absmax quantization
-                        flat = W_rot.flatten()
-                        n = flat.numel()
-                        pad_n = (bs - n % bs) % bs
-                        if pad_n > 0:
-                            flat = torch.nn.functional.pad(flat, (0, pad_n))
-
-                        blocks = flat.reshape(-1, bs)
-                        absmax = blocks.abs().amax(dim=1, keepdim=True).clamp_(min=1e-12)
-                        normalized = blocks / absmax
-
-                        # VQ quantization on normalized blocks
-                        elems_per_p = (bs // p_dim) * p_dim
-                        rem = bs - elems_per_p
-
-                        if elems_per_p > 0:
-                            vq_part = normalized[:, :elems_per_p]
-                            groups = vq_part.reshape(-1, p_dim)
-
-                            # Find nearest codewords (use _chunked_nearest like working BNF)
-                            idx = _chunked_nearest(groups, q_cb.to(W.device), chunk_size=100000)
-
-                            # Dequantize (returns values on unit sphere)
-                            dq_groups = d_cb.to(W.device)[idx]
-                            dq_vq = dq_groups.reshape(normalized.shape[0], elems_per_p)
-
-                            if rem > 0:
-                                # rem_part is normalized (unit scale), dq_vq is normalized
-                                # Both need to be multiplied by absmax to denormalize
-                                rem_part = normalized[:, elems_per_p:]
-                                dequantized = torch.cat([dq_vq, rem_part], dim=1) * absmax
-                            else:
-                                dequantized = dq_vq * absmax
-                        else:
-                            dequantized = normalized * absmax
-
-                        W_q = dequantized.flatten()[:n].reshape(W_rot.shape)
                     else:
-                        # L2 norm
-                        W_flat = W_rot.reshape(-1, p_dim)
-                        idx = _chunked_nearest(W_flat, q_cb.to(W.device), chunk_size=100000)
-                        W_q = d_cb.to(W.device)[idx].reshape(W_rot.shape)
+                        actual_rot_bs = rot_bs
 
-                    # Inverse Hadamard if needed (match working BNF pattern)
-                    if p_dim > 1 or norm_type == 'l2':
-                        W_deshaped = W_q.reshape(out_dim * n_rot, actual_rot_bs)
-                        W_unrot = W_deshaped @ H  # No normalization - BNF doesn't multiply by sqrt(n)
-                        W_unrot = W_unrot * had_sign.unsqueeze(0)
-                        W_final = W_unrot.reshape(W.shape)
+                    W_reshaped = W.reshape(out_dim * n_rot, actual_rot_bs)
+                    W_signed = W_reshaped * signs[:actual_rot_bs].unsqueeze(0)
+                    W_rot = W_signed @ H_block.T
+                else:
+                    W_rot = W
+                    n_rot = 1
+                    actual_rot_bs = in_dim
+
+                # Quantize
+                flat = W_rot.flatten()
+                n = flat.numel()
+                pad_n = (bs - n % bs) % bs
+                if pad_n > 0:
+                    flat = torch.nn.functional.pad(flat, (0, pad_n))
+
+                blocks = flat.reshape(-1, bs)
+                absmax = blocks.abs().amax(dim=1, keepdim=True).clamp_(min=1e-12)
+                normalized = blocks / absmax
+
+                elems_per_p = (bs // p_dim) * p_dim
+                rem = bs - elems_per_p
+
+                if elems_per_p > 0:
+                    vq_part = normalized[:, :elems_per_p]
+                    groups = vq_part.reshape(-1, p_dim)
+                    idx = _chunked_nearest(groups, q_cb, chunk_size=100000)
+                    dq_groups = d_cb[idx]
+                    dq_vq = dq_groups.reshape(normalized.shape[0], elems_per_p)
+
+                    if rem > 0:
+                        rem_part = normalized[:, elems_per_p:]
+                        dequantized = torch.cat([dq_vq, rem_part], dim=1) * absmax
                     else:
-                        W_final = W_q.reshape(W.shape)
+                        dequantized = dq_vq * absmax
+                else:
+                    dequantized = normalized * absmax
 
-                    mod.weight.data = W_final.to(dtype)
-                return pre_hook
+                dequantized = dequantized.flatten()[:n].reshape(W_rot.shape)
 
-            def post_hook(mod, args_, output):
-                # Restore original weight after forward
-                if hasattr(mod, '_orig_weight'):
-                    mod.weight.data = mod._orig_weight
-                    del mod._orig_weight
+                # Inverse Hadamard
+                if p_dim > 1 or norm_type == 'l2':
+                    W_deshaped = dequantized.reshape(out_dim * n_rot, actual_rot_bs)
+                    W_unrot = W_deshaped @ H_block
+                    W_unrot = W_unrot * signs[:actual_rot_bs].unsqueeze(0)
+                    W_final = W_unrot.reshape(W.shape)
+                else:
+                    W_final = dequantized.reshape(W.shape)
 
-            h1 = module.register_forward_pre_hook(
-                make_pre_hook(quant_cb, deq_cb, args.blocksize, args.rot_blocksize,
-                             args.seed, args.norm, p)
-            )
-            h2 = module.register_forward_hook(post_hook)
-            hooks.extend([h1, h2])
+                mod.weight.data = W_final.to(mod.weight.dtype)
+            return hook
+
+        def post_hook(mod, args_, output):
+            if hasattr(mod, '_orig_weight'):
+                mod.weight.data = mod._orig_weight
+                del mod._orig_weight
+
+        for name, module in model.named_modules():
+            if isinstance(module, nn.Linear) and hasattr(module, '_higgs_quant_cb'):
+                h1 = module.register_forward_pre_hook(
+                    make_higgs_pre_hook(args.blocksize, args.rot_blocksize, args.seed, args.norm))
+                h2 = module.register_forward_hook(post_hook)
+                hooks.extend([h1, h2])
 
         print(f"Installed {len(hooks)} per-layer quantization hooks")
         effective_bits = avg_bits
