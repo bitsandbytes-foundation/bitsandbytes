@@ -1343,15 +1343,15 @@ def main():
             key = (k, p)
             quant_cb, deq_cb = unique_configs[key]
 
-            # Use existing BNF hook installation (inline)
-            # Reuse the closure pattern from install_bnf_hooks/install_l2_hooks
-            sign_key = f"hadamard_sign_{args.seed}"
-            had_sign = None
-
-            def make_hook(q_cb, d_cb, bs, rot_bs, sign_seed, norm_type, p_dim):
-                def hook(module, input, output):
-                    # Use module weight directly (quantized in-place)
-                    W = module.weight.data
+            # Use pre_hook (runs BEFORE forward) to quantize weights before use
+            # Then post_hook to restore original weights
+            def make_pre_hook(q_cb, d_cb, bs, rot_bs, sign_seed, norm_type, p_dim):
+                def pre_hook(mod, args_):
+                    if not _hooks_enabled:
+                        return
+                    # Save original weight
+                    mod._orig_weight = mod.weight.data.clone()
+                    W = mod.weight.data
                     dtype = W.dtype
                     W_float = W.float()
 
@@ -1366,14 +1366,11 @@ def main():
                         else:
                             actual_rot_bs = rot_bs
 
-                        # Reshape for rotation
                         W_reshaped = W_float.reshape(out_dim * n_rot, actual_rot_bs)
 
                         # Get or create sign vector
-                        nonlocal had_sign
-                        if had_sign is None:
-                            torch.manual_seed(sign_seed)
-                            had_sign = (2 * (torch.rand(actual_rot_bs, device=W.device) > 0.5).float() - 1).to(W.device)
+                        torch.manual_seed(sign_seed)
+                        had_sign = (2 * (torch.rand(actual_rot_bs, device=W.device) > 0.5).float() - 1).to(W.device)
 
                         # Apply sign and Hadamard
                         W_signed = W_reshaped * had_sign.unsqueeze(0)
@@ -1386,7 +1383,7 @@ def main():
 
                     # Quantization
                     if norm_type == 'absmax':
-                        # Flatten, pad, blockwise absmax quantization (same pattern as install_bnf_hooks)
+                        # Flatten, pad, blockwise absmax quantization
                         flat = W_rot.flatten()
                         n = flat.numel()
                         pad_n = (bs - n % bs) % bs
@@ -1419,12 +1416,11 @@ def main():
                             else:
                                 dequantized = dq_vq * absmax
                         else:
-                            # p_dim > bs, can't do VQ - keep normalized
                             dequantized = normalized * absmax
 
                         W_q = dequantized.flatten()[:n].reshape(W_rot.shape)
                     else:
-                        # L2 norm - simpler case
+                        # L2 norm
                         W_flat = W_rot.reshape(-1, p_dim)
                         dists = torch.cdist(W_flat, q_cb.float())
                         idx = dists.argmin(dim=1)
@@ -1439,15 +1435,21 @@ def main():
                     else:
                         W_final = W_q.reshape(W.shape)
 
-                    module.weight.data = W_final.to(dtype)
-                    return output
-                return hook
+                    mod.weight.data = W_final.to(dtype)
+                return pre_hook
 
-            handle = module.register_forward_hook(
-                make_hook(quant_cb, deq_cb, args.blocksize, args.rot_blocksize,
-                         args.seed, args.norm, p)
+            def post_hook(mod, args_, output):
+                # Restore original weight after forward
+                if hasattr(mod, '_orig_weight'):
+                    mod.weight.data = mod._orig_weight
+                    del mod._orig_weight
+
+            h1 = module.register_forward_pre_hook(
+                make_pre_hook(quant_cb, deq_cb, args.blocksize, args.rot_blocksize,
+                             args.seed, args.norm, p)
             )
-            hooks.append(handle)
+            h2 = module.register_forward_hook(post_hook)
+            hooks.extend([h1, h2])
 
         print(f"Installed {len(hooks)} per-layer quantization hooks")
         effective_bits = avg_bits
