@@ -1386,23 +1386,30 @@ def main():
 
                     # Quantization
                     if norm_type == 'absmax':
-                        # Block-wise absmax
-                        W_blocks = W_rot.reshape(-1, bs)
-                        absmax_vals = W_blocks.abs().max(dim=1, keepdim=True)[0]
-                        absmax_vals = absmax_vals.clamp_min(1e-8)
-
-                        W_unit = W_blocks / absmax_vals
-
-                        # VQ quantization
+                        # VQ quantization setup
                         elems_per_p = (actual_rot_bs // p_dim) * p_dim
                         rem = actual_rot_bs - elems_per_p
 
-                        if rem > 0:
-                            vq_part = W_unit.reshape(out_dim * n_rot, actual_rot_bs)[:, :elems_per_p]
-                        else:
-                            vq_part = W_unit
+                        # Reshape for VQ: [out_dim * n_rot, actual_rot_bs]
+                        W_rot_reshaped = W_rot.reshape(out_dim * n_rot, actual_rot_bs)
 
-                        groups = vq_part.reshape(-1, p_dim)
+                        # Compute absmax on VQ-compatible portion (excluding remainder)
+                        if rem > 0:
+                            W_for_vq = W_rot_reshaped[:, :elems_per_p]
+                        else:
+                            W_for_vq = W_rot_reshaped
+
+                        # Reshape to blocks for absmax: [out_dim * n_rot * elems_per_p / bs, bs]
+                        W_blocks_vq = W_for_vq.reshape(-1, bs)
+                        absmax_vals = W_blocks_vq.abs().max(dim=1, keepdim=True)[0]
+                        absmax_vals = absmax_vals.clamp_min(1e-8)
+
+                        # Normalize
+                        W_unit_blocks = W_blocks_vq / absmax_vals
+                        W_unit = W_unit_blocks.reshape(out_dim * n_rot, elems_per_p)
+
+                        # VQ quantization
+                        groups = W_unit.reshape(-1, p_dim)
 
                         # Find nearest codewords
                         dists = torch.cdist(groups, q_cb.float())
@@ -1413,14 +1420,17 @@ def main():
                         dq_groups = d_cb[idx]
                         dq_vq = dq_groups.reshape(out_dim * n_rot, elems_per_p)
 
-                        if rem > 0:
-                            rem_part = W_unit.reshape(out_dim * n_rot, actual_rot_bs)[:, elems_per_p:]
-                            dq_blocks = torch.cat([dq_vq, rem_part], dim=1)
-                        else:
-                            dq_blocks = dq_vq
+                        # Denormalize - reshape absmax to match dq_vq shape
+                        absmax_reshaped = absmax_vals.reshape(out_dim * n_rot, -1)
+                        dq_vq_denorm = dq_vq * absmax_reshaped
 
-                        # Denormalize
-                        W_q = (dq_blocks * absmax_vals).reshape(W_rot.shape)
+                        if rem > 0:
+                            rem_part = W_rot_reshaped[:, elems_per_p:]
+                            dq_blocks = torch.cat([dq_vq_denorm, rem_part], dim=1)
+                        else:
+                            dq_blocks = dq_vq_denorm
+
+                        W_q = dq_blocks.reshape(W_rot.shape)
                     else:
                         # L2 norm - simpler case
                         W_flat = W_rot.reshape(-1, p_dim)
