@@ -502,7 +502,7 @@ def test_params4bit_quant_state_attr_access(device, quant_type, compress_statist
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="FSDP requires CUDA")
 @pytest.mark.skipif(
-    not torch.distributed.is_nccl_available(),
+    not getattr(torch.distributed, "is_nccl_available", lambda: False)(),
     reason="FSDP test requires NCCL backend",
 )
 def test_fsdp_state_dict_save_4bit():

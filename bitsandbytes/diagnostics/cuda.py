@@ -32,7 +32,10 @@ CUDART_PATH_IGNORED_ENVVARS = {
 }
 
 CUDA_RUNTIME_LIB_PATTERNS = (
-    ("libamdhip64.so*",)
+    (
+        "libamdhip64.so*",  # Linux
+        "amdhip64*.dll",  # Windows
+    )
     if HIP_ENVIRONMENT
     else (
         "cudart64*.dll",  # Windows

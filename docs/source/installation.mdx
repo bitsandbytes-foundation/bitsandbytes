@@ -187,7 +187,10 @@ pip install -e .
 
 * Support for AMD GPUs is currently in a preview state.
 * All features are supported for both consumer RDNA devices and Data Center CDNA products.
-* A compatible PyTorch version with AMD ROCm support is required. It is recommended to use the latest stable release. See [PyTorch on ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/3rd-party/pytorch-install.html) for guidance.
+* A compatible PyTorch version with AMD ROCm support is required. It is recommended to use the latest stable release. On Linux, see [PyTorch on ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/3rd-party/pytorch-install.html) for guidance. On Windows, ROCm-enabled PyTorch wheels are available from:
+  - [repo.radeon.com/rocm/windows/](https://repo.radeon.com/rocm/windows/) — official AMD releases
+  - [repo.amd.com/rocm/whl/](https://repo.amd.com/rocm/whl/) — [TheRock](https://github.com/ROCm/TheRock) release builds
+  - [rocm.nightlies.amd.com/v2](https://rocm.nightlies.amd.com/v2) — TheRock nightly builds
 
 ### Installation from PyPI[[rocm-pip]]
 
@@ -203,8 +206,7 @@ The currently distributed `bitsandbytes` are built with the following configurat
 | **Linux x86-64**   | 7.0.2    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
 | **Linux x86-64**   | 7.1.0    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
 | **Linux x86-64**   | 7.2.1    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
-
-**Windows is not currently supported.**
+| **Windows x86-64** | 7.2.1    | RDNA: gfx1100, gfx1101, gfx1102, gfx1150, gfx1151, gfx1200, gfx1201
 
 Use `pip` or `uv` to install the latest release:
 
@@ -214,12 +216,18 @@ pip install bitsandbytes
 
 ### Compile from Source[[rocm-compile]]
 
-bitsandbytes can be compiled from ROCm 6.2 - ROCm 7.2.1.
+bitsandbytes can be compiled from ROCm 6.2 - ROCm 7.2.1. See the `CMakeLists.txt` for additional options.
 
-To compile from source, you need CMake >= **3.31.6**.
+<hfoptions id="rocm-source">
+<hfoption id="Linux">
+
+To compile from source, you need CMake >= **3.31.6** and Python >= **3.10** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.).
+
+You should also have a ROCm installation (system-wide or via Docker). The current minimum supported version is **6.2**.
 
 ```bash
 # Install bitsandbytes from source
+
 # Clone bitsandbytes repo
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 
@@ -229,6 +237,36 @@ cmake -DCOMPUTE_BACKEND=hip -S .  # Use -DBNB_ROCM_ARCH="gfx90a;gfx942" to targe
 make
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
+
+</hfoption>
+<hfoption id="Windows">
+
+Compilation on Windows requires Visual Studio with C++ support, CMake, Ninja, and Python >= **3.10**.
+
+Instead of a system-wide ROCm installation, you can use the pip-installable ROCm SDK wheels from [repo.radeon.com](https://repo.radeon.com/rocm/windows/):
+
+```bash
+# Install ROCm SDK wheels (adjust version as needed)
+pip install ninja cmake
+pip install \
+    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl \
+    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl \
+    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl \
+    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm-7.2.1.tar.gz
+
+# Expand the devel tarball
+rocm-sdk init
+
+# Set ROCM_PATH and activate Visual Studio environment, then build
+export ROCM_PATH="$(rocm-sdk path --root)"
+export PATH="${ROCM_PATH}/bin:${PATH}"
+git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
+cmake -G Ninja -DCOMPUTE_BACKEND=hip -DBNB_ROCM_ARCH="gfx1100" -DCMAKE_BUILD_TYPE=Release -S .
+cmake --build . --config Release
+pip install .
+```
+</hfoption>
+</hfoptions>
 
 ## Preview Wheels[[preview-wheels]]
 
