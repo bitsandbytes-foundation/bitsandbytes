@@ -38,9 +38,9 @@ if(WIN32 AND COMPUTE_BACKEND STREQUAL "hip")
                   "${ROCM_PATH}/lib/llvm/amdgcn/bitcode"
             NO_DEFAULT_PATH
         )
-        set(CMAKE_HIP_FLAGS "--rocm-path=${ROCM_PATH}")
+        string(APPEND CMAKE_HIP_FLAGS " --rocm-path=${ROCM_PATH}")
         if(ROCM_DEVICE_LIB_PATH)
-            set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --rocm-device-lib-path=${ROCM_DEVICE_LIB_PATH}")
+            string(APPEND CMAKE_HIP_FLAGS " --rocm-device-lib-path=${ROCM_DEVICE_LIB_PATH}")
         endif()
     endif()
 endif()

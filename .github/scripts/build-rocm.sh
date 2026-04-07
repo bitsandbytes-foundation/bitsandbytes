@@ -44,9 +44,10 @@ else
     cmake -G Ninja \
         -DCOMPUTE_BACKEND=hip \
         -DBNB_ROCM_ARCH="${bnb_rocm_arch}" \
-        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_HIP_FLAGS="--offload-compress" \
         -S .
-    cmake --build . --config Release
+    cmake --build .
 fi
 
 output_dir="output/${build_os}/${build_arch}"
