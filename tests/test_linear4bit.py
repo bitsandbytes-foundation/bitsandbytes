@@ -437,6 +437,76 @@ def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_st
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+@pytest.mark.skipif(torch.__version__ < (2, 8, 0, "dev"), reason="fullgraph requires torch 2.8+")
+@pytest.mark.skipif(
+    torch.__version__ < (2, 10) and sys.version_info >= (3, 14), reason="Not supported in Python 3.14 until torch 2.10"
+)
+def test_linear4bit_torch_compile_activation_checkpointing(device, quant_type, compress_statistics):
+    """Regression test for #1904: __getattr__ on Params4bit causes graph breaks under torch.compile.
+
+    Activation checkpointing replays the forward pass during backward, which multiplies
+    attribute accesses on Params4bit. If __getattr__ is defined (instead of @property),
+    Dynamo cannot trace through it and creates graph breaks. With fullgraph=True, this
+    causes torch.compile to raise an error rather than silently degrading performance.
+    """
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
+    if device == "cuda" and platform.system() == "Windows":
+        pytest.skip("Triton is not officially supported on Windows")
+
+    dim = 256
+    batch_size = 16
+    compute_dtype = torch.bfloat16
+
+    torch.compiler.reset()
+
+    class CheckpointedNet(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layers = torch.nn.ModuleList(
+                [
+                    bnb.nn.Linear4bit(
+                        dim,
+                        dim,
+                        bias=False,
+                        compute_dtype=compute_dtype,
+                        compress_statistics=compress_statistics,
+                        quant_type=quant_type,
+                    )
+                    for _ in range(4)
+                ]
+            )
+
+        def forward(self, x):
+            for layer in self.layers:
+                x = torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=False)
+            return x
+
+    net = CheckpointedNet().to(device)
+
+    x = torch.randn(batch_size, dim, dtype=compute_dtype, device=device, requires_grad=True)
+
+    # Reference output (eager)
+    ref_output = net(x)
+    ref_output.sum().backward()
+    grad_ref = x.grad.clone()
+    x.grad = None
+
+    # Compiled with fullgraph=True — will raise if there are graph breaks
+    compile_backend = "hpu_backend" if device == "hpu" else "inductor"
+    compiled_net = torch.compile(net, fullgraph=True, backend=compile_backend)
+
+    compiled_output = compiled_net(x)
+    compiled_output.sum().backward()
+    grad_compiled = x.grad.clone()
+
+    torch.testing.assert_close(compiled_output, ref_output)
+    torch.testing.assert_close(grad_compiled, grad_ref)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_params4bit_quant_state_attr_access(device, quant_type, compress_statistics):
     """Test that Params4bit proxies QuantState attributes for FSDP state_dict traversal (#1405).
 
@@ -494,7 +564,7 @@ def test_params4bit_quant_state_attr_access(device, quant_type, compress_statist
     with pytest.raises(AttributeError, match="nonexistent_attribute"):
         _ = w.nonexistent_attribute
 
-    # Verify that normal Params4bit attributes are unaffected by __getattr__
+    # Verify that normal Params4bit instance attributes are unaffected
     assert isinstance(w.quant_state, bnb.functional.QuantState)
     assert isinstance(w.bnb_quantized, bool)
     assert w.bnb_quantized is True
