@@ -20,3 +20,36 @@ Make sure this path is appended to the `LD_LIBRARY_PATH` so bnb can find the CUD
 If this does not fix the issue, please try compilation from source next.
 
 If this does not work, please open an issue and paste the printed environment if you call `make` and the associated error when running bnb.
+
+## Library not found: version mismatch
+
+If you see an error like `Library not found: libbitsandbytes_cuda128.dll` or `libbitsandbytes_rocm72.so`, it means the pre-compiled library version doesn't match the CUDA/ROCm version reported by your PyTorch installation.
+
+The library filename encodes the version: `libbitsandbytes_cuda{major}{minor}` for CUDA, `libbitsandbytes_rocm{major}{minor}` for ROCm. bitsandbytes picks which one to load based on what PyTorch reports:
+
+```python
+import torch
+print(torch.version.cuda)  # e.g. "12.8" -> looks for libbitsandbytes_cuda128
+print(torch.version.hip)   # e.g. "7.2"  -> looks for libbitsandbytes_rocm72
+```
+
+This commonly happens when your PyTorch was compiled against a different CUDA/ROCm version than what you have installed on your system. For example, PyTorch built with ROCm 7.2 reports `torch.version.hip = "7.2"` and bitsandbytes looks for `libbitsandbytes_rocm72`, even if your system has a different ROCm version installed.
+
+To resolve this:
+
+1. **Install a matching PyTorch version** that aligns with the pre-compiled libraries shipped in the bitsandbytes wheel.
+2. **Override the version at runtime** with an environment variable so bitsandbytes loads a different library:
+   ```bash
+   # Linux / macOS
+   export BNB_CUDA_VERSION=128   # or BNB_ROCM_VERSION=72
+
+   # Windows (cmd)
+   set BNB_CUDA_VERSION=128
+   ```
+3. **Compile from source** to produce a library matching your exact toolkit version. For ROCm, you can override the library name with `-DROCM_VERSION`:
+   ```bash
+   cmake -DCOMPUTE_BACKEND=hip -DROCM_VERSION=72 -S .    # produces libbitsandbytes_rocm72
+   ```
+   For CUDA, the version is detected automatically from the CUDA compiler on your PATH and cannot be overridden -- make sure the correct CUDA Toolkit is first on your PATH.
+
+   See the [installation guide](installation) for full compile-from-source instructions.

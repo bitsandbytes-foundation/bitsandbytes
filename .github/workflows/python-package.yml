@@ -137,10 +137,15 @@ jobs:
         os: [ubuntu-22.04]
         arch: [x86_64]
         rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1", "7.2.1"]
+        include:
+          - os: windows-2025
+            arch: x86_64
+            rocm_version: "7.2.1"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Clean up disk space
+        if: startsWith(matrix.os, 'ubuntu')
         run: |
           echo "Disk space before cleanup:"
           df -h
@@ -156,6 +161,9 @@ jobs:
 
           echo "Disk space after cleanup:"
           df -h
+      - name: Setup MSVC
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1.13.0
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
         env:

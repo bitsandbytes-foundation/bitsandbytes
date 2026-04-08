@@ -135,6 +135,18 @@ bitsandbytes has the following minimum requirements for all platforms:
     </tr>
     <tr>
       <td></td>
+      <td>🟥 AMD GPU <br><code>cuda</code></td>
+      <td>
+        RDNA: gfx1100, gfx1101, gfx1102,<br>
+        gfx1150, gfx1151,<br>
+        gfx1200, gfx1201
+      </td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
+    </tr>
+    <tr>
+      <td></td>
       <td>🟦 Intel GPU <br><code>xpu</code></td>
       <td>
         Arc A-Series (Alchemist) <br>
