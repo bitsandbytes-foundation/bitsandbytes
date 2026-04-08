@@ -382,10 +382,7 @@ def matmul_4bit(
     bias: Optional[torch.Tensor] = None,
 ):
     assert quant_state is not None
-    # Change dtype to input dtype on CPU
     if A.device.type == "cpu":
-        quant_state.dtype = A.dtype
-
         if getattr(quant_state, "packing_format_for_cpu", False):
             out = F.gemv_4bit(A, B, out, state=quant_state)
             if bias is not None:
