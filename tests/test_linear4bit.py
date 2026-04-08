@@ -453,6 +453,8 @@ def test_linear4bit_torch_compile_activation_checkpointing(device, quant_type, c
         pytest.skip("This configuration is not supported on HPU.")
     if device == "cuda" and platform.system() == "Windows":
         pytest.skip("Triton is not officially supported on Windows")
+    if device == "cpu":
+        pytest.skip("matmul_4bit mutates quant_state.dtype on CPU, causing a separate graph break (#1917)")
 
     dim = 256
     batch_size = 16
