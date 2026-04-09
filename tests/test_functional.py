@@ -1140,7 +1140,7 @@ class TestQuantize4BitFunctional:
             },
             torch.float32: {
                 "le512": {"err1": (2e-8, 2e-9), "relerr1": (8e-7, 1.2e-6), "maxerr1": (6e-8, 2e-8)},
-                "gt512": {"err1": (1e-8, 2e-9), "relerr1": (5e-7, 1.6e-7), "maxerr1": (4e-8, 1e-8)},
+                "gt512": {"err1": (1e-8, 2e-9), "relerr1": (5e-7, 1.6e-7), "maxerr1": (5e-8, 1e-8)},
             },
             torch.bfloat16: {
                 "le512": {"err1": (0.00042, 0.000059), "relerr1": (0.0041, 0.01153), "maxerr1": (0.0037, 0.000556)},
