@@ -721,7 +721,8 @@ def dequantize_blockwise(
             The dequantized tensor. The datatype is indicated by `quant_state.dtype` and defaults to `torch.float32`.
     """
 
-    assert quant_state is not None or absmax is not None
+    if quant_state is None and absmax is None:
+        raise ValueError("Either quant_state or absmax must be provided")
     if code is None and quant_state is None:
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
