@@ -32,6 +32,8 @@ def _dequantize_4bit_impl(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
+    # XPU SYCL kernels only support contiguous tensors.
+    A = A.contiguous()
     args = (
         None,
         get_ptr(A),
@@ -61,6 +63,8 @@ def _dequantize_4bit_impl(
 def _dequantize_blockwise_impl(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
 ) -> None:
+    # XPU SYCL kernels only support contiguous tensors.
+    A = A.contiguous()
     args = (
         get_ptr(code),
         get_ptr(A),

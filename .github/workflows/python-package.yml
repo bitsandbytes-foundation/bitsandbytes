@@ -136,11 +136,16 @@ jobs:
       matrix:
         os: [ubuntu-22.04]
         arch: [x86_64]
-        rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1", "7.2"]
+        rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1", "7.2.1"]
+        include:
+          - os: windows-2025
+            arch: x86_64
+            rocm_version: "7.2.1"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Clean up disk space
+        if: startsWith(matrix.os, 'ubuntu')
         run: |
           echo "Disk space before cleanup:"
           df -h
@@ -156,6 +161,9 @@ jobs:
 
           echo "Disk space after cleanup:"
           df -h
+      - name: Setup MSVC
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/msvc-dev-cmd@v1.13.0
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
         env:
@@ -332,6 +340,12 @@ jobs:
           done
 
           cat >> body.md << 'ENDOFMARKDOWN'
+          > **Custom PyTorch builds (Intel XPU, ROCm, etc.):**
+          > The `--force-reinstall` flag causes pip to re-resolve all dependencies from PyPI, which may replace your custom PyTorch build with the default CUDA variant. To avoid this, add `--no-deps`:
+          > ```sh
+          > pip install --force-reinstall --no-deps https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl
+          > ```
+
           > **Note:**
           > These wheels are updated automatically with every commit to `main` and become available as soon as the [python-package.yml](.github/workflows/python-package.yml) workflow finishes.
 

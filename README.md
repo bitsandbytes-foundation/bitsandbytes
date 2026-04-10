@@ -57,7 +57,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>Minimum: AVX2<br>Optimized: AVX512F, AVX512BF16</td>
       <td>✅</td>
       <td>✅</td>
-      <td>❌</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
@@ -88,7 +88,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       </td>
       <td>✅</td>
       <td>✅</td>
-      <td>〰️</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
@@ -123,12 +123,24 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>AVX2</td>
       <td>✅</td>
       <td>✅</td>
-      <td>❌</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
       <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
       <td>SM60+ minimum<br>SM75+ recommended</td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
+    </tr>
+    <tr>
+      <td></td>
+      <td>🟥 AMD GPU <br><code>cuda</code></td>
+      <td>
+        RDNA: gfx1100, gfx1101, gfx1102,<br>
+        gfx1150, gfx1151,<br>
+        gfx1200, gfx1201
+      </td>
       <td>✅</td>
       <td>✅</td>
       <td>✅</td>
@@ -142,7 +154,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       </td>
       <td>✅</td>
       <td>✅</td>
-      <td>〰️</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td colspan="6">🍎 <strong>macOS 14+</strong></td>

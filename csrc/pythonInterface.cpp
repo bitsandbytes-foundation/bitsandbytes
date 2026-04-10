@@ -757,6 +757,18 @@ void cquantize_blockwise_cpu_fp32(
     quantize_cpu(code, A, absmax, out, blocksize, n);
 }
 
+void cquantize_blockwise_cpu_bf16(
+    float* code, bf16_t* A, float* absmax, unsigned char* out, long long blocksize, long long n
+) {
+    quantize_cpu_bf16(code, A, absmax, out, blocksize, n);
+}
+
+void cquantize_blockwise_cpu_fp16(
+    float* code, fp16_t* A, float* absmax, unsigned char* out, long long blocksize, long long n
+) {
+    quantize_cpu_fp16(code, A, absmax, out, blocksize, n);
+}
+
 void cdequantize_blockwise_cpu_fp32(
     float* code, unsigned char* A, const float* absmax, float* out, long long blocksize, long long n
 ) {

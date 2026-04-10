@@ -228,6 +228,26 @@ def test_linear8bit_serialization(linear8bit):
     assert (linear8bit.weight.CB == deserialized.weight.CB).all()
 
 
+def test_linear8bit_state_dict_skips_scb_for_tied_weight():
+    linear = Linear8bitLt(8, 8, bias=False, has_fp16_weights=False)
+    linear.weight = torch.nn.Parameter(torch.randn_like(linear.weight))
+
+    state_dict = linear.state_dict()
+
+    assert "SCB" not in state_dict
+    assert "weight_format" not in state_dict
+
+
+def test_linear8bit_load_state_dict_raises_runtime_for_tied_weight():
+    linear = Linear8bitLt(8, 8, bias=False, has_fp16_weights=False)
+    linear.weight = torch.nn.Parameter(torch.randn_like(linear.weight))
+    state_dict = linear.state_dict()
+    state_dict["SCB"] = torch.ones(linear.out_features)
+
+    with pytest.raises(RuntimeError, match="Loading a quantized checkpoint into non-quantized Linear8bitLt"):
+        linear.load_state_dict(state_dict, strict=False)
+
+
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("threshold", [0.0, 6.0], ids=id_formatter("threshold"))
 @pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
