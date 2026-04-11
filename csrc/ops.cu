@@ -421,15 +421,21 @@ void gemm_4bit_inference_naive(
     int blocksize, bnb_stream_t stream
 ) {
 
-    int num_blocks = (m + 3) / 4;
 #if BNB_HIP
-    if (bnb_host_warp_size() == 64) {
-        num_blocks = (m + 1) / 2;
+    const int ws = bnb_host_warp_size();
+    int num_blocks = (m + 1) / 2;
+    if (ws == 32) {
+        kgemm_4bit_inference_naive<T, 64, BITS>
+            <<<num_blocks, 64, 0, stream>>>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize);
+    } else {
+        kgemm_4bit_inference_naive<T, 128, BITS>
+            <<<num_blocks, 128, 0, stream>>>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize);
     }
-#endif
-
+#else
+    int num_blocks = (m + 3) / 4;
     kgemm_4bit_inference_naive<T, 128, BITS>
         <<<num_blocks, 128, 0, stream>>>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize);
+#endif
     BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 }
 
