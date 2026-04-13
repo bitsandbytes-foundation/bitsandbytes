@@ -20,6 +20,14 @@ import torch.nn as nn
 import bitsandbytes as bnb
 
 
+def _get_device_and_backend():
+    """Auto-detect accelerator device and distributed backend."""
+    device_type = str(torch.accelerator.current_accelerator())
+    backend_map = {"cuda": "nccl", "xpu": "ccl"}
+    backend = backend_map.get(device_type, "gloo")
+    return device_type, backend
+
+
 class SimpleQLoRAModel(nn.Module):
     """Minimal model with a frozen 4-bit base layer and a trainable adapter."""
 
@@ -33,15 +41,16 @@ class SimpleQLoRAModel(nn.Module):
 
 
 def main():
-    dist.init_process_group(backend="nccl")
+    device_type, backend = _get_device_and_backend()
+    dist.init_process_group(backend=backend)
     rank = dist.get_rank()
-    torch.cuda.set_device(rank)
+    torch.accelerator.set_device_index(rank)
 
     errors = []
 
     for quant_type in ("nf4", "fp4"):
         model = SimpleQLoRAModel(quant_type=quant_type)
-        model = model.to("cuda")
+        model = model.to(device_type)
 
         # Freeze quantized base weights (as in real QLoRA)
         for p in model.base.parameters():
