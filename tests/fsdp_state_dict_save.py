@@ -23,7 +23,7 @@ import bitsandbytes as bnb
 def _get_device_and_backend():
     """Auto-detect accelerator device and distributed backend."""
     device_type = str(torch.accelerator.current_accelerator())
-    backend_map = {"cuda": "nccl", "xpu": "ccl"}
+    backend_map = {"cuda": "nccl", "xpu": "xccl"}
     backend = backend_map.get(device_type, "gloo")
     return device_type, backend
 
