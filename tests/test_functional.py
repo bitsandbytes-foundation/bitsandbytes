@@ -2,7 +2,6 @@ import math
 import platform
 import time
 
-import einops
 from packaging import version
 import pytest
 import torch
@@ -335,59 +334,6 @@ class Test8BitBlockwiseQuantizeFunctional:
 def test_stable_embedding():
     layer = bnb.nn.StableEmbedding(1024, 1024)
     layer.reset_parameters()
-
-
-def quant(x):
-    max1 = torch.abs(x).max()
-    x = torch.round(x / max1 * 127)
-    return max1, x.to(torch.int8)
-
-
-def dequant(c, maxC):
-    return c.float() * (maxC / 127)
-
-
-def mm_dequant(maxA, maxB, C):
-    return C.float() * (maxA / 127) * (maxB / 127)
-
-
-def quant_multi(x, dim):
-    max1 = torch.amax(torch.abs(x), dim=dim, keepdim=True)
-    max1[max1 == 0] = 1.0
-    x = torch.round(x / max1 * 127)
-    return max1, x.to(torch.int8)
-
-
-def quant_multi_chunk(x, dim, chunk_size=32):
-    if dim == 1:
-        x_chunked = einops.rearrange(x, "(c a) b -> c a b", c=chunk_size)
-        max1 = torch.amax(torch.abs(x_chunked), dim=dim + 1, keepdim=True)
-        max1 = torch.tile(max1, (1, 1, x.shape[1]))
-        max1 = max1.view(x.shape)
-    elif dim == 0:
-        x_chunked = einops.rearrange(x, "a (b c) -> a b c", c=chunk_size)
-        max1 = torch.amax(torch.abs(x_chunked), dim=dim, keepdim=True)
-        max1 = torch.tile(max1, (x.shape[0], 1, 1))
-        max1 = max1.view(x.shape)
-    max1[max1 == 0] = 1.0
-    x = torch.round(x / max1 * 127)
-    return max1, x.to(torch.int8)
-
-
-def mean(xx):
-    return sum(xx) / float(len(xx))
-
-
-methods = {
-    "linear": (
-        lambda x, dim: quant(x),
-        lambda x, dim: quant(x),
-        dequant,
-        dequant,
-        mm_dequant,
-    ),
-    "vectorwise": (quant_multi, quant_multi, dequant, dequant, mm_dequant),
-}
 
 
 class TestLLMInt8Functional:
