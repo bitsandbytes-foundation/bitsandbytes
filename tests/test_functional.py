@@ -446,6 +446,42 @@ class TestLLMInt8Functional:
             n = C5.numel()
             assert_all_approx_close(C1, C4, atol=0.015, rtol=0.1, count=int(0.01 * n))
 
+    # Keep CUDA-only coverage for int8_double_quant during deprecation cycle.
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+    @pytest.mark.parametrize("dim1", [2048, 4096], ids=id_formatter("dim1"))
+    @pytest.mark.parametrize("dim2", [512, 1024], ids=id_formatter("dim2"))
+    def test_int8_double_quant(self, dim1, dim2):
+        for i in range(k):
+            A = torch.randn(dim1, dim2, device="cuda").half()
+            out_col1, Scol = self.vectorwise_quant(A, dim=0)
+            out_row1, Srow = self.vectorwise_quant(A, dim=1)
+
+            CA, CAt, statsA, statsAt, _ = F.int8_double_quant(A)
+
+            # max difference is 1 due to rounding differences
+            torch.testing.assert_close(CA, out_row1, atol=1, rtol=0)
+            torch.testing.assert_close(CAt, out_col1, atol=1, rtol=0)
+
+            n = CAt.numel()
+            num_not_close_rows = (torch.isclose(CA, out_row1, atol=1) == 0).sum().item()
+            num_not_close_cols = (torch.isclose(CAt, out_col1, atol=1) == 0).sum().item()
+
+            # allow for 1:500 error due to rounding differences
+            min_error = 1 / 500
+            if num_not_close_cols > (min_error * n):
+                print(
+                    f"Min error exceeded {num_not_close_cols} elements are different. Error: {num_not_close_cols / n:.4f}"
+                )
+                assert False
+            if num_not_close_rows > (min_error * n):
+                print(
+                    f"Min error exceeded {num_not_close_rows} elements are different. Error: {num_not_close_rows / n:.4f}"
+                )
+                assert False
+
+            torch.testing.assert_close(Srow.flatten().float(), statsA)
+            torch.testing.assert_close(Scol.flatten().float(), statsAt)
+
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize(
         ("dim1", "dim4", "inner"),
