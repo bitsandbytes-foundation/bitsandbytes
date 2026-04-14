@@ -569,7 +569,14 @@ def test_params4bit_quant_state_attr_access(device, quant_type, compress_statist
     assert w.bnb_quantized is True
 
 
-@pytest.mark.skipif(not torch.accelerator.is_available(), reason="FSDP requires an accelerator device")
+@pytest.mark.skipif(
+    not (
+        (hasattr(torch, "accelerator") and torch.accelerator.is_available())
+        or torch.cuda.is_available()
+        or (hasattr(torch, "xpu") and torch.xpu.is_available())
+    ),
+    reason="FSDP requires an accelerator device",
+)
 def test_fsdp_state_dict_save_4bit():
     """Integration test: FSDP get_model_state_dict with cpu_offload on a 4-bit model (#1405).
 
