@@ -19,6 +19,8 @@ from tests.helpers import (
     torch_save_to_buffer,
 )
 
+HAS_FP16_WEIGHTS_NON_DEPRECATED = [False]
+
 
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
@@ -65,7 +67,8 @@ def test_linear_no_igemmlt(device):
 
 
 @pytest.mark.parametrize("device", get_available_devices())
-@pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE, ids=id_formatter("has_fp16_weights"))
+# Only keep non-deprecated coverage for this test; deprecated fp16-weight path is excluded.
+@pytest.mark.parametrize("has_fp16_weights", HAS_FP16_WEIGHTS_NON_DEPRECATED, ids=id_formatter("has_fp16_weights"))
 @pytest.mark.parametrize("threshold", [0.0, 6.0], ids=id_formatter("threshold"))
 @pytest.mark.parametrize("serialize_before_forward", TRUE_FALSE, ids=id_formatter("serialize_before_forward"))
 @pytest.mark.parametrize("deserialize_before_cuda", TRUE_FALSE, ids=id_formatter("deserialize_before_cuda"))
@@ -80,9 +83,6 @@ def test_linear_serialization(
     save_before_forward,
     load_before_cuda,
 ):
-    if device != "cuda" and has_fp16_weights:
-        pytest.skip("has_fp16_weights is only supported on CUDA and is deprecated")
-
     linear = torch.nn.Linear(32, 96)
     # TODO: Fallback for bad shapes
     x = torch.randn(4, 32, dtype=torch.half)
