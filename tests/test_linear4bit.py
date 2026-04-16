@@ -451,7 +451,7 @@ def test_linear4bit_torch_compile_activation_checkpointing(device, quant_type, c
     """
     if device == "hpu" and not is_supported_on_hpu(quant_type):
         pytest.skip("This configuration is not supported on HPU.")
-    if platform.system() == "Windows":
+    if device == "cuda" and platform.system() == "Windows":
         pytest.skip("Triton is not officially supported on Windows")
     dim = 256
     batch_size = 16
@@ -569,6 +569,7 @@ def test_params4bit_quant_state_attr_access(device, quant_type, compress_statist
     assert w.bnb_quantized is True
 
 
+@pytest.mark.skipif(platform.system() == "Windows", reason="FSDP is not supported on Windows")
 @pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="FSDP requires an accelerator device")
 def test_fsdp_state_dict_save_4bit():
     """Integration test: FSDP get_model_state_dict with cpu_offload on a 4-bit model (#1405).
