@@ -221,12 +221,6 @@ jobs:
           pip install pytest-cov
         shell: bash
 
-      # Windows: Downgrade NumPy for torch<2.4.1 compatibility
-      # See: https://github.com/pytorch/pytorch/issues/131668
-      - name: Downgrade NumPy
-        if: inputs.platform == 'windows' && startsWith(inputs.torch_version, '2.3.')
-        run: pip install "numpy<2"
-
       - name: Show installed packages
         run: pip list
 
