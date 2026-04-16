@@ -4,16 +4,8 @@ from typing import Optional
 
 import torch
 
-_IS_TORCH_GTE_24 = False
-
-if hasattr(torch.library, "register_fake"):
-    _IS_TORCH_GTE_24 = True
-    register_fake = torch.library.register_fake
-    register_kernel = torch.library.register_kernel
-else:
-    # PyTorch <= 2.3
-    register_fake = torch.library.impl_abstract
-    register_kernel = torch.library.impl
+register_fake = torch.library.register_fake
+register_kernel = torch.library.register_kernel
 
 # Int8 mixed precision matmul + dequant + bias
 torch.library.define(
