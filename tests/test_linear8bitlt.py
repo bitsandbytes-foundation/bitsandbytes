@@ -172,8 +172,9 @@ def test_linear_serialization(
     assert torch.allclose(x_first.grad, x_third.grad, atol=1e-5)
 
 
-@pytest.fixture
-def linear8bit(requires_cuda):
+@pytest.fixture(params=get_available_devices(no_cpu=True))
+def linear8bit(request):
+    device = request.param
     linear = torch.nn.Linear(32, 96)
     linear_custom = Linear8bitLt(
         linear.in_features,
@@ -188,7 +189,7 @@ def linear8bit(requires_cuda):
         has_fp16_weights=False,
     )
     linear_custom.bias = linear.bias
-    linear_custom = linear_custom.cuda()
+    linear_custom = linear_custom.to(device)
     return linear_custom
 
 

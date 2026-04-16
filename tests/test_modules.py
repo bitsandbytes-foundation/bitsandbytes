@@ -448,34 +448,36 @@ def test_4bit_embedding_warnings(device, caplog):
     assert any("inference" in msg for msg in caplog.messages)
 
 
-def test_4bit_embedding_weight_fsdp_fix(requires_cuda):
+@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+def test_4bit_embedding_weight_fsdp_fix(device):
     num_embeddings = 64
     embedding_dim = 32
 
     module = bnb.nn.Embedding4bit(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
 
-    module.cuda()
+    module.to(device)
 
     module.weight.quant_state = None
 
-    input_tokens = torch.randint(low=0, high=num_embeddings, size=(1,), device="cuda")
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=(1,), device=device)
 
     module(input_tokens)
 
     assert module.weight.quant_state is not None
 
 
-def test_4bit_linear_weight_fsdp_fix(requires_cuda):
+@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+def test_4bit_linear_weight_fsdp_fix(device):
     inp_size = 64
     out_size = 32
 
     module = bnb.nn.Linear4bit(inp_size, out_size)
 
-    module.cuda()
+    module.to(device)
 
     module.weight.quant_state = None
 
-    input_tensor = torch.randn((1, inp_size), device="cuda")
+    input_tensor = torch.randn((1, inp_size), device=device)
 
     module(input_tensor)
 
