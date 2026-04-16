@@ -74,12 +74,12 @@ jobs:
           - os: windows-2025
             arch: x86_64
         cuda_version:
-          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.2"]
+          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.2", "13.2.0"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
         # Windows: We install Cuda on the agent (slow)
-      - uses: Jimver/cuda-toolkit@6008063726ffe3309d1b22e413d9e88fed91a2f2 # v0.2.29
+      - uses: Jimver/cuda-toolkit@3d45d157f327c09c04b50ee6ccdea2d9d017ec76 # v0.2.35
         if: startsWith(matrix.os, 'windows')
         id: cuda-toolkit
         with:

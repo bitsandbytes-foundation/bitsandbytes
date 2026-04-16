@@ -194,6 +194,11 @@ if(BUILD_CUDA)
         string(APPEND CMAKE_CUDA_FLAGS " --compress-mode=size")
     endif()
 
+    # CUDA 13.2+ CCCL headers require MSVC's standard conforming preprocessor.
+    if(MSVC AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.2")
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/Zc:preprocessor")
+    endif()
+
     if(PTXAS_VERBOSE)
         string(APPEND CMAKE_CUDA_FLAGS " -Xptxas=-v")
     endif()
