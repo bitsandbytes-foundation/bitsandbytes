@@ -31,12 +31,12 @@ jobs:
         platform: [linux-x64, linux-aarch64, macos]
         # default runners don't have AVX-512 support, but icelake does
         cpu_type: ["", icelake]
-        torch_version: ["2.3.1", "2.11.0"]
+        torch_version: ["2.4.1", "2.11.0"]
 
         exclude:
           # aarch64 minimum torch version is 2.5.1
           - platform: linux-aarch64
-            torch_version: "2.3.1"
+            torch_version: "2.4.1"
           # icelake only applies to linux-x64
           - platform: linux-aarch64
             cpu_type: icelake
@@ -44,7 +44,7 @@ jobs:
             cpu_type: icelake
 
         include:
-          # Add aarch64 with torch 2.5.1 instead of 2.3.1
+          # Add aarch64 with torch 2.5.1 instead of 2.4.1
           - platform: linux-aarch64
             cpu_type: ""
             torch_version: "2.5.1"
@@ -70,7 +70,7 @@ jobs:
         include:
           # Map CUDA version to torch version and PyPI index
           - cuda_version: "11.8.0"
-            torch_version: "2.3.1"
+            torch_version: "2.4.1"
             pypi_index: "https://download.pytorch.org/whl/cu118"
           - cuda_version: "12.8.1"
             torch_version: "2.9.1"

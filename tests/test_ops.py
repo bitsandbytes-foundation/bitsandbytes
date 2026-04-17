@@ -6,12 +6,7 @@ import torch
 import bitsandbytes
 from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter, is_supported_on_hpu
 
-# torch.library.opcheck is only available in torch 2.4 and later.
-# When testing with older versions, we will skip it as a no-op.
-if torch.__version__ >= (2, 4):
-    opcheck = torch.library.opcheck
-else:
-    opcheck = lambda *args, **kwargs: None
+opcheck = torch.library.opcheck
 
 
 class TestLLMInt8Ops:
