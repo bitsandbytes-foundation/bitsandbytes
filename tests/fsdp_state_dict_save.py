@@ -20,6 +20,34 @@ import torch.nn as nn
 import bitsandbytes as bnb
 
 
+def _current_accelerator_type():
+    if hasattr(torch, "accelerator") and torch.accelerator.is_available():
+        return str(torch.accelerator.current_accelerator())
+    if hasattr(torch, "xpu") and torch.xpu.is_available():
+        return "xpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
+
+
+def _set_device_index(index: int, device_type: str):
+    if hasattr(torch, "accelerator"):
+        torch.accelerator.set_device_index(index)
+        return
+    if device_type == "cuda":
+        torch.cuda.set_device(index)
+    elif device_type == "xpu" and hasattr(torch, "xpu") and hasattr(torch.xpu, "set_device"):
+        torch.xpu.set_device(index)
+
+
+def _get_device_and_backend():
+    """Auto-detect accelerator device and distributed backend."""
+    device_type = _current_accelerator_type()
+    backend_map = {"cuda": "nccl", "xpu": "xccl"}
+    backend = backend_map.get(device_type, "gloo")
+    return device_type, backend
+
+
 class SimpleQLoRAModel(nn.Module):
     """Minimal model with a frozen 4-bit base layer and a trainable adapter."""
 
@@ -33,15 +61,16 @@ class SimpleQLoRAModel(nn.Module):
 
 
 def main():
-    dist.init_process_group(backend="nccl")
+    device_type, backend = _get_device_and_backend()
+    dist.init_process_group(backend=backend)
     rank = dist.get_rank()
-    torch.cuda.set_device(rank)
+    _set_device_index(rank, device_type)
 
     errors = []
 
     for quant_type in ("nf4", "fp4"):
         model = SimpleQLoRAModel(quant_type=quant_type)
-        model = model.to("cuda")
+        model = model.to(device_type)
 
         # Freeze quantized base weights (as in real QLoRA)
         for p in model.base.parameters():

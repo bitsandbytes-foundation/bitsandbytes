@@ -98,10 +98,10 @@ class Test8BitBlockwiseQuantizeFunctional:
     def test_dynamic_blockwise_quantization(self, device, dtype, nested, blocksize, signed):
         iters = 100
 
-        if device != "cuda":
+        if device not in ["cuda", "xpu"]:
             iters = 10
 
-            # This test is slow in our non-CUDA implementations, so avoid atypical use cases.
+            # This test is slow in our non-cuda/non-xpu implementations, so avoid atypical use cases.
             if nested:
                 pytest.skip("Not a typical use case.")
             if blocksize != 256:
