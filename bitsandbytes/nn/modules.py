@@ -11,6 +11,7 @@ from torch import Tensor, device, dtype, nn
 import torch.nn.functional as F
 
 import bitsandbytes as bnb
+from bitsandbytes._telemetry import report_feature
 from bitsandbytes.functional import (
     QuantState,
     _convert_weight_packed_for_cpu,
@@ -97,6 +98,7 @@ class StableEmbedding(torch.nn.Embedding):
         )
         self.norm = torch.nn.LayerNorm(embedding_dim, device=device)
         GlobalOptimManager.get_instance().register_module_override(self, "weight", {"optim_bits": 32})
+        report_feature("embedding", {"variant": "stable"})
 
     def reset_parameters(self) -> None:
         torch.nn.init.xavier_uniform_(self.weight)
@@ -179,6 +181,7 @@ class Embedding(torch.nn.Embedding):
             device=device,
         )
         GlobalOptimManager.get_instance().register_module_override(self, "weight", {"optim_bits": 32})
+        report_feature("embedding", {"variant": "standard"})
 
     def reset_parameters(self) -> None:
         torch.nn.init.xavier_uniform_(self.weight)
@@ -239,6 +242,15 @@ class Params4bit(torch.nn.Parameter):
         self.bnb_quantized = bnb_quantized
         self.data = data
         self.module = module
+        report_feature(
+            "params_4bit",
+            {
+                "quant_type": quant_type,
+                "blocksize": blocksize,
+                "compress_statistics": compress_statistics,
+                "quant_storage": str(quant_storage).replace("torch.", ""),
+            },
+        )
         return self
 
     def __getstate__(self):
@@ -607,6 +619,16 @@ class Linear4bit(nn.Linear):
                 destination[prefix + "weight." + k] = v if keep_vars else v.detach()
 
     def forward(self, x: torch.Tensor):
+        report_feature(
+            "linear_4bit",
+            {
+                "quant_type": getattr(self.weight, "quant_type", "unknown"),
+                "blocksize": getattr(self.weight, "blocksize", 0),
+                "compress_statistics": getattr(self.weight, "compress_statistics", False),
+                "input_dtype": str(x.dtype).replace("torch.", ""),
+                "compute_dtype": (str(self.compute_dtype).replace("torch.", "") if self.compute_dtype else "auto"),
+            },
+        )
         fix_4bit_weight_quant_state_from_module(self)
         quant_state = self.weight.quant_state
 
@@ -732,6 +754,7 @@ class Int8Params(torch.nn.Parameter):
         obj.CB = CB
         obj.SCB = SCB
         obj.has_fp16_weights = has_fp16_weights
+        report_feature("int8_params", {"has_fp16_weights": has_fp16_weights})
         return obj
 
     def _quantize(self, device):
@@ -855,6 +878,7 @@ class Embedding8bit(nn.Embedding):
         self.dtype = self.weight.data.dtype
 
         self.weight = Int8Params(self.weight.data, has_fp16_weights=False, requires_grad=False)
+        report_feature("embedding", {"variant": "8bit"})
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         raise NotImplementedError("Saving Embedding8bit module is not implemented")
@@ -926,6 +950,7 @@ class Embedding4bit(nn.Embedding):
                 f"Embedding size {embedding_dim} is not divisible by block size {blocksize}. "
                 "This will lead to slow inference.",
             )
+        report_feature("embedding", {"variant": "4bit", "quant_type": quant_type})
 
     def _forward_with_partial_dequantize(self, input: Tensor):
         assert self.embedding_dim % self.weight.quant_state.blocksize == 0
@@ -1178,6 +1203,14 @@ class Linear8bitLt(nn.Linear):
         return result
 
     def forward(self, x: torch.Tensor):
+        report_feature(
+            "linear_8bit",
+            {
+                "has_fp16_weights": self.state.has_fp16_weights,
+                "threshold": self.state.threshold,
+                "input_dtype": str(x.dtype).replace("torch.", ""),
+            },
+        )
         self.state.is_training = self.training
         if self.weight.CB is not None:
             self.init_8bit_state()
@@ -1199,6 +1232,7 @@ class OutlierAwareLinear(nn.Linear):
         super().__init__(input_features, output_features, bias, device)
         self.outlier_dim = None
         self.is_quantized = False
+        report_feature("outlier_aware_linear")
 
     def forward_with_outliers(self, x, outlier_idx):
         raise NotImplementedError("Please override the `forward_with_outliers(self, x, outlier_idx)` function")

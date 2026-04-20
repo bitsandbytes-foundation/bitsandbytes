@@ -11,6 +11,7 @@ import warnings
 
 import torch
 
+from bitsandbytes._telemetry import report_feature
 import bitsandbytes.functional as F
 from bitsandbytes.utils import sync_gpu
 
@@ -104,6 +105,10 @@ class GlobalOptimManager:
             key_value_dict = {key: value}
 
         if key_value_dict is not None:
+            report_feature(
+                "optim_override_config",
+                {"keys": ",".join(sorted(key_value_dict.keys()))},
+            )
             for p in parameters:
                 if id(p) in self.pid2config:
                     self.pid2config[id(p)].update(key_value_dict)
@@ -111,6 +116,10 @@ class GlobalOptimManager:
                     self.pid2config[id(p)] = key_value_dict
 
     def register_module_override(self, module, param_name, config):
+        report_feature(
+            "optim_register_module_override",
+            {"keys": ",".join(sorted(config.keys())) if isinstance(config, dict) else "unknown"},
+        )
         self.module_weight_config_triple.append((module, param_name, config))
 
 
@@ -310,6 +319,13 @@ class Optimizer8bit(torch.optim.Optimizer):
             closure (`Callable`, *optional*, defaults to `None`):
                 A closure that reevaluates the model and returns the loss.
         """
+        report_feature(
+            "optimizer",
+            {
+                "name": type(self).__name__,
+                "is_paged": self.is_paged,
+            },
+        )
         loss = None
         if closure is not None:
             with torch.enable_grad():

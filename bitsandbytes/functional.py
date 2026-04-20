@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
+from bitsandbytes._telemetry import report_feature
 from bitsandbytes.utils import pack_dict_to_tensor, unpack_tensor_to_dict
 
 from .cextension import lib
@@ -1592,6 +1593,8 @@ def int8_double_quant(
         - `torch.Tensor` with dtype `torch.float32`: The column-wise quantization scales.
         - `torch.Tensor` with dtype `torch.int32`, *optional*: A list of column indices which contain outlier features.
     """
+
+    report_feature("int8_double_quant")
 
     if row_stats is not None:
         raise ValueError("row_stats must be None. int8_double_quant() does not support pre-allocated row_stats.")

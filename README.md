@@ -183,6 +183,43 @@ bitsandbytes has the following minimum requirements for all platforms:
 * 🤗 [Diffusers](https://huggingface.co/docs/diffusers/quantization/bitsandbytes)
 * 🤗 [PEFT](https://huggingface.co/docs/peft/developer_guides/quantization#quantize-a-model)
 
+## Telemetry
+
+`bitsandbytes` sends anonymous, aggregate feature-usage telemetry to the
+Hugging Face Hub. This data is used to prioritize maintenance (which quantization
+methods and optimizers are actually in use?) and to safely retire features that
+are no longer called by anyone.
+
+### What is collected
+
+* A session fingerprint sent once per process: `bitsandbytes` version, OS
+  name/version, CPU architecture, Python/PyTorch versions, accelerator
+  vendor/name/arch/count (e.g. `nvidia`, `NVIDIA H100`, `sm_90`, `1`).
+* One event per distinct feature used, with feature-specific flags. For
+  example: using `Linear4bit` sends `quant_type=nf4`, `blocksize=64`; using
+  `AdamW8bit.step()` sends `name=AdamW8bit`, `is_paged=false`.
+
+### What is never collected
+
+Model names, file paths, tensor shapes, parameter values, user identifiers, or
+anything derived from user input.
+
+### How to opt out
+
+Set any one of these environment variables:
+
+| Variable                     | Scope                        |
+| ---------------------------- | ---------------------------- |
+| `BNB_DISABLE_TELEMETRY=1`    | `bitsandbytes` only          |
+| `HF_HUB_DISABLE_TELEMETRY=1` | all Hugging Face libraries   |
+| `HF_HUB_OFFLINE=1`           | all Hugging Face libraries   |
+
+Telemetry is also automatically suppressed while running under `pytest` (so
+CI and local test runs don't pollute the stream) and a silent no-op when
+`huggingface_hub` is not installed. The implementation lives in
+[`bitsandbytes/_telemetry.py`](bitsandbytes/_telemetry.py) and each event
+fires at most once per process.
+
 ## :heart: Sponsors
 The continued maintenance and development of `bitsandbytes` is made possible thanks to the generous support of our sponsors. Their contributions help ensure that we can keep improving the project and delivering valuable updates to the community.
 
