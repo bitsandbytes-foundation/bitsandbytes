@@ -7,7 +7,10 @@ This guide will show you how to use 8-bit optimizers.
 > [!WARNING]
 > 8-bit optimizers reduce memory usage and accelerate optimization on a wide range of tasks. However, since 8-bit optimizers only reduce memory proportional to the number of parameters, models that use large amounts of activation memory, such as convolutional networks, don't really benefit from 8-bit optimizers. 8-bit optimizers are most beneficial for training or finetuning models with many parameters on highly memory-constrained GPUs.
 
-8-bit optimizers are a drop-in replacement for regular optimizers which means they also accept the same arguments as a regular optimizer. For NLP models, it is recommended to use the [`~nn.StableEmbedding`] class to improve stability and results.
+8-bit optimizers are designed as drop-in replacements for regular optimizers, so most arguments are supported. For NLP models, it is recommended to use the [`~nn.StableEmbedding`] class to improve stability and results.
+
+> [!NOTE]
+> `Adam8bit`/`PagedAdam8bit` always use 8-bit optimizer state, and `amsgrad` is not supported (must be `False`).
 
 ```diff
 import bitsandbytes as bnb
@@ -30,7 +33,7 @@ import bitsandbytes as bnb
 adam = bnb.optim.Adam8bit(model.parameters(), min_8bit_size=16384)
 ```
 
-Other parameters you can configure include the learning rate (`lr`), the decay rates (`betas`), and the number of bits of the optimizer state (`optim_bits`). For example, to initialize a 32-bit [`~bitsandbytes.optim.Adam`] optimizer:
+Other parameters you can configure include the learning rate (`lr`) and the decay rates (`betas`). The `optim_bits` argument applies to the base optimizers (for example `Adam`), while `Adam8bit`/`PagedAdam8bit` always use 8-bit optimizer state. For example, to initialize a 32-bit [`~bitsandbytes.optim.Adam`] optimizer:
 
 ```py
 import bitsandbytes as bnb
