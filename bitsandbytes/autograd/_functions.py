@@ -322,7 +322,12 @@ class MatMul4Bit(torch.autograd.Function):
             out.copy_(output)
             output = out
 
-        # 3. Save state
+        # 3. Write to out tensor if provided
+        if out is not None:
+            out.copy_(output)
+            output = out
+
+        # 4. Save state
         ctx.state = quant_state
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
