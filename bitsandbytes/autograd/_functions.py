@@ -396,7 +396,7 @@ def matmul_4bit(
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
 
     num_a_rows = A.numel() // A.shape[-1]
-    if num_a_rows <= FUSED_4BIT_DEQUANT_LIMIT and A.requires_grad == False and A.device.type != "hpu":
+    if 0 < num_a_rows <= FUSED_4BIT_DEQUANT_LIMIT and A.requires_grad == False and A.device.type != "hpu":
         if A.shape[-1] % quant_state.blocksize != 0:
             warn(
                 f"Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}",

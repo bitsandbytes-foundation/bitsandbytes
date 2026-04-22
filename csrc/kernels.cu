@@ -1471,7 +1471,8 @@ __global__ void kgemm_4bit_inference_naive(
     }
     __syncthreads();
 
-    if (row_B >= M) return;
+    if (row_B >= M)
+        return;
 
     const int stride = BNB_WARP_SIZE * num_values_4bit;
     const int clz_blocksize = 31 - __clz(blocksize);
@@ -1518,16 +1519,16 @@ __global__ void kgemm_4bit_inference_naive(
                     prefetch_B = reinterpret_cast<int4*>(B)[(offset_B + next_inner_idx_halved) / num_values_8bit];
             }
 
-            float b0  = quant_map[qm_offset + (local_B_4bit[0] >> 4)] * local_absmax;
-            float b1  = quant_map[qm_offset + (local_B_4bit[0] & 0xF)] * local_absmax;
-            float b2  = quant_map[qm_offset + (local_B_4bit[1] >> 4)] * local_absmax;
-            float b3  = quant_map[qm_offset + (local_B_4bit[1] & 0xF)] * local_absmax;
-            float b4  = quant_map[qm_offset + (local_B_4bit[2] >> 4)] * local_absmax;
-            float b5  = quant_map[qm_offset + (local_B_4bit[2] & 0xF)] * local_absmax;
-            float b6  = quant_map[qm_offset + (local_B_4bit[3] >> 4)] * local_absmax;
-            float b7  = quant_map[qm_offset + (local_B_4bit[3] & 0xF)] * local_absmax;
-            float b8  = quant_map[qm_offset + (local_B_4bit[4] >> 4)] * local_absmax;
-            float b9  = quant_map[qm_offset + (local_B_4bit[4] & 0xF)] * local_absmax;
+            float b0 = quant_map[qm_offset + (local_B_4bit[0] >> 4)] * local_absmax;
+            float b1 = quant_map[qm_offset + (local_B_4bit[0] & 0xF)] * local_absmax;
+            float b2 = quant_map[qm_offset + (local_B_4bit[1] >> 4)] * local_absmax;
+            float b3 = quant_map[qm_offset + (local_B_4bit[1] & 0xF)] * local_absmax;
+            float b4 = quant_map[qm_offset + (local_B_4bit[2] >> 4)] * local_absmax;
+            float b5 = quant_map[qm_offset + (local_B_4bit[2] & 0xF)] * local_absmax;
+            float b6 = quant_map[qm_offset + (local_B_4bit[3] >> 4)] * local_absmax;
+            float b7 = quant_map[qm_offset + (local_B_4bit[3] & 0xF)] * local_absmax;
+            float b8 = quant_map[qm_offset + (local_B_4bit[4] >> 4)] * local_absmax;
+            float b9 = quant_map[qm_offset + (local_B_4bit[4] & 0xF)] * local_absmax;
             float b10 = quant_map[qm_offset + (local_B_4bit[5] >> 4)] * local_absmax;
             float b11 = quant_map[qm_offset + (local_B_4bit[5] & 0xF)] * local_absmax;
             float b12 = quant_map[qm_offset + (local_B_4bit[6] >> 4)] * local_absmax;
@@ -1562,25 +1563,41 @@ __global__ void kgemm_4bit_inference_naive(
                 const T* a2 = reinterpret_cast<const T*>(&a_vec2);
                 const T* a3 = reinterpret_cast<const T*>(&a_vec3);
 
-                local_C0 += (float)a0[0]*b0;   local_C1 += (float)a0[1]*b1;
-                local_C2 += (float)a0[2]*b2;   local_C3 += (float)a0[3]*b3;
-                local_C0 += (float)a0[4]*b4;   local_C1 += (float)a0[5]*b5;
-                local_C2 += (float)a0[6]*b6;   local_C3 += (float)a0[7]*b7;
-                local_C0 += (float)a1[0]*b8;   local_C1 += (float)a1[1]*b9;
-                local_C2 += (float)a1[2]*b10;  local_C3 += (float)a1[3]*b11;
-                local_C0 += (float)a1[4]*b12;  local_C1 += (float)a1[5]*b13;
-                local_C2 += (float)a1[6]*b14;  local_C3 += (float)a1[7]*b15;
-                local_C0 += (float)a2[0]*b16;  local_C1 += (float)a2[1]*b17;
-                local_C2 += (float)a2[2]*b18;  local_C3 += (float)a2[3]*b19;
-                local_C0 += (float)a2[4]*b20;  local_C1 += (float)a2[5]*b21;
-                local_C2 += (float)a2[6]*b22;  local_C3 += (float)a2[7]*b23;
-                local_C0 += (float)a3[0]*b24;  local_C1 += (float)a3[1]*b25;
-                local_C2 += (float)a3[2]*b26;  local_C3 += (float)a3[3]*b27;
-                local_C0 += (float)a3[4]*b28;  local_C1 += (float)a3[5]*b29;
-                local_C2 += (float)a3[6]*b30;  local_C3 += (float)a3[7]*b31;
+                local_C0 += (float)a0[0] * b0;
+                local_C1 += (float)a0[1] * b1;
+                local_C2 += (float)a0[2] * b2;
+                local_C3 += (float)a0[3] * b3;
+                local_C0 += (float)a0[4] * b4;
+                local_C1 += (float)a0[5] * b5;
+                local_C2 += (float)a0[6] * b6;
+                local_C3 += (float)a0[7] * b7;
+                local_C0 += (float)a1[0] * b8;
+                local_C1 += (float)a1[1] * b9;
+                local_C2 += (float)a1[2] * b10;
+                local_C3 += (float)a1[3] * b11;
+                local_C0 += (float)a1[4] * b12;
+                local_C1 += (float)a1[5] * b13;
+                local_C2 += (float)a1[6] * b14;
+                local_C3 += (float)a1[7] * b15;
+                local_C0 += (float)a2[0] * b16;
+                local_C1 += (float)a2[1] * b17;
+                local_C2 += (float)a2[2] * b18;
+                local_C3 += (float)a2[3] * b19;
+                local_C0 += (float)a2[4] * b20;
+                local_C1 += (float)a2[5] * b21;
+                local_C2 += (float)a2[6] * b22;
+                local_C3 += (float)a2[7] * b23;
+                local_C0 += (float)a3[0] * b24;
+                local_C1 += (float)a3[1] * b25;
+                local_C2 += (float)a3[2] * b26;
+                local_C3 += (float)a3[3] * b27;
+                local_C0 += (float)a3[4] * b28;
+                local_C1 += (float)a3[5] * b29;
+                local_C2 += (float)a3[6] * b30;
+                local_C3 += (float)a3[7] * b31;
             } else {
-                float b_vals[32] = {b0,b1,b2,b3,b4,b5,b6,b7,b8,b9,b10,b11,b12,b13,b14,b15,
-                                    b16,b17,b18,b19,b20,b21,b22,b23,b24,b25,b26,b27,b28,b29,b30,b31};
+                float b_vals[32] = {b0,  b1,  b2,  b3,  b4,  b5,  b6,  b7,  b8,  b9,  b10, b11, b12, b13, b14, b15,
+                                    b16, b17, b18, b19, b20, b21, b22, b23, b24, b25, b26, b27, b28, b29, b30, b31};
 #pragma unroll
                 for (int k = 0; k < 32; k++) {
                     float a_val = (inner_idx + k < K) ? (float)A_row[inner_idx + k] : 0.0f;
