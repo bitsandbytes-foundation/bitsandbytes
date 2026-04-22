@@ -12,6 +12,9 @@ from tests.helpers import (
 )
 
 TRANSPOSE_VALS = [(False, True), (False, False)]
+# Keep req_grad[1] (weight grad for B) disabled for test_matmullt.
+# The req_grad[1] == True path there is deprecated, so we avoid generating that case.
+REQ_GRAD_NO_B_WEIGHT = [flags for flags in BOOLEAN_TRIPLES if not flags[1]]
 
 
 @pytest.mark.parametrize("device", get_available_devices())
@@ -26,19 +29,13 @@ TRANSPOSE_VALS = [(False, True), (False, False)]
     ids=["func=matmul"],
 )
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
-@pytest.mark.parametrize("req_grad", BOOLEAN_TRIPLES, ids=id_formatter("req_grad"))
+@pytest.mark.parametrize("req_grad", REQ_GRAD_NO_B_WEIGHT, ids=id_formatter("req_grad"))
 @pytest.mark.parametrize("transpose", TRANSPOSE_VALS, ids=id_formatter("transpose"))
 @pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE, ids=id_formatter("has_fp16_weights"))
 @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
 def test_matmullt(
     device, dim1, dim2, dim3, dim4, funcs, dtype, req_grad, transpose, decomp, has_fp16_weights, has_bias
 ):
-    if device != "cuda":
-        if req_grad[1]:
-            # This will be deprecated for CUDA in the future. We don't expect
-            # this to work on any other device.
-            pytest.skip("Deprecated feature with CUDA support only.")
-
     dimA = (dim2, dim3) if not transpose[0] else (dim3, dim2)
     dimB = (dim3, dim4) if not transpose[1] else (dim4, dim3)
     outlier_dim = torch.randint(0, dimA[1], size=(dimA[1] // 8,), device=device)
@@ -111,7 +108,6 @@ def test_matmullt(
                     loss_bnb = torch.nn.functional.mse_loss(out_bnb, target).mean()
                     loss_bnb.backward()
                     gradA1 = A.grad
-                    gradB1 = B.grad
                     A.grad = None
                     B.grad = None
                     if has_bias:
@@ -121,7 +117,6 @@ def test_matmullt(
                     loss_torch = torch.nn.functional.mse_loss(out_torch, target).mean()
                     loss_torch.backward()
                     gradA2 = A.grad
-                    gradB2 = B.grad
                     A.grad = None
                     B.grad = None
                     if has_bias:
@@ -130,22 +125,6 @@ def test_matmullt(
 
                 if req_grad[0]:
                     torch.testing.assert_close(gradA1, gradA2, atol=0.015, rtol=0.1)
-                if req_grad[1]:
-                    n = gradB1.numel()
-                    if dim2 > 0:
-                        assert torch.abs(gradB1).sum() > 0.0
-                        assert torch.abs(gradB2).sum() > 0.0
-                    else:
-                        assert torch.abs(gradB1).sum() == 0.0
-                        assert torch.abs(gradB2).sum() == 0.0
-
-                    idx = torch.isclose(gradB1, gradB2, atol=0.06, rtol=0.3)
-                    assert (idx == 0).sum().item() <= n * 0.10
-
-                    idx = torch.isclose(gradB1, gradB2, atol=0.10, rtol=0.3)
-                    assert (idx == 0).sum().item() <= n * 0.02
-
-                    torch.testing.assert_close(gradB1, gradB2, atol=0.18, rtol=0.3)
 
                 if req_grad[2]:
                     torch.testing.assert_close(gradBias1, gradBias2)

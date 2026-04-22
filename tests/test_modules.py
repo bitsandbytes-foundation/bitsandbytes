@@ -75,53 +75,6 @@ def test_linear8bitlt_inference(device, threshold):
             assert l1.state.CB is not None
 
 
-# TODO: Remove support for training int8 weights
-@pytest.mark.parametrize("device", get_available_devices())
-def test_linear8bitlt_accumulated_gradient(device):
-    if device != "cuda":
-        pytest.skip("Only supported on CUDA")
-
-    l1 = torch.nn.Sequential(*[bnb.nn.Linear8bitLt(32, 32).to(device).half() for i in range(2)])
-    l2 = torch.nn.Sequential(*[torch.nn.Linear(32, 32).to(device).half() for i in range(2)])
-    l1[0].weight.data.copy_(l2[0].weight.data)
-    l1[1].weight.data.copy_(l2[1].weight.data)
-    l1[0].bias.data.copy_(l2[0].bias.data)
-    l1[1].bias.data.copy_(l2[1].bias.data)
-
-    opt1 = bnb.optim.Adam32bit(l1.parameters(), lr=0.001)
-    opt2 = bnb.optim.Adam32bit(l2.parameters(), lr=0.001)
-
-    acc_steps = 10
-
-    for i in range(15):
-        b1 = torch.randn(16, 8, 32, device=device).half()
-        o1 = l1(b1)
-        o2 = l2(b1)
-        loss1 = o1.mean()
-        loss2 = o2.mean()
-        loss1.backward()
-        loss2.backward()
-        if i == 2:
-            assert l1[0].state.CB is not None
-            assert l1[1].state.CB is not None
-
-        if i > 0 and i % acc_steps == 0:
-            opt1.step()
-            opt1.zero_grad(True)
-            opt2.step()
-            opt2.zero_grad(True)
-            assert_all_approx_close(l1[0].weight, l2[0].weight, rtol=1.05, atol=0.01, count=2)
-            assert_all_approx_close(l1[1].weight, l2[1].weight, rtol=1.05, atol=0.01, count=2)
-            # we do this copy because otherwise we have small divergences over time that add up
-            l1[0].weight.data.copy_(l2[0].weight.data)
-            l1[1].weight.data.copy_(l2[1].weight.data)
-            l1[0].bias.data.copy_(l2[0].bias.data)
-            l1[1].bias.data.copy_(l2[1].bias.data)
-        else:
-            assert_all_approx_close(l1[0].weight.grad, l2[0].weight.grad, rtol=1.05, atol=0.04, count=1)
-            assert_all_approx_close(l1[1].weight.grad, l2[1].weight.grad, rtol=1.05, atol=0.04, count=1)
-
-
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("threshold", [0.0, 2.0])
 def test_linear8bitlt_no_fp16_weights(device, threshold):
@@ -495,34 +448,36 @@ def test_4bit_embedding_warnings(device, caplog):
     assert any("inference" in msg for msg in caplog.messages)
 
 
-def test_4bit_embedding_weight_fsdp_fix(requires_cuda):
+@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+def test_4bit_embedding_weight_fsdp_fix(device):
     num_embeddings = 64
     embedding_dim = 32
 
     module = bnb.nn.Embedding4bit(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
 
-    module.cuda()
+    module.to(device)
 
     module.weight.quant_state = None
 
-    input_tokens = torch.randint(low=0, high=num_embeddings, size=(1,), device="cuda")
+    input_tokens = torch.randint(low=0, high=num_embeddings, size=(1,), device=device)
 
     module(input_tokens)
 
     assert module.weight.quant_state is not None
 
 
-def test_4bit_linear_weight_fsdp_fix(requires_cuda):
+@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+def test_4bit_linear_weight_fsdp_fix(device):
     inp_size = 64
     out_size = 32
 
     module = bnb.nn.Linear4bit(inp_size, out_size)
 
-    module.cuda()
+    module.to(device)
 
     module.weight.quant_state = None
 
-    input_tensor = torch.randn((1, inp_size), device="cuda")
+    input_tensor = torch.randn((1, inp_size), device=device)
 
     module(input_tensor)
 

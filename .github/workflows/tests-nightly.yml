@@ -57,7 +57,7 @@ jobs:
         # Linux x64 cross-product
         platform: [linux-x64]
         gpu_type: [T4, A10, L40S]
-        cuda_version: ["11.8.0", "12.6.3", "12.8.1", "13.0.2"]
+        cuda_version: ["11.8.0", "12.6.3", "12.8.1", "13.0.2", "13.2.0"]
 
         include:
           # Map CUDA version to torch version and PyPI index
@@ -73,6 +73,10 @@ jobs:
           - cuda_version: "13.0.2"
             torch_version: "2.11.0"
             pypi_index: "https://download.pytorch.org/whl/cu130"
+          - cuda_version: "13.2.0"
+            torch_version: "2.12.0"
+            torch_nightly: true
+            pypi_index: "https://download.pytorch.org/whl/nightly/cu132"
 
           # Windows CUDA Tests - T4 GPU (CUDA 11.8 only, multiple torch versions)
           - platform: windows
@@ -98,4 +102,5 @@ jobs:
       cuda_version: ${{ matrix.cuda_version }}
       gpu_type: ${{ matrix.gpu_type }}
       torch_version: ${{ matrix.torch_version }}
+      torch_nightly: ${{ matrix.torch_nightly || false }}
       pypi_index: ${{ matrix.pypi_index }}
