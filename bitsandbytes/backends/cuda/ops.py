@@ -472,10 +472,11 @@ def _gemv_4bit_impl(
     # torch._check(code.dtype == torch.float32, lambda: f"code must be float32, got {code.dtype}")
 
     m = ct.c_int32(shapeB[0])
-    n = ct.c_int32(1)
+    num_a_rows = A.numel() // A.shape[-1]
+    n = ct.c_int32(num_a_rows)
     k = ct.c_int32(shapeB[1])
 
-    lda = m
+    lda = ct.c_int32(A.shape[-1])
     ldb = ct.c_int32((A.shape[-1] + 1) // 2)
     ldc = m
 

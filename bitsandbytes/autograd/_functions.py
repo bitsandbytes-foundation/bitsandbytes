@@ -374,6 +374,10 @@ def matmul(
     return MatMul8bitLt.apply(A, B, out, bias, state)
 
 
+# Above this limit, inference falls back to the dequantize + GEMM path.
+FUSED_4BIT_DEQUANT_LIMIT = 8
+
+
 def matmul_4bit(
     A: torch.Tensor,
     B: torch.Tensor,
@@ -391,7 +395,8 @@ def matmul_4bit(
         else:
             return MatMul4Bit.apply(A, B, out, bias, quant_state)
 
-    if A.numel() == A.shape[-1] and A.requires_grad == False and A.device.type != "hpu":
+    num_a_rows = A.numel() // A.shape[-1]
+    if 0 < num_a_rows <= FUSED_4BIT_DEQUANT_LIMIT and A.requires_grad == False and A.device.type != "hpu":
         if A.shape[-1] % quant_state.blocksize != 0:
             warn(
                 f"Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}",
