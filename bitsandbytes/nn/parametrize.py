@@ -175,14 +175,16 @@ def _parametrized_state_dict_post_hook(
         clean_key = f"{prefix}{param_name}"
         state_dict[clean_key] = state_dict.pop(original_key)
 
-        assert P.is_parametrized(module, param_name)
+        if not P.is_parametrized(module, param_name):
+            raise AssertionError
 
         # Find the parametrization, which should have the quantization state.
         parametrization: Bnb4bitParametrization = next(
             filter(lambda x: isinstance(x, Bnb4bitParametrization), module.parametrizations[param_name]), None
         )
 
-        assert parametrization is not None, "Parametrization not found for the parameter."
+        if parametrization is None:
+            raise AssertionError("Parametrization not found for the parameter.")
 
         quant_state = parametrization.quant_state
 

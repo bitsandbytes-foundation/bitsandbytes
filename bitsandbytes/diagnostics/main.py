@@ -39,7 +39,8 @@ def sanity_check():
     loss.backward()
     adam.step()
     p2 = p.data.sum().item()
-    assert p1 != p2
+    if p1 == p2:
+        raise AssertionError
 
 
 def get_package_version(name: str) -> str:
