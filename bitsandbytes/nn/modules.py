@@ -495,7 +495,8 @@ def fix_4bit_weight_quant_state_from_module(module: Union["Embedding4bit", "Line
 
     # the quant state got lost when the parameter got converted. This happens for example for fsdp
     # since we registered the module, we can recover the state here
-    assert module.weight.shape[1] == 1
+    if module.weight.shape[1] != 1:
+        raise AssertionError
     if not isinstance(module.weight, Params4bit):
         module.weight = Params4bit(module.weight, quant_storage=module.quant_storage, bnb_quantized=True)
     module.weight.quant_state = module.quant_state
@@ -866,8 +867,10 @@ class Embedding8bit(nn.Embedding):
         rows = self.weight.data
         row_stats = self.weight.SCB
 
-        assert rows.shape == (self.num_embeddings, self.embedding_dim)
-        assert row_stats.shape == (self.num_embeddings,)
+        if rows.shape != (self.num_embeddings, self.embedding_dim):
+            raise AssertionError
+        if row_stats.shape != (self.num_embeddings,):
+            raise AssertionError
 
         compressed_output = F.embedding(input, rows)
         compressed_output_stats = F.embedding(input, row_stats.view(self.num_embeddings, 1))
@@ -928,7 +931,8 @@ class Embedding4bit(nn.Embedding):
             )
 
     def _forward_with_partial_dequantize(self, input: Tensor):
-        assert self.embedding_dim % self.weight.quant_state.blocksize == 0
+        if self.embedding_dim % self.weight.quant_state.blocksize != 0:
+            raise AssertionError
 
         w_4bit_uint8 = self.weight.data.view(torch.uint8).view(self.num_embeddings * self.embedding_dim // 2, 1)
 
@@ -936,12 +940,14 @@ class Embedding4bit(nn.Embedding):
             weight=w_4bit_uint8.view(self.num_embeddings, self.embedding_dim // 2),
             input=input,
         ).view(-1, 1)
-        assert output_4bit.shape == (input.numel() * self.embedding_dim // 2, 1)
+        if output_4bit.shape != (input.numel() * self.embedding_dim // 2, 1):
+            raise AssertionError
 
         blocks_per_emb = self.embedding_dim // self.weight.blocksize
 
         absmax = self.weight.quant_state.absmax
-        assert absmax.shape == (self.num_embeddings * blocks_per_emb,)
+        if absmax.shape != (self.num_embeddings * blocks_per_emb,):
+            raise AssertionError
 
         output_absmax = torch.nn.functional.embedding(
             weight=absmax.view(self.num_embeddings, blocks_per_emb),
@@ -949,14 +955,16 @@ class Embedding4bit(nn.Embedding):
         ).view(
             -1,
         )
-        assert output_absmax.shape == (input.numel() * blocks_per_emb,)
+        if output_absmax.shape != (input.numel() * blocks_per_emb,):
+            raise AssertionError
 
         output_quant_state = copy.deepcopy(self.weight.quant_state)
         output_quant_state.absmax = output_absmax
         output_quant_state.shape = torch.Size((*input.shape, self.embedding_dim))
 
         output = bnb.functional.dequantize_4bit(output_4bit, output_quant_state)
-        assert output.shape == (*input.shape, self.embedding_dim)
+        if output.shape != (*input.shape, self.embedding_dim):
+            raise AssertionError
 
         return output.to(self.dtype)
 

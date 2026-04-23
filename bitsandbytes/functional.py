@@ -99,7 +99,8 @@ def get_paged(*shape, dtype=torch.float32, device=FIRST_CUDA_DEVICE):
 
 
 def prefetch_tensor(A: torch.Tensor, to_cpu=False):
-    assert A.is_paged, "Only paged tensors can be prefetched!"
+    if not A.is_paged:
+        raise AssertionError("Only paged tensors can be prefetched!")
     if to_cpu:
         deviceid = -1
     else:
@@ -218,7 +219,8 @@ def create_normal_map(offset=0.9677083, use_extra_value=True):
     values = values.sort().values
     values /= values.max()
 
-    assert values.numel() == 256
+    if values.numel() != 256:
+        raise AssertionError
 
     return values
 
@@ -254,7 +256,8 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
     e = exponent_bits
     p = precision_bits
     has_sign = 1 if signed else 0
-    assert e + p == total_bits - has_sign
+    if e + p != total_bits - has_sign:
+        raise AssertionError
     # the exponent is biased to 2^(e-1) -1 == 0
     evalues = []
     for i, val in enumerate(range(-(2 ** (exponent_bits - has_sign)), 2 ** (exponent_bits - has_sign), 1)):
@@ -279,7 +282,8 @@ def create_fp8_map(signed=True, exponent_bits=5, precision_bits=2, total_bits=8)
             if signed:
                 values.append(-value)
 
-    assert len(values) == 2**total_bits
+    if len(values) != 2**total_bits:
+        raise AssertionError
     values.sort()
     if total_bits < 8:
         gap = 256 - len(values)
@@ -337,7 +341,8 @@ def create_dynamic_map(signed=True, max_exponent_bits=7, total_bits=8):
     data.append(0)
     data.append(1.0)
 
-    assert len(data) == 2**total_bits
+    if len(data) != 2**total_bits:
+        raise AssertionError
 
     gap = 256 - len(data)
     for i in range(gap):
@@ -516,7 +521,8 @@ class QuantState:
             qs_dict.update(unpack_tensor_to_dict(qs_dict.pop(first_qs_key)))
 
         qs_dict = {k.split(".")[-1]: v for k, v in qs_dict.items()}  # strip prefixes
-        assert set(qs_dict.keys()).issubset(cls.valid_qs_keys)
+        if not set(qs_dict.keys()).issubset(cls.valid_qs_keys):
+            raise AssertionError
 
         if "nested_absmax" in qs_dict:
             offset = torch.tensor(float(qs_dict["nested_offset"])).to(device)
@@ -721,7 +727,8 @@ def dequantize_blockwise(
             The dequantized tensor. The datatype is indicated by `quant_state.dtype` and defaults to `torch.float32`.
     """
 
-    assert quant_state is not None or absmax is not None
+    if quant_state is None and absmax is None:
+        raise AssertionError
     if code is None and quant_state is None:
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
@@ -842,7 +849,8 @@ def get_4bit_type(typename, device=None, blocksize=64):
     data = torch.tensor(data, device=device)
     data.div_(data.abs().max())
 
-    assert data.numel() == 16
+    if data.numel() != 16:
+        raise AssertionError
 
     return data
 
@@ -1009,7 +1017,8 @@ def dequantize_4bit(
         blocksize = 64
 
     if quant_state is None:
-        assert absmax is not None and out is not None
+        if absmax is None or out is None:
+            raise AssertionError
 
         quant_state = QuantState(
             absmax=absmax,
@@ -1365,7 +1374,8 @@ def igemm(
         ldc = sB[1]
     elif len(sB) == 3:
         # special case
-        assert len(sA) == 3
+        if len(sA) != 3:
+            raise AssertionError
         if not (sA[0] == sB[0] and sA[1] == sB[1]):
             raise ValueError(
                 f"Only bsi,bso->io supported for tensor contractions, but dims for A x B were: {sA} x {sB}",
@@ -1658,10 +1668,13 @@ def _convert_weight_packed_for_cpu(qweight: torch.Tensor, quant_state: QuantStat
     unpacked_w[::2] = qweight >> 4
     qweight_final = unpacked_w.reshape(quant_state.shape).to(torch.uint8)  # (*, N, K)
     # pack weight: [*, N, K] -> [*, N, K/2] combine low and high bit
-    assert len(qweight_final.shape) == 2
+    if len(qweight_final.shape) != 2:
+        raise AssertionError
     N, K = qweight_final.shape[0], qweight_final.shape[1]
-    assert N % block_n == 0, "N must be divisible by block_n"
-    assert K % 2 == 0, "K must be even"
+    if N % block_n != 0:
+        raise AssertionError("N must be divisible by block_n")
+    if K % 2 != 0:
+        raise AssertionError("K must be even")
     BLOCK_N = block_n
     BIT_COUNT = 32  # (=32 low +32 high)
     new_shape = [N // BLOCK_N, BLOCK_N, K // 2, 2]
@@ -1706,9 +1719,12 @@ def _convert_weight_packed_for_cpu_inverse(
         qweight: [*, N, K] uint8, original qweight shape (quant_state.shape)
         recovered_state: QuantState with partially restored fields (best-effort inverse)
     """
-    assert quant_state.packing_format_for_cpu, "only for packing format"
-    assert packed_weight.dtype == torch.uint8
-    assert len(packed_weight.shape) == 2, "packed_weight should be [N, K/2]"
+    if not quant_state.packing_format_for_cpu:
+        raise AssertionError("only for packing format")
+    if packed_weight.dtype != torch.uint8:
+        raise AssertionError
+    if len(packed_weight.shape) != 2:
+        raise AssertionError("packed_weight should be [N, K/2]")
     N, K_half = packed_weight.shape
     K = K_half * 2
 
@@ -1716,8 +1732,10 @@ def _convert_weight_packed_for_cpu_inverse(
     BLOCK_N = block_n
     BIT_COUNT = 32  # (=32 low + 32 high)
 
-    assert N % BLOCK_N == 0, "N must be divisible by block_n"
-    assert K % 2 == 0, "K must be even"
+    if N % BLOCK_N != 0:
+        raise AssertionError("N must be divisible by block_n")
+    if K % 2 != 0:
+        raise AssertionError("K must be even")
 
     # [N, K/2] -> [-1, 64] (32 low + 32 high)
     packed = packed_weight.reshape(-1, BIT_COUNT)  # [-1, 64]

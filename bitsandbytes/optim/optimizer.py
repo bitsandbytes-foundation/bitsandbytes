@@ -100,7 +100,8 @@ class GlobalOptimManager:
         if isinstance(parameters, torch.Tensor):
             parameters = [parameters]
         if key is not None and value is not None:
-            assert key_value_dict is None
+            if key_value_dict is not None:
+                raise AssertionError
             key_value_dict = {key: value}
 
         if key_value_dict is not None:
@@ -286,8 +287,10 @@ class Optimizer8bit(torch.optim.Optimizer):
     def check_overrides(self):
         for module, attr, config in self.mng.module_weight_config_triple:
             pmodule = getattr(module, attr)
-            assert pmodule is not None
-            assert isinstance(pmodule, torch.Tensor) or isinstance(pmodule, torch.Parameter)
+            if pmodule is None:
+                raise AssertionError
+            if not (isinstance(pmodule, torch.Tensor) or isinstance(pmodule, torch.Parameter)):
+                raise AssertionError
             found = False
             for gindex, group in enumerate(self.param_groups):
                 if found:

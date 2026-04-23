@@ -16,6 +16,7 @@ adam.step()
 
 p2 = p.data.sum().item()
 
-assert p1 != p2
+if p1 == p2:
+    raise AssertionError
 print("SUCCESS!")
 print("Installation was successful!")

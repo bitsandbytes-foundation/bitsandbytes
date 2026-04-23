@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 
 
 def outlier_hook(module, input):
-    assert isinstance(module, torch.nn.Linear)
+    if not isinstance(module, torch.nn.Linear):
+        raise AssertionError
     tracer = OutlierTracer.get_instance()
     hvalue = tracer.get_hvalue(module.weight)
     if hvalue not in tracer.hvalue2outlier_idx:
@@ -20,7 +21,8 @@ def outlier_hook(module, input):
             # assign the current layer the outlier idx found from the weight
             # of the previous linear layer
             if tracer.outliers[-1].numel() > 0:
-                assert tracer.outliers[-1].max() < module.weight.shape[1]
+                if tracer.outliers[-1].max() >= module.weight.shape[1]:
+                    raise AssertionError
             tracer.hvalue2outlier_idx[hvalue] = tracer.outliers[-1]
 
         else:
