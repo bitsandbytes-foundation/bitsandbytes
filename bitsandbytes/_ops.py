@@ -282,7 +282,6 @@ def _(
     A: torch.Tensor, B: torch.Tensor, shapeB: Sequence[int], absmax: torch.Tensor, code: torch.Tensor, blocksize: int
 ) -> torch.Tensor:
     torch._check_is_size(blocksize)
-    torch._check(A.numel() == A.size(-1), lambda: f"A must be a vector with leading dimensions of 1, got {A.shape}")
     torch._check(
         A.dtype in [torch.float16, torch.bfloat16, torch.float32],
         lambda: f"A must be float16, bfloat16, or float32, got {A.dtype}",
@@ -312,7 +311,6 @@ def _(
     out: torch.Tensor,
 ) -> None:
     torch._check_is_size(blocksize)
-    torch._check(A.numel() == A.size(-1), lambda: f"A must be a vector with leading dimensions of 1, got {A.shape}")
     torch._check(
         A.dtype in [torch.float16, torch.bfloat16, torch.float32],
         lambda: f"A must be float16, bfloat16, or float32, got {A.dtype}",
