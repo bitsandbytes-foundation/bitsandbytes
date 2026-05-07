@@ -175,7 +175,7 @@ def _(A: torch.Tensor, threshold=0.0):
 
 @register_kernel("bitsandbytes::quantize_blockwise", "default")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
 
     n = A.numel()
     rem = n % blocksize
@@ -201,7 +201,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
 
 @register_kernel("bitsandbytes::dequantize_blockwise", "default")
 def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
 
     out = code[A.reshape(-1).int()]
@@ -220,7 +220,7 @@ def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int,
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
     torch._check(
         A.dtype in [torch.bfloat16, torch.float16, torch.float32],
@@ -317,7 +317,7 @@ def _(
     shape: Sequence[int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
     torch._check(
         dtype in [torch.bfloat16, torch.float16, torch.float32],
