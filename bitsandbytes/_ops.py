@@ -183,7 +183,7 @@ def _(
     shape: Sequence[int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     return torch.empty(shape, dtype=dtype, device=A.device)
 
 
@@ -203,7 +203,7 @@ def _(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     torch._check(out.shape == shape, lambda: f"Expected out.shape == {shape}, got {out.shape}")
     torch._check(out.device == A.device, lambda: f"Expected out.device == {A.device}, got {out.device}")
     torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
@@ -219,7 +219,7 @@ torch.library.define(
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
 
     n = A.numel()
     blocks = -(n // -blocksize)
@@ -236,7 +236,7 @@ torch.library.define(
 
 @register_fake("bitsandbytes::dequantize_blockwise")
 def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
     return torch.empty_like(A, dtype=dtype)
 
@@ -251,7 +251,7 @@ torch.library.define(
 def _(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype, out: torch.Tensor
 ):
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
     torch._check(out.shape == A.shape, lambda: f"Expected out.shape == {A.shape}, got {out.shape}")
     torch._check(out.device == A.device, lambda: f"Expected out.device == {A.device}, got {out.device}")
@@ -263,7 +263,7 @@ torch.library.define("bitsandbytes::quantize_blockwise", "(Tensor A, Tensor code
 
 @register_fake("bitsandbytes::quantize_blockwise")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     n = A.numel()
     blocks = -(n // -blocksize)
     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
@@ -281,7 +281,7 @@ torch.library.define(
 def _(
     A: torch.Tensor, B: torch.Tensor, shapeB: Sequence[int], absmax: torch.Tensor, code: torch.Tensor, blocksize: int
 ) -> torch.Tensor:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     torch._check(A.numel() == A.size(-1), lambda: f"A must be a vector with leading dimensions of 1, got {A.shape}")
     torch._check(
         A.dtype in [torch.float16, torch.bfloat16, torch.float32],
@@ -311,7 +311,7 @@ def _(
     blocksize: int,
     out: torch.Tensor,
 ) -> None:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     torch._check(A.numel() == A.size(-1), lambda: f"A must be a vector with leading dimensions of 1, got {A.shape}")
     torch._check(
         A.dtype in [torch.float16, torch.bfloat16, torch.float32],

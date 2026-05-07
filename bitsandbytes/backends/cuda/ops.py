@@ -221,7 +221,7 @@ def _get_col_absmax(
 @register_kernel("bitsandbytes::quantize_blockwise", "cuda")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     A = A.contiguous()
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
 
     torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32])
 
@@ -464,7 +464,7 @@ def _gemv_4bit_impl(
     blocksize: int,
     out: torch.Tensor,
 ) -> None:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
 
     # Note: these checks are not strictly necessary, and cost more than they are worth, so they are commented out for now.
     # torch._check(
