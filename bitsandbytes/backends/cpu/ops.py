@@ -147,7 +147,10 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         dtype: torch.dtype,
     ) -> torch.Tensor:
         torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
-        torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
+        torch._check(
+            quant_type in ("nf4", "fp4", "pbf4"),
+            lambda: f"quant_type must be nf4, fp4, or pbf4, got {quant_type}",
+        )
         torch._check(
             dtype in [torch.bfloat16, torch.float16, torch.float32],
             lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
@@ -160,7 +163,10 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         # Odd shape is not supported by this kernel; fallback to generic implementation
         shape_fallback = shape[-1] % 2 != 0
 
-        if avx512_fallback or shape_fallback:
+        # No native pbf4 CPU kernel — route to the LUT-driven default impl.
+        pbf4_fallback = quant_type == "pbf4"
+
+        if avx512_fallback or shape_fallback or pbf4_fallback:
             from ..default.ops import _dequantize_4bit_impl
 
             return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)

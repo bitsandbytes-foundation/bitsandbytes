@@ -216,16 +216,27 @@ def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int,
     return out
 
 
-@register_kernel("bitsandbytes::quantize_4bit", "default")
-def _(
+def _quantize_4bit_impl(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
     torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
-    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
+    torch._check(
+        quant_type in ("nf4", "fp4", "pbf4"),
+        lambda: f"quant_type must be nf4, fp4, or pbf4, got {quant_type}",
+    )
     torch._check(
         A.dtype in [torch.bfloat16, torch.float16, torch.float32],
         lambda: f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}",
     )
+
+    if quant_type == "pbf4":
+        # PBF4 uses a fixed LUT derived from the PBF8 spine — same shape every
+        # call, so the op-level path can produce correct (packed, absmax)
+        # without any extra metadata. Python fallback for non-CUDA backends.
+        from ..._pbf4 import PBF_MX_LUT, quantize_pbf4_blockwise
+
+        packed, absmax, _ = quantize_pbf4_blockwise(A, blocksize, quant_storage, lut=PBF_MX_LUT)
+        return packed, absmax
 
     n = A.numel()
     full_blocks = n // blocksize
@@ -262,6 +273,13 @@ def _(
     return packed, absmax.float()
 
 
+@register_kernel("bitsandbytes::quantize_4bit", "default")
+def _(
+    A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
+) -> tuple[torch.Tensor, torch.Tensor]:
+    return _quantize_4bit_impl(A, blocksize, quant_type, quant_storage)
+
+
 def _dequantize_4bit_impl(
     A: torch.Tensor,
     absmax: torch.Tensor,
@@ -270,6 +288,11 @@ def _dequantize_4bit_impl(
     shape: Sequence[int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if quant_type == "pbf4":
+        from ..._pbf4 import PBF_MX_LUT, dequantize_pbf4_blockwise
+
+        return dequantize_pbf4_blockwise(A, absmax, PBF_MX_LUT, blocksize, shape, dtype)
+
     # Enable non uint8 dtype
     if A.dtype != torch.uint8:
         A = A.view(torch.uint8)
@@ -318,7 +341,10 @@ def _(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
-    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
+    torch._check(
+        quant_type in ("nf4", "fp4", "pbf4"),
+        lambda: f"quant_type must be nf4, fp4, or pbf4, got {quant_type}",
+    )
     torch._check(
         dtype in [torch.bfloat16, torch.float16, torch.float32],
         lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
@@ -336,8 +362,11 @@ def _(
     code: torch.Tensor,
     blocksize: int,
 ) -> torch.Tensor:
-    # Applied from dequantize_4bit
-    quant_type = "fp4" if code[1] > 0 else "nf4"
+    # Recover quant_type from the LUT's distinctive ``code[1]``:
+    #   fp4 ≈ +0.0052 (small positive); nf4 ≈ -0.696. (PBF4 has per-tensor
+    #   calibrated LUTs that can't reach this op-level path — see
+    #   ``functional.dequantize_4bit`` which short-circuits PBF4 directly.)
+    quant_type = "fp4" if float(code[1]) > 0 else "nf4"
     B_dq = torch.ops.bitsandbytes.dequantize_4bit.default(B, absmax, blocksize, quant_type, shapeB, A.dtype)
 
     return torch.nn.functional.linear(

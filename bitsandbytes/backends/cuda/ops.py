@@ -313,7 +313,7 @@ def _(
     A = A.contiguous()
     torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32])
 
-    torch._check(quant_type in ["fp4", "nf4"])
+    torch._check(quant_type in ["fp4", "nf4", "pbf4"])
     torch._check(
         A.dtype in [torch.bfloat16, torch.float16, torch.float32],
         lambda: f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}",
@@ -337,16 +337,22 @@ def _(
         if A.dtype == torch.bfloat16:
             if quant_type == "fp4":
                 lib.cquantize_blockwise_bf16_fp4(*args)
+            elif quant_type == "pbf4":
+                lib.cquantize_blockwise_bf16_pbf4(*args)
             else:
                 lib.cquantize_blockwise_bf16_nf4(*args)
         elif A.dtype == torch.float16:
             if quant_type == "fp4":
                 lib.cquantize_blockwise_fp16_fp4(*args)
+            elif quant_type == "pbf4":
+                lib.cquantize_blockwise_fp16_pbf4(*args)
             else:
                 lib.cquantize_blockwise_fp16_nf4(*args)
         elif A.dtype == torch.float32:
             if quant_type == "fp4":
                 lib.cquantize_blockwise_fp32_fp4(*args)
+            elif quant_type == "pbf4":
+                lib.cquantize_blockwise_fp32_pbf4(*args)
             else:
                 lib.cquantize_blockwise_fp32_nf4(*args)
 
@@ -393,7 +399,7 @@ def _dequantize_4bit_impl(
     A = A.contiguous()
     torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32])
 
-    torch._check(quant_type in ["fp4", "nf4"])
+    torch._check(quant_type in ["fp4", "nf4", "pbf4"])
     torch._check(
         dtype in [torch.bfloat16, torch.float16, torch.float32],
         lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
@@ -413,16 +419,22 @@ def _dequantize_4bit_impl(
         if out.dtype == torch.bfloat16:
             if quant_type == "fp4":
                 lib.cdequantize_blockwise_bf16_fp4(*args)
+            elif quant_type == "pbf4":
+                lib.cdequantize_blockwise_bf16_pbf4(*args)
             else:
                 lib.cdequantize_blockwise_bf16_nf4(*args)
         elif out.dtype == torch.float16:
             if quant_type == "fp4":
                 lib.cdequantize_blockwise_fp16_fp4(*args)
+            elif quant_type == "pbf4":
+                lib.cdequantize_blockwise_fp16_pbf4(*args)
             else:
                 lib.cdequantize_blockwise_fp16_nf4(*args)
         elif out.dtype == torch.float32:
             if quant_type == "fp4":
                 lib.cdequantize_blockwise_fp32_fp4(*args)
+            elif quant_type == "pbf4":
+                lib.cdequantize_blockwise_fp32_pbf4(*args)
             else:
                 lib.cdequantize_blockwise_fp32_nf4(*args)
 

@@ -115,6 +115,7 @@ def dequantize_4bit(
         dtype in [torch.bfloat16, torch.float16, torch.float32],
         lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
     )
+
     # torch._check(
     #     A.dtype == torch.uint8,
     #     lambda: f"Blockwise 4bit dequantization on XPU only supports uint8 storage, got {A.dtype}",

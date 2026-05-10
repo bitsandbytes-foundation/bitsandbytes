@@ -382,8 +382,16 @@ def matmul_4bit(
     bias: Optional[torch.Tensor] = None,
 ):
     assert quant_state is not None
+    # PBF4 stores a calibrated 16-entry LUT in quant_state.code; CUDA's
+    # kgemm_4bit_inference_naive loads ``datatype`` into shared memory and is fully
+    # LUT-generic, so pbf4 piggybacks the existing gemv_4bit fast path with no kernel
+    # changes. The CPU fused-gemm path (``packing_format_for_cpu``) is opt-in and
+    # uses a code-tensor heuristic that doesn't account for arbitrary calibrated
+    # LUTs, so we keep pbf4 off that specific lane.
+    is_pbf4 = getattr(quant_state, "quant_type", None) == "pbf4"
+
     if A.device.type == "cpu":
-        if getattr(quant_state, "packing_format_for_cpu", False):
+        if getattr(quant_state, "packing_format_for_cpu", False) and not is_pbf4:
             out = F.gemv_4bit(A, B, out, state=quant_state)
             if bias is not None:
                 out += bias

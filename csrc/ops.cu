@@ -506,6 +506,9 @@ template void quantizeBlockwise<half, 0, FP4>(
 template void quantizeBlockwise<half, 0, NF4>(
     float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
 );
+template void quantizeBlockwise<half, 0, PBF4>(
+    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+);
 template void quantizeBlockwise<float, 1, General8bit>(
     float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
 );
@@ -516,6 +519,9 @@ template void quantizeBlockwise<float, 0, FP4>(
     float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
 );
 template void quantizeBlockwise<float, 0, NF4>(
+    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+);
+template void quantizeBlockwise<float, 0, PBF4>(
     float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
 );
 template void quantizeBlockwise<bnb_bfloat16, 1, General8bit>(
@@ -534,6 +540,10 @@ template void quantizeBlockwise<bnb_bfloat16, 0, NF4>(
     float* code, bnb_bfloat16* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize,
     const int n
 );
+template void quantizeBlockwise<bnb_bfloat16, 0, PBF4>(
+    float* code, bnb_bfloat16* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize,
+    const int n
+);
 
 template void dequantizeBlockwise<float, General8bit>(
     float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, bnb_stream_t stream
@@ -542,6 +552,9 @@ template void dequantizeBlockwise<float, FP4>(
     float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, bnb_stream_t stream
 );
 template void dequantizeBlockwise<float, NF4>(
+    float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwise<float, PBF4>(
     float* code, unsigned char* A, float* absmax, float* out, int blocksize, const int n, bnb_stream_t stream
 );
 template void dequantizeBlockwise<half, General8bit>(
@@ -553,6 +566,9 @@ template void dequantizeBlockwise<half, FP4>(
 template void dequantizeBlockwise<half, NF4>(
     float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, bnb_stream_t stream
 );
+template void dequantizeBlockwise<half, PBF4>(
+    float* code, unsigned char* A, float* absmax, half* out, int blocksize, const int n, bnb_stream_t stream
+);
 template void dequantizeBlockwise<bnb_bfloat16, General8bit>(
     float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, int blocksize, const int n, bnb_stream_t stream
 );
@@ -560,6 +576,9 @@ template void dequantizeBlockwise<bnb_bfloat16, FP4>(
     float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, int blocksize, const int n, bnb_stream_t stream
 );
 template void dequantizeBlockwise<bnb_bfloat16, NF4>(
+    float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwise<bnb_bfloat16, PBF4>(
     float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, int blocksize, const int n, bnb_stream_t stream
 );
 

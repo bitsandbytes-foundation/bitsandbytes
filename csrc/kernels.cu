@@ -42,6 +42,59 @@ __device__ static float nf4_dequantization_lut[16] = {
     1.0f                   // 0b1111
 };
 
+// PBF4 (peace-quant PBF-MX) -- 8 magnitudes sampled at every-other level of the
+// PBF8 standard ring, normalised so the top entry is 1.0, then mirrored NF4-style
+// (7 negatives + 0 + 8 positives = 16 unique entries).
+//
+// Construction (mirrors bitsandbytes/_pbf4.py::_build_pbf_mx_lut, which derives
+// these from the PBF8 spine constants in bitsandbytes/_pbf8.py):
+//
+//   raw_mags[k] = (BASE/8192) * exp((2*k + START_LEVEL) * LEVEL_LOG_STEP)
+//   where  BASE            = phi + pi  (peace-quant irrational base)
+//          LEVEL_LOG_STEP  = ln(8) / 16
+//          START_LEVEL     = 2          (every-other level, base-anchored)
+//          k               = 0 .. 7    (8 magnitudes)
+//
+//   Equivalently, mag[k] / mag[7] = 2^(3*(k - 7)/8), i.e. each step is a factor
+//   of 2^(3/8) ~= 1.297 (~30%/level). After dividing by mag[7] the entries are:
+//
+//     k=0: 2^(-21/8) = 0.16210494...
+//     k=1: 2^(-18/8) = 0.21022410...
+//     k=2: 2^(-15/8) = 0.27262693...
+//     k=3: 2^(-12/8) = 0.35355339...
+//     k=4: 2^(-9/8)  = 0.45850202...
+//     k=5: 2^(-6/8)  = 0.59460356...
+//     k=6: 2^(-3/8)  = 0.77110541...
+//     k=7: 2^( 0)    = 1.0
+//
+// Layout: byte = sign_bit << 3 | mag_index, mirroring NF4. Byte 0b0111 (= 7) is
+// the unique zero; byte 0b1000 (= 8) is the smallest positive magnitude (NOT a
+// duplicate zero). Sign bit is bit 3 (LSB of the upper nibble).
+//
+// To regenerate: change PBF8's BASE, LEVEL_LOG_STEP, or START_LEVEL in
+// bitsandbytes/_pbf8.py / bitsandbytes/_pbf4.py and copy the resulting Python
+// PBF_MX_LUT.tolist() into this table; the values must stay in lock-step
+// because the device-side LUT cannot be loaded from the Python module at
+// kernel-launch time.
+__device__ static float pbf4_dequantization_lut[16] = {
+    -1.0f,       // 0b0000   -2^( 0)
+    -0.7711054f, // 0b0001   -2^(-3/8)
+    -0.5946036f, // 0b0010   -2^(-6/8)
+    -0.4585020f, // 0b0011   -2^(-9/8)
+    -0.3535534f, // 0b0100   -2^(-12/8)
+    -0.2726269f, // 0b0101   -2^(-15/8)
+    -0.2102241f, // 0b0110   -2^(-18/8)
+    0.0f,        // 0b0111    zero
+    0.1621049f,  // 0b1000    2^(-21/8)  (smallest positive)
+    0.2102241f,  // 0b1001    2^(-18/8)
+    0.2726269f,  // 0b1010    2^(-15/8)
+    0.3535534f,  // 0b1011    2^(-12/8)
+    0.4585020f,  // 0b1100    2^(-9/8)
+    0.5946036f,  // 0b1101    2^(-6/8)
+    0.7711054f,  // 0b1110    2^(-3/8)
+    1.0f         // 0b1111    2^( 0)     (largest positive)
+};
+
 // source: https://stackoverflow.com/questions/17399119/how-do-i-use-atomicmax-on-floating-point-values-in-cuda
 // HIP has native atomicMax for float; CUDA needs a CAS loop
 #if !BNB_HIP
@@ -106,6 +159,69 @@ __device__ unsigned char dQuantizeFP4(float x) {
 }
 
 __device__ __forceinline__ float dDequantizeNF4(unsigned char val) { return nf4_dequantization_lut[val & 0x0F]; }
+
+__device__ __forceinline__ float dDequantizePBF4(unsigned char val) { return pbf4_dequantization_lut[val & 0x0F]; }
+
+__device__ unsigned char dQuantizePBF4(float x) {
+    // Encode an fp32 in [-1.0, 1.0] to a 4-bit PBF4 code. Uses a balanced
+    // binary-search tree (3 comparisons in the worst case) over the PBF4
+    // positive LUT entries; the negative side mirrors via the sign bit
+    // (bit 3, set by `sign` below). Because PBF4 is log-spaced the optimal
+    // split points are the GEOMETRIC midpoints between adjacent LUT entries,
+    // NOT arithmetic midpoints. The split between 0 and the smallest positive
+    // entry is a special case -- there is no geometric mean of 0 and a
+    // nonzero value, so we use the linear midpoint there (= L0 / 2).
+    //
+    // Threshold derivation -- L_k are the positive LUT magnitudes from
+    // pbf4_dequantization_lut[8 + k] for k = 0..7
+    // (L = [0.1621, 0.2102, 0.2726, 0.3536, 0.4585, 0.5946, 0.7711, 1.0]):
+    //
+    //     T0 = L0 / 2                       = 0.08105   (zero -> mag 0 split)
+    //     T_k = sqrt(L_{k-1} * L_k)         for k = 1..7
+    //         T1 = sqrt(0.1621 * 0.2102)    = 0.18468
+    //         T2 = sqrt(0.2102 * 0.2726)    = 0.23947
+    //         T3 = sqrt(0.2726 * 0.3536)    = 0.31052
+    //         T4 = sqrt(0.3536 * 0.4585)    = 0.40262
+    //         T5 = sqrt(0.4585 * 0.5946)    = 0.52215
+    //         T6 = sqrt(0.5946 * 0.7711)    = 0.67710
+    //         T7 = sqrt(0.7711 * 1.0000)    = 0.87813
+    //
+    // To regenerate when the LUT changes:
+    //
+    //     >>> import math
+    //     >>> L = [v for v in PBF_MX_LUT.tolist() if v > 0]
+    //     >>> [L[0] / 2.0] + [math.sqrt(L[k-1] * L[k]) for k in range(1, 8)]
+    int sign = x < 0 ? 0b1000 : 0b0000;
+    x = fabsf(x);
+    // Upper half: |x| > T4 -> mags 4..7 (LUT entries 0.4585 .. 1.0)
+    if (x > 0.40262f) {
+        if (x > 0.67710f) {
+            if (x > 0.87813f)
+                return 0b1111 + sign; // mag 7, |L| = 1.0
+            else
+                return 0b1110 + sign; // mag 6, |L| = 0.7711054
+        } else if (x > 0.52215f)
+            return 0b1101 + sign; // mag 5, |L| = 0.5946036
+        else
+            return 0b1100 + sign; // mag 4, |L| = 0.4585020
+    }
+    // Lower half: |x| in (T1, T4] -> mags 1..3
+    else if (x > 0.18468f) {
+        if (x > 0.31052f)
+            return 0b1011 + sign; // mag 3, |L| = 0.3535534
+        else if (x > 0.23947f)
+            return 0b1010 + sign; // mag 2, |L| = 0.2726269
+        else
+            return 0b1001 + sign; // mag 1, |L| = 0.2102241
+    }
+    // |x| in (T0, T1] -> mag 0 (smallest positive, |L| = 0.1621049)
+    else if (x > 0.08105f)
+        return 0b1000 + sign;
+    // |x| <= T0 -> exact zero. The unique zero is byte 0b0111; the negative
+    // side does NOT have a duplicate -0 (NF4-style asymmetric layout).
+    else
+        return 0b0111;
+}
 
 __device__ unsigned char dQuantizeNF4(float x) {
 
@@ -365,6 +481,13 @@ __global__ void kQuantizeBlockwise(
                 qvals[j] |= dQuantizeNF4(((float)vals[2 * j + 1]) * local_abs_max);
             }
             break;
+        case PBF4:
+#pragma unroll NUM_PER_TH
+            for (int j = 0; j < NUM_PER_TH / 2; j++) {
+                qvals[j] = dQuantizePBF4(((float)vals[2 * j]) * local_abs_max) << 4;
+                qvals[j] |= dQuantizePBF4(((float)vals[2 * j + 1]) * local_abs_max);
+            }
+            break;
         }
 
         __syncthreads();
@@ -456,6 +579,13 @@ __global__ void kQuantizeBlockwiseSmall(
             qvals[j] |= dQuantizeNF4(((float)vals[2 * j + 1]) * local_abs_max);
         }
         break;
+    case PBF4:
+#pragma unroll NUM_PER_TH
+        for (int j = 0; j < NUM_PER_TH / 2; j++) {
+            qvals[j] = dQuantizePBF4(((float)vals[2 * j]) * local_abs_max) << 4;
+            qvals[j] |= dQuantizePBF4(((float)vals[2 * j + 1]) * local_abs_max);
+        }
+        break;
     }
 
     __syncthreads();
@@ -519,6 +649,13 @@ __global__ void
             for (int j = 0; j < NUM_PER_TH; j++) {
                 vals[j * 2] = dDequantizeNF4(qvals[j] >> 4) * local_abs_max;
                 vals[j * 2 + 1] = dDequantizeNF4(qvals[j] & 0x0F) * local_abs_max;
+            }
+            break;
+        case PBF4:
+#pragma unroll NUM_PER_TH
+            for (int j = 0; j < NUM_PER_TH; j++) {
+                vals[j * 2] = dDequantizePBF4(qvals[j] >> 4) * local_abs_max;
+                vals[j * 2 + 1] = dDequantizePBF4(qvals[j] & 0x0F) * local_abs_max;
             }
             break;
         }
@@ -1722,6 +1859,13 @@ MAKE_kQuantizeBlockwise(half, 512, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(half, 256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(half, 128, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(half, 64, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(half, 4096, 4, 0, PBF4)
+MAKE_kQuantizeBlockwise(half, 2048, 4, 0, PBF4)
+MAKE_kQuantizeBlockwise(half, 1024, 4, 0, PBF4)
+MAKE_kQuantizeBlockwise(half, 512, 2, 0, PBF4)
+MAKE_kQuantizeBlockwise(half, 256, 2, 0, PBF4)
+MAKE_kQuantizeBlockwise(half, 128, 2, 0, PBF4)
+MAKE_kQuantizeBlockwise(half, 64, 2, 0, PBF4)
 MAKE_kQuantizeBlockwise(float, 4096, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(float, 4096, 4, 1, General8bit)
 MAKE_kQuantizeBlockwise(float, 2048, 4, 0, General8bit)
@@ -1744,6 +1888,13 @@ MAKE_kQuantizeBlockwise(float, 512, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 128, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(float, 64, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(float, 4096, 4, 0, PBF4)
+MAKE_kQuantizeBlockwise(float, 2048, 4, 0, PBF4)
+MAKE_kQuantizeBlockwise(float, 1024, 4, 0, PBF4)
+MAKE_kQuantizeBlockwise(float, 512, 2, 0, PBF4)
+MAKE_kQuantizeBlockwise(float, 256, 2, 0, PBF4)
+MAKE_kQuantizeBlockwise(float, 128, 2, 0, PBF4)
+MAKE_kQuantizeBlockwise(float, 64, 2, 0, PBF4)
 
 MAKE_kQuantizeBlockwise(bnb_bfloat16, 4096, 4, 0, General8bit)
 MAKE_kQuantizeBlockwise(bnb_bfloat16, 4096, 4, 1, General8bit)
@@ -1767,6 +1918,13 @@ MAKE_kQuantizeBlockwise(bnb_bfloat16, 512, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(bnb_bfloat16, 256, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(bnb_bfloat16, 128, 2, 0, NF4)
 MAKE_kQuantizeBlockwise(bnb_bfloat16, 64, 2, 0, NF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 4096, 4, 0, PBF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 2048, 4, 0, PBF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 1024, 4, 0, PBF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 512, 2, 0, PBF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 256, 2, 0, PBF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 128, 2, 0, PBF4)
+MAKE_kQuantizeBlockwise(bnb_bfloat16, 64, 2, 0, PBF4)
 
 // Template instantiations for kQuantizeBlockwiseSmall (4-bit only)
 #define MAKE_kQuantizeBlockwiseSmall(dtype, qblock_size, data_type_name)                                               \
@@ -1782,6 +1940,9 @@ MAKE_kQuantizeBlockwiseSmall(bnb_bfloat16, 32, FP4)
 MAKE_kQuantizeBlockwiseSmall(half, 32, NF4)
 MAKE_kQuantizeBlockwiseSmall(float, 32, NF4)
 MAKE_kQuantizeBlockwiseSmall(bnb_bfloat16, 32, NF4)
+MAKE_kQuantizeBlockwiseSmall(half, 32, PBF4)
+MAKE_kQuantizeBlockwiseSmall(float, 32, PBF4)
+MAKE_kQuantizeBlockwiseSmall(bnb_bfloat16, 32, PBF4)
 
 // QBLOCK_SIZE=64 instantiations (blocksize=64, 4-bit)
 MAKE_kQuantizeBlockwiseSmall(half, 64, FP4)
@@ -1790,6 +1951,9 @@ MAKE_kQuantizeBlockwiseSmall(bnb_bfloat16, 64, FP4)
 MAKE_kQuantizeBlockwiseSmall(half, 64, NF4)
 MAKE_kQuantizeBlockwiseSmall(float, 64, NF4)
 MAKE_kQuantizeBlockwiseSmall(bnb_bfloat16, 64, NF4)
+MAKE_kQuantizeBlockwiseSmall(half, 64, PBF4)
+MAKE_kQuantizeBlockwiseSmall(float, 64, PBF4)
+MAKE_kQuantizeBlockwiseSmall(bnb_bfloat16, 64, PBF4)
 
 template __global__ void kDequantizeBlockwise<half, 512, 64, 8, FP4>(
     float* code, unsigned char* A, float* absmax, half* out, const int blocksize, const int n
@@ -1798,6 +1962,9 @@ template __global__ void kDequantizeBlockwise<half, 512, 64, 8, General8bit>(
     float* code, unsigned char* A, float* absmax, half* out, const int blocksize, const int n
 );
 template __global__ void kDequantizeBlockwise<half, 512, 64, 8, NF4>(
+    float* code, unsigned char* A, float* absmax, half* out, const int blocksize, const int n
+);
+template __global__ void kDequantizeBlockwise<half, 512, 64, 8, PBF4>(
     float* code, unsigned char* A, float* absmax, half* out, const int blocksize, const int n
 );
 template __global__ void kDequantizeBlockwise<float, 512, 64, 8, FP4>(
@@ -1809,6 +1976,9 @@ template __global__ void kDequantizeBlockwise<float, 512, 64, 8, General8bit>(
 template __global__ void kDequantizeBlockwise<float, 512, 64, 8, NF4>(
     float* code, unsigned char* A, float* absmax, float* out, const int blocksize, const int n
 );
+template __global__ void kDequantizeBlockwise<float, 512, 64, 8, PBF4>(
+    float* code, unsigned char* A, float* absmax, float* out, const int blocksize, const int n
+);
 template __global__ void kDequantizeBlockwise<bnb_bfloat16, 512, 64, 8, FP4>(
     float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, const int blocksize, const int n
 );
@@ -1816,6 +1986,9 @@ template __global__ void kDequantizeBlockwise<bnb_bfloat16, 512, 64, 8, General8
     float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, const int blocksize, const int n
 );
 template __global__ void kDequantizeBlockwise<bnb_bfloat16, 512, 64, 8, NF4>(
+    float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, const int blocksize, const int n
+);
+template __global__ void kDequantizeBlockwise<bnb_bfloat16, 512, 64, 8, PBF4>(
     float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, const int blocksize, const int n
 );
 

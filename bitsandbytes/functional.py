@@ -419,7 +419,7 @@ def get_ptr(A: Optional[Tensor]) -> Optional[ct.c_void_p]:
 class QuantState:
     """container for quantization state components to work with Params4bit and similar classes"""
 
-    valid_quant_types = ("fp4", "nf4")
+    valid_quant_types = ("fp4", "nf4", "pbf4")
     valid_qs_type_keys = [f"bitsandbytes__{x}" for x in valid_quant_types]
     valid_qs_keys = [
         "absmax",
@@ -809,6 +809,13 @@ def get_4bit_type(typename, device=None, blocksize=64):
         #
         # All values are normalized to [-1, 1] after construction (see end of function).
         data = [0, 0.0625, 8.0, 12.0, 4.0, 6.0, 2.0, 3.0, -0, -0.0625, -8.0, -12.0, -4.0, -6.0, -2.0, -3.0]
+    elif typename == "pbf4":
+        # PBF4 (peace-quant PBF-MX): 8 magnitudes sampled every-other level of the
+        # standard PBF8 spine. The fixed LUT lives in ``bitsandbytes._pbf4.PBF_MX_LUT``;
+        # it is dynamically derived from the PBF8 constants in ``_pbf8`` at module load.
+        from bitsandbytes._pbf4 import PBF_MX_LUT
+
+        data = PBF_MX_LUT.tolist()
     elif typename == "int4":
         data = [7, 6, 5, 4, 3, 2, 1, 0, -0, -1, -2, -3, -4, -5, -6, -7]
     elif typename == "af4":
@@ -913,8 +920,16 @@ def quantize_4bit(
         quant_type,
         quant_storage,
     )
+    if quant_type == "pbf4":
+        # PBF4 uses a fixed LUT derived from the PBF8 spine (`_pbf4.PBF_MX_LUT`).
+        # The op only returns (packed, absmax); attach the canonical LUT to
+        # QuantState.code here so CUDA's LUT-generic gemv_4bit and the Triton/
+        # default fallback paths all see the same table.
+        from bitsandbytes._pbf4 import PBF_MX_LUT
 
-    code = get_4bit_type(quant_type, device=A.device)
+        code = PBF_MX_LUT.to(A.device)
+    else:
+        code = get_4bit_type(quant_type, device=A.device)
 
     if compress_statistics:
         offset = _absmax.mean()
