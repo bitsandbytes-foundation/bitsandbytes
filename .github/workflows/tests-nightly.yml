@@ -49,7 +49,7 @@ jobs:
       cpu_type: ${{ matrix.cpu_type }}
 
   test-cuda:
-    name: CUDA
+    name: CUDA ${{ matrix.cuda_version }} (${{ matrix.platform }}, ${{ matrix.gpu_type }}, ${{ matrix.torch_version }})
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     strategy:
       fail-fast: false
