@@ -229,8 +229,8 @@ jobs:
       # via https://github.com/pytorch/pytorch/pull/134365. Remove when torch < 2.5 is dropped.
       - name: Set inductor cache dir (Windows)
         if: inputs.platform == 'windows'
-        shell: bash
-        run: echo "TORCHINDUCTOR_CACHE_DIR=C:/torchinductor_cache" >> $GITHUB_ENV
+        shell: pwsh
+        run: echo "TORCHINDUCTOR_CACHE_DIR=C:/torchinductor_cache" >> $env:GITHUB_ENV
 
       - name: Run tests
         run: pytest --durations=100
