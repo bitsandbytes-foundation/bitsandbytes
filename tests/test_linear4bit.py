@@ -365,8 +365,13 @@ def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_st
     if fullgraph and torch.__version__ < (2, 8, 0, "dev"):
         pytest.skip("fullgraph mode requires torch 2.8 or higher")
 
-    if device == "cuda" and platform.system() == "Windows":
-        pytest.skip("Triton is not officially supported on Windows")
+    if platform.system() == "Windows":
+        if device == "cuda":
+            pytest.skip("Triton is not officially supported on Windows")
+        if device == "cpu" and torch.__version__ < (2, 7):
+            # torch.compile inductor on Windows CPU has include path bugs fixed in torch 2.7
+            # https://github.com/pytorch/pytorch/pull/148271
+            pytest.skip("torch.compile inductor on Windows CPU requires torch >= 2.7")
 
     # Has a strange regression on Linux aarch64 CPU in torch==2.6.0 when fullgraph=False.
     if (
