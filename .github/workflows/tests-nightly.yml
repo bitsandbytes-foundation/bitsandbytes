@@ -74,8 +74,7 @@ jobs:
             torch_version: "2.11.0"
             pypi_index: "https://download.pytorch.org/whl/cu130"
           - cuda_version: "13.2.0"
-            torch_version: "2.12.0"
-            torch_nightly: true
+            torch_version: "nightly"
             pypi_index: "https://download.pytorch.org/whl/nightly/cu132"
 
           # Windows CUDA Tests - T4 GPU (CUDA 11.8 only, multiple torch versions)
@@ -102,5 +101,4 @@ jobs:
       cuda_version: ${{ matrix.cuda_version }}
       gpu_type: ${{ matrix.gpu_type }}
       torch_version: ${{ matrix.torch_version }}
-      torch_nightly: ${{ matrix.torch_nightly || false }}
       pypi_index: ${{ matrix.pypi_index }}
