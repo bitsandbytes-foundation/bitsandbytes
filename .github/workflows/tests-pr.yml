@@ -58,25 +58,25 @@ jobs:
       cpu_type: ${{ matrix.cpu_type }}
 
   test-cuda:
-    name: CUDA
+    name: CUDA ${{ matrix.cuda_version }} (${{ matrix.platform }}, ${{ matrix.gpu_type }}, ${{ matrix.torch_version }})
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     strategy:
       fail-fast: false
       matrix:
         platform: [linux-x64]
         gpu_type: [T4, A10, L40S]
-        cuda_version: ["11.8.0", "12.8.1", "13.0.2"]
+        cuda_version: ["11.8.0", "12.6.3", "13.0.2"]
 
         include:
           # Map CUDA version to torch version and PyPI index
           - cuda_version: "11.8.0"
             torch_version: "2.3.1"
             pypi_index: "https://download.pytorch.org/whl/cu118"
-          - cuda_version: "12.8.1"
-            torch_version: "2.9.1"
-            pypi_index: "https://download.pytorch.org/whl/cu128"
-          - cuda_version: "13.0.2"
+          - cuda_version: "12.6.3"
             torch_version: "2.11.0"
+            pypi_index: "https://download.pytorch.org/whl/cu126"
+          - cuda_version: "13.0.2"
+            torch_version: "2.12.0"
             pypi_index: "https://download.pytorch.org/whl/cu130"
 
           # Windows CUDA test - single configuration

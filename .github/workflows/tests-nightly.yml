@@ -49,7 +49,7 @@ jobs:
       cpu_type: ${{ matrix.cpu_type }}
 
   test-cuda:
-    name: CUDA
+    name: CUDA ${{ matrix.cuda_version }} (${{ matrix.platform }}, ${{ matrix.gpu_type }}, ${{ matrix.torch_version }})
     if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
     strategy:
       fail-fast: false
@@ -65,17 +65,16 @@ jobs:
             torch_version: "2.3.1"
             pypi_index: "https://download.pytorch.org/whl/cu118"
           - cuda_version: "12.6.3"
-            torch_version: "2.8.0"
+            torch_version: "2.11.0"
             pypi_index: "https://download.pytorch.org/whl/cu126"
           - cuda_version: "12.8.1"
-            torch_version: "2.9.1"
+            torch_version: "2.10.0"
             pypi_index: "https://download.pytorch.org/whl/cu128"
           - cuda_version: "13.0.2"
-            torch_version: "2.11.0"
+            torch_version: "2.12.0"
             pypi_index: "https://download.pytorch.org/whl/cu130"
           - cuda_version: "13.2.0"
-            torch_version: "2.12.0"
-            torch_nightly: true
+            torch_version: "nightly"
             pypi_index: "https://download.pytorch.org/whl/nightly/cu132"
 
           # Windows CUDA Tests - T4 GPU (CUDA 11.8 only, multiple torch versions)
@@ -102,5 +101,4 @@ jobs:
       cuda_version: ${{ matrix.cuda_version }}
       gpu_type: ${{ matrix.gpu_type }}
       torch_version: ${{ matrix.torch_version }}
-      torch_nightly: ${{ matrix.torch_nightly || false }}
       pypi_index: ${{ matrix.pypi_index }}
