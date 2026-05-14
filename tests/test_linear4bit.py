@@ -355,7 +355,6 @@ def test_params4bit_real_serialization(device, quant_type, blocksize, compress_s
 @pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
 @pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
-@pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
 @pytest.mark.skipif(
     torch.__version__ < (2, 10) and sys.version_info >= (3, 14), reason="Not supported in Python 3.14 until torch 2.10"
 )
@@ -378,6 +377,17 @@ def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_st
         and ((2, 7) > torch.__version__ >= (2, 6))
     ):
         pytest.xfail("Regression in torch==2.6.0 on Linux aarch64 CPU")
+
+    if (
+        not fullgraph
+        and quant_type == "fp4"
+        and compute_dtype == torch.bfloat16
+        and bias
+        and device == "cpu"
+        and platform.system() == "Darwin"
+        and torch.__version__ < (2, 6)
+    ):
+        pytest.xfail("precision diverges on macos cpu")
 
     dim = 256
     batch_size = 16

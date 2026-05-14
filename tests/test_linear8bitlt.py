@@ -254,11 +254,13 @@ def test_linear8bit_load_state_dict_raises_runtime_for_tied_weight():
 @pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
 @pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
-@pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
 @pytest.mark.skipif(
     torch.__version__ < (2, 10) and sys.version_info >= (3, 14), reason="Not supported in Python 3.14 until torch 2.10"
 )
 def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
+    if fullgraph and torch.__version__ < (2, 5):
+        pytest.skip("fullgraph tracing of MatmulLtState requires torch >= 2.5")
+
     if device == "cuda" and platform.system() == "Windows":
         pytest.skip("Triton is not officially supported on Windows")
 
