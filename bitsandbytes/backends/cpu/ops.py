@@ -153,9 +153,9 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
         )
 
-        # Fallback as AVX512 implementation has accuracy issues with fp16/fp32 and blocksize >= 2048
+        # Fallback as AVX512 implementation has accuracy issues with blocksize >= 2048.
         # Note: this is not a common use case.
-        avx512_fallback = _has_avx512 and blocksize >= 2048 and dtype != torch.bfloat16
+        avx512_fallback = _has_avx512 and blocksize >= 2048
 
         # Odd shape is not supported by this kernel; fallback to generic implementation
         shape_fallback = shape[-1] % 2 != 0
