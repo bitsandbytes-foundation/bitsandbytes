@@ -211,7 +211,7 @@ jobs:
 
       - name: Install torch
         if: inputs.torch_version != 'nightly'
-        run: pip install --pre torch==${{ inputs.torch_version }} --index-url ${{ inputs.pypi_index }}
+        run: pip install torch==${{ inputs.torch_version }} --index-url ${{ inputs.pypi_index }}
 
       - name: Install dependencies
         run: |
