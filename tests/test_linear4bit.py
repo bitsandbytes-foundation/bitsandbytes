@@ -378,6 +378,17 @@ def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_st
     ):
         pytest.xfail("Regression in torch==2.6.0 on Linux aarch64 CPU")
 
+    if (
+        not fullgraph
+        and quant_type == "fp4"
+        and compute_dtype == torch.bfloat16
+        and bias
+        and device == "cpu"
+        and platform.system() == "Darwin"
+        and torch.__version__ < (2, 6)
+    ):
+        pytest.xfail("precision diverges on macos cpu")
+
     dim = 256
     batch_size = 16
 
