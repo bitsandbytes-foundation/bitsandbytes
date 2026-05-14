@@ -453,6 +453,13 @@ def test_linear4bit_torch_compile_activation_checkpointing(device, quant_type, c
         pytest.skip("This configuration is not supported on HPU.")
     if device == "cuda" and platform.system() == "Windows":
         pytest.skip("Triton is not officially supported on Windows")
+    if (
+        device == "cuda"
+        and torch.cuda.is_available()
+        and torch.cuda.get_device_capability() < (8, 0)
+        and torch.__version__ >= (2, 13, 0, "dev")
+    ):
+        pytest.xfail("no compiled frames error on SM75")
     dim = 256
     batch_size = 16
     compute_dtype = torch.bfloat16
