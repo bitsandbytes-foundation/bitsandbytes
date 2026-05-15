@@ -327,7 +327,10 @@ int igemmlt(
             bnb_blasLtPrefSetAttr(pref, BNB_BLASLT_PREF_MAX_WORKSPACE, &max_workspace_size, sizeof(max_workspace_size))
         );
 
-        const int request_solutions = 1;
+        // hipBLASLt's first heuristic algo can be unusable for small-n int8 gemms
+        // (e.g. n=4 on MI300X) and fails at matmul time with INVALID_VALUE. Request
+        // several candidates and use the first one that actually runs successfully.
+        const int request_solutions = 8;
         bnb_blasLt_heuristic_t heuristicResult[request_solutions];
         int returnedAlgoCount = 0;
         checkBlasLtStatus(bnb_blasLtAlgoGetHeuristic(
@@ -340,10 +343,24 @@ int igemmlt(
             fprintf(stderr, "Error: Matmul Algo Heuristic didn't return algorithms\n");
         } else {
             int alpha = 1, beta = 0;
-            has_error |= checkBlasLtStatus(bnb_blasLtMatmul(
-                ltHandle, matmulDesc, &alpha, A, aDesc, B, bDesc, &beta, (int32_t*)C, cDesc, (int32_t*)C, cDesc,
-                &heuristicResult[0].algo, NULL, 0, stream
-            ));
+            bnb_blas_status_t matmul_status = BNB_BLAS_STATUS_SUCCESS;
+            for (int i = 0; i < returnedAlgoCount; ++i) {
+                matmul_status = bnb_blasLtMatmul(
+                    ltHandle, matmulDesc, &alpha, A, aDesc, B, bDesc, &beta, (int32_t*)C, cDesc, (int32_t*)C, cDesc,
+                    &heuristicResult[i].algo, NULL, 0, stream
+                );
+                if (matmul_status == BNB_BLAS_STATUS_SUCCESS)
+                    break;
+            }
+            if (matmul_status != BNB_BLAS_STATUS_SUCCESS) {
+                // Every workspace-free algo hipBLASLt offered failed at runtime
+                // (seen on MI300X for some small-n int8 gemms). Drain the HIP
+                // last-error flag the failed launches set, otherwise the next
+                // unrelated HIP call will inherit it. Then signal the Python
+                // wrapper to take the fp32 fallback via ERR_NOT_IMPLEMENTED.
+                (void)hipGetLastError();
+                return ERR_NOT_IMPLEMENTED;
+            }
         }
 #else
         int alpha = 1, beta = 0;

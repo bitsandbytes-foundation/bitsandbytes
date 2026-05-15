@@ -32,11 +32,6 @@ on:
         type: string
         default: ""
         description: "CPU architecture for testing: icelake, cascadelake (default: platform default runner)"
-      torch_nightly:
-        type: boolean
-        default: false
-        description: "Install nightly torch (--pre, no version pin) instead of a stable release"
-
 env:
   BNB_SKIP_CMAKE: 1
 
@@ -210,22 +205,18 @@ jobs:
         if: inputs.platform == 'windows'
         uses: ilammy/msvc-dev-cmd@v1.13.0
 
+      - name: Install torch (nightly)
+        if: inputs.torch_version == 'nightly'
+        run: pip install --pre torch --index-url ${{ inputs.pypi_index }}
+
+      - name: Install torch
+        if: inputs.torch_version != 'nightly'
+        run: pip install torch==${{ inputs.torch_version }} --index-url ${{ inputs.pypi_index }}
+
       - name: Install dependencies
         run: |
-          if [[ "${{ inputs.torch_nightly }}" == "true" ]]; then
-            pip install --pre torch --index-url ${{ inputs.pypi_index }}
-          else
-            pip install torch==${{ inputs.torch_version }} --index-url ${{ inputs.pypi_index }}
-          fi
           pip install -e ".[test]" -v
           pip install pytest-cov
-        shell: bash
-
-      # Windows: Downgrade NumPy for torch<2.4.1 compatibility
-      # See: https://github.com/pytorch/pytorch/issues/131668
-      - name: Downgrade NumPy
-        if: inputs.platform == 'windows' && startsWith(inputs.torch_version, '2.3.')
-        run: pip install "numpy<2"
 
       - name: Show installed packages
         run: pip list

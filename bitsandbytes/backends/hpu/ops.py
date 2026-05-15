@@ -25,7 +25,7 @@ def _(
     shape: Sequence[int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4, got {quant_type}")
     torch._check(
         A.dtype in [torch.bfloat16, torch.uint8],

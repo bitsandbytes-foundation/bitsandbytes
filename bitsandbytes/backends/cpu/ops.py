@@ -35,7 +35,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
 
     @register_kernel("bitsandbytes::quantize_blockwise", "cpu")
     def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
-        torch._check_is_size(blocksize)
+        torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
 
         n = A.numel()
         blocks = -(n // -blocksize)
@@ -94,7 +94,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
     def _(
         A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype
     ) -> torch.Tensor:
-        torch._check_is_size(blocksize)
+        torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
         torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
 
         out = torch.empty_like(A, dtype=dtype)
@@ -146,16 +146,16 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         shape: Sequence[int],
         dtype: torch.dtype,
     ) -> torch.Tensor:
-        torch._check_is_size(blocksize)
+        torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
         torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
         torch._check(
             dtype in [torch.bfloat16, torch.float16, torch.float32],
             lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
         )
 
-        # Fallback as AVX512 implementation has accuracy issues with fp16/fp32 and blocksize >= 2048
+        # Fallback as AVX512 implementation has accuracy issues with blocksize >= 2048.
         # Note: this is not a common use case.
-        avx512_fallback = _has_avx512 and blocksize >= 2048 and dtype != torch.bfloat16
+        avx512_fallback = _has_avx512 and blocksize >= 2048
 
         # Odd shape is not supported by this kernel; fallback to generic implementation
         shape_fallback = shape[-1] % 2 != 0

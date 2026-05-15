@@ -27,7 +27,7 @@ We provide official support for NVIDIA GPUs, CPUs, Intel XPUs, and Intel Gaudi. 
 These are the minimum requirements for `bitsandbytes` across all platforms. Please be aware that some compute platforms may impose more strict requirements.
 
 * Python >= 3.10
-* PyTorch >= 2.3
+* PyTorch >= 2.4
 
 ## NVIDIA CUDA[[cuda]]
 
@@ -65,6 +65,14 @@ Use `pip` or `uv` to install the latest release:
 ```bash
 pip install bitsandbytes
 ```
+
+> [!WARNING]
+> **NVIDIA Jetson (L4T / JetPack) — source build required.** The `Linux aarch64` wheels above are built on aarch64-sbsa runners (server-class ARM with the standard CUDA Toolkit). They are **not compatible** with the L4T runtime on Jetson devices (Orin Nano / NX / AGX, Xavier, Thor on CUDA 12), even though both are aarch64 and even though the cubins are binary-compatible with the device's compute capability (e.g., `sm_80` cubin runs on `sm_87` hardware via Ampere-family binary compat — see [NVIDIA's docs on binary compatibility](https://developer.nvidia.com/blog/understanding-ptx-the-assembly-language-of-cuda-gpu-computing/#binary_compatibility)). The mismatch is at the CUDA library / ABI layer (JetPack ships its own CUDA Toolkit and system libraries), and surfaces as a runtime symbol-resolution error like `Error named symbol not found in /src/csrc/ops.cu` on the first CUDA op.
+>
+> **Two working options on Jetson:**
+>
+> 1. **Source build on-device.** Use the [Compile from Source](#cuda-compile) instructions below, passing your device's compute capability explicitly (sm_87 for Orin family, sm_72 for Xavier). On an Orin Nano Super: `cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=87 . && make -j4 && pip install .`
+> 2. **Third-party prebuilt** from [Jetson AI Lab's package index](https://pypi.jetson-ai-lab.io/) (e.g., `pypi.jetson-ai-lab.io/jp6/cu126/bitsandbytes/`).
 
 ### Compile from Source[[cuda-compile]]
 
@@ -205,7 +213,7 @@ The currently distributed `bitsandbytes` are built with the following configurat
 | **Linux x86-64**   | 6.4.4    | CDNA: gfx90a, gfx942 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
 | **Linux x86-64**   | 7.0.2    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
 | **Linux x86-64**   | 7.1.1    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
-| **Linux x86-64**   | 7.2.2    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
+| **Linux x86-64**   | 7.2.3    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
 | **Windows x86-64** | 7.2.1    | RDNA: gfx1100, gfx1101, gfx1102, gfx1150, gfx1151, gfx1200, gfx1201
 
 Use `pip` or `uv` to install the latest release:
@@ -216,7 +224,7 @@ pip install bitsandbytes
 
 ### Compile from Source[[rocm-compile]]
 
-bitsandbytes can be compiled from ROCm 6.2 - ROCm 7.2.2. See the `CMakeLists.txt` for additional options.
+bitsandbytes can be compiled from ROCm 6.2 - ROCm 7.2.3. See the `CMakeLists.txt` for additional options.
 
 <hfoptions id="rocm-source">
 <hfoption id="Linux">

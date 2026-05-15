@@ -356,7 +356,6 @@ def test_params4bit_real_serialization(device, quant_type, blocksize, compress_s
 @pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
 @pytest.mark.parametrize("batch_size", [1, 16], ids=id_formatter("batch_size"))
-@pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
 @pytest.mark.skipif(
     torch.__version__ < (2, 10) and sys.version_info >= (3, 14), reason="Not supported in Python 3.14 until torch 2.10"
 )
@@ -369,8 +368,13 @@ def test_linear4bit_torch_compile(
     if fullgraph and torch.__version__ < (2, 8, 0, "dev"):
         pytest.skip("fullgraph mode requires torch 2.8 or higher")
 
-    if device == "cuda" and platform.system() == "Windows":
-        pytest.skip("Triton is not officially supported on Windows")
+    if platform.system() == "Windows":
+        if device == "cuda":
+            pytest.skip("Triton is not officially supported on Windows")
+        if device == "cpu" and torch.__version__ < (2, 7):
+            # torch.compile inductor on Windows CPU has include path bugs fixed in torch 2.7
+            # https://github.com/pytorch/pytorch/pull/148271
+            pytest.skip("torch.compile inductor on Windows CPU requires torch >= 2.7")
 
     # Has a strange regression on Linux aarch64 CPU in torch==2.6.0 when fullgraph=False.
     if (
@@ -381,6 +385,17 @@ def test_linear4bit_torch_compile(
         and ((2, 7) > torch.__version__ >= (2, 6))
     ):
         pytest.xfail("Regression in torch==2.6.0 on Linux aarch64 CPU")
+
+    if (
+        not fullgraph
+        and quant_type == "fp4"
+        and compute_dtype == torch.bfloat16
+        and bias
+        and device == "cpu"
+        and platform.system() == "Darwin"
+        and torch.__version__ < (2, 6)
+    ):
+        pytest.xfail("precision diverges on macos cpu")
 
     dim = 256
 
@@ -455,6 +470,13 @@ def test_linear4bit_torch_compile_activation_checkpointing(device, quant_type, c
         pytest.skip("This configuration is not supported on HPU.")
     if device == "cuda" and platform.system() == "Windows":
         pytest.skip("Triton is not officially supported on Windows")
+    if (
+        device == "cuda"
+        and torch.cuda.is_available()
+        and torch.cuda.get_device_capability() < (8, 0)
+        and torch.__version__ >= (2, 13, 0, "dev")
+    ):
+        pytest.xfail("no compiled frames error on SM75")
     dim = 256
     batch_size = 16
     compute_dtype = torch.bfloat16

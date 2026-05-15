@@ -22,6 +22,7 @@ template <typename T, int TILE_SIZE, int NUM_PER_TH, int DATA_TYPE> class kDequa
 
 template <typename T, size_t GROUP_SIZE, size_t NUM_PER_THREAD, size_t SUBG_SIZE, int BITS> class kgemv_4bit_inference {
   public:
+    [[sycl::reqd_sub_group_size(SUBG_SIZE)]]
     SYCL_EXTERNAL void operator()(sycl::nd_item<1> item) const;
 
     kgemv_4bit_inference(

@@ -15,7 +15,7 @@ torch_accelerator_module = getattr(torch, device_type, torch.cuda)
 
 
 def quantize_blockwise(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     # torch._check(A.dtype == torch.float32, lambda: f"A must be float32 on xpu, got {A.dtype}")
     with torch_accelerator_module.device(A.device):
         out, absmax = kernels_8bit_quant.quantize_blockwise_triton(A.contiguous(), code, blocksize)
@@ -25,7 +25,7 @@ def quantize_blockwise(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> t
 def dequantize_blockwise(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype
 ) -> torch.Tensor:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
     # torch._check(dtype == torch.float32, lambda: f"dtype must be float32 on xpu, got {dtype}")
     with torch_accelerator_module.device(A.device):
@@ -47,7 +47,7 @@ def dequantize_blockwise_inplace(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
     torch._check(out.shape == A.shape, lambda: f"Expected out.shape == {A.shape}, got {out.shape}")
     torch._check(out.device == A.device, lambda: f"Expected out.device == {A.device}, got {out.device}")
@@ -67,7 +67,7 @@ def dequantize_blockwise_inplace(
 def quantize_4bit(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     # torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on CPU, got {quant_type}")
     torch._check(
         A.dtype in [torch.bfloat16, torch.float16, torch.float32],
@@ -109,7 +109,7 @@ def dequantize_4bit(
     shape: Sequence[int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     # torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on XPU, got {quant_type}")
     torch._check(
         dtype in [torch.bfloat16, torch.float16, torch.float32],

@@ -84,9 +84,20 @@ def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor
 
     if has_error:
         if has_error == 100:
-            # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`
-            # TODO: Warn and implement a fallback to fp32 compute?
-            raise NotImplementedError("int8_linear_matmul not implemented!")
+            # `ERR_NOT_IMPLEMENTED` is defined as 100 in `ops.cu`. The HIP backend
+            # also returns this when no usable hipBLASLt algo exists for the shape
+            # (seen on MI300X for some small-n int8 gemms). Fall back to fp32 — same
+            # path used for the `lda % 4 != 0` case above.
+            import warnings
+
+            warnings.warn(
+                f"int8_linear_matmul has no usable (hip|cu)blasLt algo for shape "
+                f"{shapeA=} {shapeB=}; falling back to fp32 matmul.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            result = torch.matmul(B.float(), A.float().t()).to(torch.int32)
+            return out.copy_(result)
         else:
             raise RuntimeError(
                 f"cublasLt ran into an error!\n\t{shapeA=}, {shapeB=}, {shapeC=}\n\t{(lda, ldb, ldc)=}\n\t{(m, n, k)=}"
@@ -220,7 +231,7 @@ def _get_col_absmax(
 @register_kernel("bitsandbytes::quantize_blockwise", "cuda")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
     A = A.contiguous()
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
 
     torch._check(blocksize in [4096, 2048, 1024, 512, 256, 128, 64, 32])
 
@@ -463,7 +474,7 @@ def _gemv_4bit_impl(
     blocksize: int,
     out: torch.Tensor,
 ) -> None:
-    torch._check_is_size(blocksize)
+    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
 
     # Note: these checks are not strictly necessary, and cost more than they are worth, so they are commented out for now.
     # torch._check(
