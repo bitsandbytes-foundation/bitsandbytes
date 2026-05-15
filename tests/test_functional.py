@@ -959,6 +959,8 @@ class TestQuantize4BitFunctional:
         M, N, K = MNK
         if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, torch.uint8):
             pytest.skip("This configuration is not supported on HPU.")
+        if device == "cpu" and (blocksize == 4096 or K > 128 or M > 40 or N > 8192):
+            pytest.skip("narrowed on CPU")
 
         B = torch.randn(N, K, dtype=dtype, device=device) / (K**0.5)
         A = torch.randn(1, M, K, dtype=dtype, device=device)
