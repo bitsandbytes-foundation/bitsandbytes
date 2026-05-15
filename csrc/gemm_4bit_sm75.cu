@@ -8,9 +8,9 @@
 #include "gemm_4bit_sm75.cuh"
 
 static constexpr int K_CHUNK = 64;
-static constexpr int MMA_M = 16;
-static constexpr int MMA_N = 8;
-static constexpr int MMA_K_SM75 = 8;
+[[maybe_unused]] static constexpr int MMA_M = 16;
+[[maybe_unused]] static constexpr int MMA_N = 8;
+[[maybe_unused]] static constexpr int MMA_K = 8;
 
 static constexpr int NUM_WARPS = 8;
 static constexpr int CTA_SIZE = NUM_WARPS * 32;
@@ -265,8 +265,8 @@ __global__ void __launch_bounds__(CTA_SIZE) gemm_4bit_sm75_m16n8k8(
         const int wm_off = warp_m * WARP_M;
         const int wn_off = warp_n * WARP_N;
 
-        for (int kk = 0; kk < K_CHUNK / MMA_K_SM75; kk++) {
-            const int k_off = kk * MMA_K_SM75;
+        for (int kk = 0; kk < K_CHUNK / MMA_K; kk++) {
+            const int k_off = kk * MMA_K;
 
             uint32_t a_frag[WARP_MMA_M][2];
 #pragma unroll

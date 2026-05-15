@@ -9,9 +9,9 @@
 #include "gemm_4bit_common.cuh"
 #include "gemm_4bit_sm80.cuh"
 
-static constexpr int MMA_M = 16;
-static constexpr int MMA_N = 8;
-static constexpr int MMA_K = 16;
+[[maybe_unused]] static constexpr int MMA_M = 16;
+[[maybe_unused]] static constexpr int MMA_N = 8;
+[[maybe_unused]] static constexpr int MMA_K = 16;
 
 static constexpr int NUM_WARPS = 8;
 static constexpr int CTA_SIZE = NUM_WARPS * 32;

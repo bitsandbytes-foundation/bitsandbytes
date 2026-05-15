@@ -82,8 +82,8 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
     // Each lane loads its LUT entry (lane_id < 16) for warp-shuffle dequant.
     // bf16/fp16: centroid as uint16-in-uint32 for __shfl_sync over uint32.
     // fp32: centroid as float for __shfl_sync over float.
-    uint32_t my_lut_u32 = 0u;
-    float my_lut_f32_shfl = 0.0f;
+    [[maybe_unused]] uint32_t my_lut_u32 = 0u;
+    [[maybe_unused]] float my_lut_f32_shfl = 0.0f;
 
     if (lane_id < 16) {
         const float* lut = (quant_type == 1) ? FP4_LUT_F32 : NF4_LUT_F32;
@@ -146,7 +146,7 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
         // Decode B and accumulate.
         // bf16/fp16: uint16-in-uint32 LUT, hmul2 vector math, 1x uint4 A load per sub-iter.
         // fp32:      float LUT, scalar multiply, 2x uint4 A loads per sub-iter.
-        T2 scale_x2{};
+        [[maybe_unused]] T2 scale_x2{};
         if constexpr (!std::is_same_v<T, float>)
             scale_x2 = broadcast_vec2<T>(scale_f);
 
@@ -154,8 +154,8 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
         for (int sub = 0; sub < 4; sub++) {
             // Decode 4 B bytes (8 nibbles) into 8 dequantized values.
             // hi nibble (>>4) = lower K index, lo nibble (&0xf) = higher K index.
-            T2 b_chunk[4];
-            float b_dq[8];
+            [[maybe_unused]] T2 b_chunk[4];
+            [[maybe_unused]] float b_dq[8];
 #pragma unroll
             for (int j = 0; j < 4; j++) {
                 const uint8_t byte = b_bytes[sub * 4 + j];
