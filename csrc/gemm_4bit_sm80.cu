@@ -150,9 +150,11 @@ __global__ void __launch_bounds__(CTA_SIZE) gemm_4bit_sm80_m16n8k16(
     // if constexpr prunes the kernel body entirely at compile time; __trap()
     // provides a visible error if this assumption is ever violated at runtime.
     // clang-format off
-#if __CUDA_ARCH__ == 800 || __CUDA_ARCH__ == 900 || __CUDA_ARCH__ == 1000 || __CUDA_ARCH__ == 1030
-    // HBM (sm80/sm90/sm100/sm103): MT=32 always returns K_CHUNK=128 with NT=64 or NT=256;
+#if __CUDA_ARCH__ == 900 || __CUDA_ARCH__ == 1000 || __CUDA_ARCH__ == 1030
+    // HBM (sm90/sm100/sm103): MT=32 always returns K_CHUNK=128 with NT=64 or NT=256;
     // MT=64 never uses NT=32 (GDDR-only fallback).
+    // sm80 is intentionally excluded: these four GDDR tiles are unused on sm80 itself
+    // but must remain in the sm80 cubin so it can run correctly on sm86/sm89.
     if constexpr ((MT==32 && NT== 64 && K_CHUNK== 64) ||
                   (MT==32 && NT==128 && K_CHUNK== 64) ||
                   (MT==32 && NT==128 && K_CHUNK==128) ||
