@@ -611,17 +611,13 @@ class Linear4bit(nn.Linear):
         quant_state = self.weight.quant_state
 
         if (
-            not getattr(quant_state, "packing_format_for_cpu", False)
-            and x.device.type == "cpu"
+            x.device.type == "cpu"
             and self.support_avx512bf16_for_cpu
             and not self.training
             and x.requires_grad == False
+            and not getattr(quant_state, "packing_format_for_cpu", False)
         ):
             self.weight.data, quant_state = _convert_weight_packed_for_cpu(self.weight.data, quant_state)
-
-        # weights are cast automatically as Int8Params, but the bias has to be cast manually
-        if self.bias is not None and self.bias.dtype != x.dtype:
-            self.bias.data = self.bias.data.to(x.dtype)
 
         if not self.compute_type_is_set:
             self.set_compute_type(x)
@@ -631,10 +627,14 @@ class Linear4bit(nn.Linear):
         if self.compute_dtype is not None:
             x = x.to(self.compute_dtype)
 
-        bias = None if self.bias is None else self.bias.to(self.compute_dtype)
-        weight = self.weight if getattr(quant_state, "packing_format_for_cpu", False) else self.weight.t()
+        bias = self.bias
+        if bias is not None:
+            if bias.dtype != x.dtype:
+                # TODO: do we need to cast bias like this?
+                bias.data = bias.data.to(x.dtype)
+            bias = bias.to(self.compute_dtype)
 
-        return bnb.matmul_4bit(x, weight, bias=bias, quant_state=quant_state).to(inp_dtype)
+        return bnb.matmul_4bit(x, self.weight, bias=bias, quant_state=quant_state).to(inp_dtype)
 
 
 class LinearFP4(Linear4bit):

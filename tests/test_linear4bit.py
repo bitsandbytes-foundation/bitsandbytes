@@ -355,11 +355,14 @@ def test_params4bit_real_serialization(device, quant_type, blocksize, compress_s
 @pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
 @pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))
 @pytest.mark.parametrize("mode", ["default", "reduce-overhead"], ids=id_formatter("mode"))
+@pytest.mark.parametrize("batch_size", [1, 16], ids=id_formatter("batch_size"))
 @pytest.mark.skipif(torch.__version__ < (2, 4), reason="Not supported in torch < 2.4")
 @pytest.mark.skipif(
     torch.__version__ < (2, 10) and sys.version_info >= (3, 14), reason="Not supported in Python 3.14 until torch 2.10"
 )
-def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_statistics, bias, fullgraph, mode):
+def test_linear4bit_torch_compile(
+    device, quant_type, compute_dtype, compress_statistics, bias, fullgraph, mode, batch_size
+):
     if device == "hpu" and not is_supported_on_hpu(quant_type):
         pytest.skip("This configuration is not supported on HPU.")
 
@@ -380,7 +383,6 @@ def test_linear4bit_torch_compile(device, quant_type, compute_dtype, compress_st
         pytest.xfail("Regression in torch==2.6.0 on Linux aarch64 CPU")
 
     dim = 256
-    batch_size = 16
 
     torch.compiler.reset()
 

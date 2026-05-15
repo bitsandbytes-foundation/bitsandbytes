@@ -4,8 +4,9 @@ from packaging import version
 import torch
 
 try:
-    import triton  # noqa: F401
     import triton.language as tl  # noqa: F401
+
+    import triton  # noqa: F401
 
     triton_available = True
 except ImportError:
@@ -61,6 +62,18 @@ _FP4_QUANT_TABLE = torch.tensor(
     else "cpu",  # Only cpu/xpu use this table for now.
 )
 CODE = {"nf4": _NF4_QUANT_TABLE, "fp4": _FP4_QUANT_TABLE}
+
+# Cache 4-bit dequantization code tensors per (quant_type, device).
+_code_4bit_cache: dict[tuple[str, torch.device], torch.Tensor] = {}
+
+
+def _get_4bit_code(quant_type: str, device: torch.device) -> torch.Tensor:
+    key = (quant_type, device)
+    if key not in _code_4bit_cache:
+        from bitsandbytes.functional import get_4bit_type
+
+        _code_4bit_cache[key] = get_4bit_type(quant_type, device=device)
+    return _code_4bit_cache[key]
 
 
 def get_gaudi_sw_version():

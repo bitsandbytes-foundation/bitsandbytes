@@ -315,9 +315,37 @@ class MatMul4Bit(torch.autograd.Function):
             else:
                 return torch.empty(A.shape[:-1] + B_shape[:1], dtype=A.dtype, device=A.device)
 
-        # 1. Dequantize
-        # 2. MatmulnN
-        output = torch.nn.functional.linear(A, F.dequantize_4bit(B, quant_state).to(A.dtype).t(), bias)
+        # Normalize to canonical [(N*K+1)//2, 1]. Packed weights are always contiguous
+        # in this orientation (B.t() callers get strides [1,1], still compatible).
+        # quant_state.shape is the source of truth for N and K.
+        B = B.view(-1, 1)
+
+        if not quant_state.nested:
+            output = torch.ops.bitsandbytes.gemm_4bit.default(
+                A,
+                B,
+                quant_state.shape,
+                quant_state.absmax,
+                quant_state.blocksize,
+                quant_state.quant_type,
+                bias=bias,
+            )
+        elif quant_state.state2.blocksize == 256:
+            output = torch.ops.bitsandbytes.gemm_4bit.default(
+                A,
+                B,
+                quant_state.shape,
+                quant_state.state2.absmax,
+                quant_state.blocksize,
+                quant_state.quant_type,
+                bias=bias,
+                absmax_8bit=quant_state.absmax,
+                absmax_code=quant_state.state2.code,
+                absmax_offset=quant_state.offset,
+            )
+        else:
+            raise NotImplementedError("nested quantization with state2.blocksize != 256 is not supported")
+
         if out is not None:
             out.copy_(output)
             output = out
@@ -351,7 +379,9 @@ class MatMul4Bit(torch.autograd.Function):
         # not supported by PyTorch. TODO: create work-around
         # if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
         if req_gradA:
-            grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype).t())
+            # B in ctx.tensors is already in canonical [(N*K+1)//2, 1] form (normalized in forward).
+            # dequantize returns [N, K]; matmul(grad_output[M,N], [N,K]) = grad_A[M,K].
+            grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype))
 
         return grad_A, grad_B, None, grad_bias, None
 
@@ -381,26 +411,81 @@ def matmul_4bit(
     out: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
 ):
-    assert quant_state is not None
-    if A.device.type == "cpu":
-        if getattr(quant_state, "packing_format_for_cpu", False):
-            out = F.gemv_4bit(A, B, out, state=quant_state)
-            if bias is not None:
-                out += bias
-            return out
-        else:
-            return MatMul4Bit.apply(A, B, out, bias, quant_state)
+    if quant_state is None:
+        raise ValueError("quant_state is required")
+    if len(quant_state.shape) != 2:
+        raise ValueError("matmul_4bit: quant_state.shape must be 2D [N, K]")
 
-    if A.numel() == A.shape[-1] and A.requires_grad == False and A.device.type != "hpu":
-        if A.shape[-1] % quant_state.blocksize != 0:
+    # packing_format_for_cpu uses a different memory layout optimized for AVX512BF16.
+    # This flag is only set for inference (weight conversion happens at eval time).
+    # The underlying kernel supports any M via tiled GEMM despite the gemv name.
+    if A.device.type == "cpu" and getattr(quant_state, "packing_format_for_cpu", False):
+        result = F.gemv_4bit(A, B, out=out, state=quant_state)
+        if bias is not None:
+            result += bias
+        return result
+
+    # Normalize B to canonical [(N*K+1)//2, 1]. Packed weights are always contiguous
+    # in this orientation (B.t() callers get strides [1,1], still compatible).
+    # quant_state.shape is the source of truth for N and K.
+    B = B.view(-1, 1)
+
+    K = A.shape[-1]
+
+    # Weight is in [K, N] orientation when A's inner dim matches shape[0] not shape[1].
+    # Square weights (K==N) are ambiguous and treated as [N, K].
+    if K == quant_state.shape[0] and K != quant_state.shape[1]:
+        if not _is_compiling():
             warn(
-                f"Some matrices hidden dimension is not a multiple of {quant_state.blocksize} and efficient inference kernels are not supported for these (slow). Matrix input size found: {A.shape}",
+                f"matmul_4bit: weight was quantized from a [K, N] tensor (quant_state.shape={list(quant_state.shape)}). "
+                "Re-quantize from the weight in [N, K] (out_features, in_features) orientation. "
+                "This will be an error in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
             )
-            return MatMul4Bit.apply(A, B, out, bias, quant_state)
-        else:
-            out = F.gemv_4bit(A, B.t(), out, state=quant_state)
-            if bias is not None:
-                out += bias
+        B_dq = F.dequantize_4bit(B, quant_state).to(A.dtype)
+        result = torch.nn.functional.linear(A, B_dq.t(), bias)
+        if out is not None:
+            out.copy_(result)
             return out
-    else:
-        return MatMul4Bit.apply(A, B, out, bias, quant_state)
+        return result
+
+    needs_grad = torch.is_grad_enabled() and (A.requires_grad or (bias is not None and bias.requires_grad))
+    if not needs_grad:
+        A_numel = A.numel()
+        if A_numel == 0:
+            if out is not None:
+                return out
+            return torch.empty((*A.shape[:-1], quant_state.shape[0]), dtype=A.dtype, device=A.device)
+
+        if not quant_state.nested:
+            result = torch.ops.bitsandbytes.gemm_4bit.default(
+                A,
+                B,
+                quant_state.shape,
+                quant_state.absmax,
+                quant_state.blocksize,
+                quant_state.quant_type,
+                bias=bias,
+            )
+        elif quant_state.state2.blocksize == 256:
+            result = torch.ops.bitsandbytes.gemm_4bit.default(
+                A,
+                B,
+                quant_state.shape,
+                quant_state.state2.absmax,
+                quant_state.blocksize,
+                quant_state.quant_type,
+                bias=bias,
+                absmax_8bit=quant_state.absmax,
+                absmax_code=quant_state.state2.code,
+                absmax_offset=quant_state.offset,
+            )
+        else:
+            raise NotImplementedError("nested quantization with state2.blocksize != 256 is not supported")
+        if out is not None:
+            out.copy_(result)
+            return out
+        return result
+
+    return MatMul4Bit.apply(A, B, out, bias, quant_state)

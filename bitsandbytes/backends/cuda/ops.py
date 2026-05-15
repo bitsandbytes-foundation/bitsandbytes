@@ -1,7 +1,9 @@
 from collections.abc import Sequence
 import ctypes as ct
+import functools
 from math import prod
 from typing import Optional
+from warnings import warn
 
 import torch
 
@@ -9,6 +11,14 @@ from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, _get_tensor
 
 from ..._ops import register_kernel
 from ...cextension import lib
+from ..default.ops import _gemm_4bit_default_impl
+from ..utils import _get_4bit_code
+
+
+@functools.cache
+def _gpu_dispatch_props(device_index):
+    props = torch.cuda.get_device_properties(device_index)
+    return props.multi_processor_count, props.major, props.minor
 
 
 @register_kernel("bitsandbytes::int8_linear_matmul", "cuda")
@@ -530,6 +540,364 @@ def _gemv_4bit_impl(
                 ct.c_int32(blocksize),
                 stream,
             )
+
+
+@functools.cache
+def _gemm_4bit_use_custom(device_index, dtype, M, N, K):
+    """Custom kernel vs dequant+F.linear heuristic for M in [5, 1536].
+
+    Per-arch notes (bf16/fp16, M >= 8, large weight):
+      sm75 (T4, ~300 GB/s GDDR6):    fp16 MMA only; GDDR makes dequant expensive.
+      sm80 (A100, ~2 TB/s HBM2e):    mma.sync; HBM thresholds; K-heavy shapes handled explicitly.
+      sm86 (A10, ~600 GB/s GDDR6):   dedicated block; wider M caps than sm89 at medium N.
+      sm89 (4090, L40S, GDDR6X):     default fallback; tall-K and large-N get higher M caps.
+      sm90 (H100/H200, HBM3/HBM3e):  dequant+linear is much faster; thresholds are tight.
+      sm100 (B200/B300, HBM3e):       exits early at top of function.
+      sm120 (RTX 5000, GDDR7):        dedicated block; medium-N tiers differ from sm89.
+    """
+    num_sms, major, minor = _gpu_dispatch_props(device_index)
+    n_blocks = (N + 63) // 64
+
+    # fp32 has no MMA kernel; pre-sm75 has no MMA kernel; sm75 has fp16 MMA only.
+    # For all of these, custom only wins in the SIMT range (M<8).
+    if dtype == torch.float32 or major < 7:
+        return M < 8
+    if major == 7 and (minor < 5 or dtype != torch.float16):
+        return M < 8
+
+    # sm87 and sm110: no calibration data, conservative fallback.
+    if (major == 8 and minor == 7) or major == 11:
+        return False
+
+    # sm100 (B200/B300): dequant+F.linear is significantly faster than our mma.sync kernel.
+    if major == 10:
+        if n_blocks >= num_sms * 3:
+            return M <= 32
+        if n_blocks >= num_sms:
+            return False if K >= N else M <= 8
+        return False
+
+    is_sm75 = major == 7 and minor == 5
+    is_sm80 = major == 8 and minor == 0
+    is_sm86 = major == 8 and minor == 6
+    is_sm90 = major == 9
+    is_sm120 = major == 12 and minor == 0
+    is_hbm = is_sm80 or is_sm90  # sm100 already returned above
+    tall_k_2xn = K > N * 2
+
+    # Small-weight path (N*K < 4MB): dequant overhead dominates.
+    if N * K < 4 * 1024 * 1024:
+        if K * 2 < N:
+            # Very short K (K < N/2): latency-dominated, custom 3-9x cheaper.
+            if is_hbm:
+                # Calibrated on A100: custom wins to M=1536 (low wave), M=512 (high wave).
+                # Calibrated on H100/H200: custom wins to M=512 (low wave), M=320 (high wave).
+                low_wave = n_blocks * 3 < num_sms
+                if is_sm80:
+                    return M <= (1536 if low_wave else 512)
+                return M <= (512 if low_wave else 320)
+            if is_sm75:
+                # T4: wins require >=3 waves; M cap scales with K depth.
+                if n_blocks >= num_sms * 3:
+                    return M <= 320
+                if K >= 1024:
+                    return M <= 64
+                if K >= 704:
+                    return M <= 96
+                return M <= 320
+            # sm86/sm89/sm120: well-subscribed wins to M=320; undersubscribed tighter.
+            if n_blocks >= num_sms:
+                return M <= 320
+            return M <= 192 if n_blocks * K > num_sms * 320 else M <= 320
+        # K*2 >= N: arch-specific handling at low occupancy.
+        quarter_wave = n_blocks * 4 <= num_sms
+        if is_sm80 and quarter_wave:
+            # A100 <1/4 wave: K>=N loses earlier (K-tiling efficient on HBM2e).
+            if K >= N:
+                return M <= (32 if n_blocks * 8 <= num_sms else 128)
+            return M <= 384
+        # T4 <1 wave non-short-K: M>8 routes through occupancy caps below.
+        if is_sm75 and n_blocks < num_sms and M > 8:
+            return M <= 64
+        # General tiers (sm90, sm86, sm89, sm120):
+        # GDDR tall-K (K>=N) at <1/4 wave: K-tiling in default impl wins above M=23.
+        if quarter_wave:
+            return M <= (32 if (K < N or is_hbm) else 23)
+        if n_blocks * 2 <= num_sms:
+            return M <= 16
+        return False  # >=1/2 wave: no validated wins for remaining small-weight shapes
+
+    # Non-small-weight: custom wins up to M=512; dequant+F.linear wins above that.
+    if M > 512:
+        return False
+
+    # M=5-7: custom SIMT generally wins because dequant cost dominates.
+    # Exceptions where K-tiling efficiency or MMA occupancy favors dequant+F.linear:
+    #   HBM at M=6-7: tall-K (K>N) at ~3/4 MMA wave.
+    #   sm90 square (K==N) at specific occupancy bands: arch-specific crossover.
+    if M < 8:
+        hbm_m67_thresh = 36 if is_sm90 else 48
+        if is_hbm and M >= 6 and n_blocks >= hbm_m67_thresh:
+            lt_75pct_wave = n_blocks * 4 < num_sms * 3
+            lt_60pct_wave = n_blocks * 5 < num_sms * 3
+            # Tall-K: K-tiling in default impl wins when under-subscribed.
+            if K > N and lt_75pct_wave:
+                return False
+            # Square: arch-specific crossover around 0.6 wave.
+            # A100 (HBM2e): loses below 0.6 wave. H100/H200 (HBM3/3e): loses above.
+            if K == N:
+                if is_sm80 and lt_60pct_wave:
+                    return False
+                if is_sm90 and lt_75pct_wave and not lt_60pct_wave:
+                    return False
+        return True
+
+    # M in [8, 512]: per-arch tier ladders.
+
+    if is_sm75:
+        # fp16 MMA (m16n8k8). GDDR bandwidth makes dequant relatively expensive.
+        if n_blocks >= num_sms * 3:
+            return M <= (128 if K < N else 64)
+        if n_blocks >= num_sms // 2:
+            return M <= 64
+        return M <= 32
+
+    if is_sm80:
+        # mma.sync (m16n8k16). HBM2e thresholds; K-heavy shapes handled explicitly.
+        if n_blocks >= num_sms * 3:
+            return M <= 128
+        if n_blocks >= num_sms:
+            return M <= (64 if K < N else 32)
+        # Very tall-K (K>=3N) at >1/4 wave: K-tiling in default impl wins at all M.
+        # Uses >= to catch K==3N (e.g. N=4096,K=12288 M=9-16: measured regression on A100).
+        if K >= N * 3 and n_blocks * 4 > num_sms:
+            return False
+        # Square (K==N) at 0.5-1 wave: K-tiling wins at ~0.6 wave.
+        # n_blocks>=48 excludes small N where SIMT still wins.
+        if K == N and n_blocks >= 48 and n_blocks * 5 < num_sms * 3:
+            return False
+        # <0.5 wave: K<=N custom wins to M=128; K>N default wins above wave threshold.
+        if n_blocks * 2 < num_sms:
+            if K <= N:
+                return M <= 128
+            if n_blocks * 3 >= num_sms:
+                return False
+        # 0.5-1 wave K<N: calibrated on A100 to M=128 (e.g. N=4096,K=1536 M=17-384).
+        if n_blocks >= num_sms // 2 and K < N:
+            return M <= 128
+        return M <= 16
+
+    if is_sm86:
+        # ~600-940 GB/s GDDR6/GDDR6X. Dedicated block: sm89 fallback tiers are too
+        # loose for 600 GB/s bandwidth and cause regressions at medium N (~N=4096).
+        if n_blocks >= num_sms:
+            return M <= 128
+        if n_blocks >= num_sms // 2:
+            return M <= 64
+        return M <= 16
+
+    if is_sm90:
+        # HBM3/HBM3e. dequant+F.linear (WGMMA path) is significantly faster than our
+        # mma.sync kernel; thresholds are calibrated conservatively (H100/H200 share path).
+        if n_blocks >= num_sms * 3:
+            return M <= 64
+        if n_blocks >= num_sms * 2:
+            return M <= 48
+        if n_blocks >= num_sms:
+            return M <= 32
+        if n_blocks >= num_sms // 2:
+            # Square/tall-K at <3/4 wave: K-tiling too efficient on HBM3e.
+            if K >= N and n_blocks * 4 < num_sms * 3:
+                return False
+            return M <= 16
+        return False
+
+    if is_sm120:
+        # GDDR7 (~1-1.8 TB/s). Medium-N threshold tiers differ from sm89.
+        # sm121 (DGX Spark) has a different bandwidth/SM profile; uses sm89
+        # fallback below until validated.
+        if n_blocks >= num_sms * 3:
+            return M <= 256
+        if n_blocks >= num_sms * 2:
+            return M <= 128
+        # Short-K (K<N) at ~0.8 wave: default impl competitive above M=64.
+        if n_blocks * 5 >= num_sms * 4:
+            return M <= (96 if K >= N else 64)
+        if n_blocks >= num_sms:
+            return M <= 64
+        if n_blocks >= num_sms // 2:
+            # Large-N (n_blocks>=128, N>=8192) with K>=N/2: calibrated on RTX Pro 6000 to M=64.
+            return M <= (64 if (K * 2 >= N and n_blocks >= 128) else 8)
+        if tall_k_2xn and n_blocks > 64:
+            return M <= 16
+        return M <= 8
+
+    # Fallback: sm89 (4090, L40S, L4), sm121 (DGX Spark), unrecognized arches.
+    # GDDR bandwidth makes dequant relatively expensive so custom wins at higher M.
+    if n_blocks >= num_sms * 3:
+        return M <= 256
+    if n_blocks >= num_sms * 2:
+        return M <= 128
+    # Near-wave (~0.8x): tall-K and very large N (n_blocks>=200, N>=14336) raise cap to M=128.
+    # N=10240 (n_blocks=160) deliberately excluded to avoid regressions there.
+    if n_blocks * 5 >= num_sms * 4:
+        if tall_k_2xn or n_blocks >= 200:
+            return M <= 128
+        # Square/tall-K: >=60 SMs wins to M=128; <60 SMs default wins earlier.
+        if K >= N:
+            return M <= (128 if num_sms >= 60 else 32)
+        return M <= 64
+    if n_blocks >= num_sms // 2:
+        if tall_k_2xn:
+            return M <= 64
+        if n_blocks >= 64:
+            return M <= 8
+        return M <= 32
+    # Tall-K (K>N) at narrow N (n_blocks<=48): M-driven crossover.
+    # K>=3N (e.g. N=2560,K=10240): SIMT wins to M=12. Moderate K>N: M=10.
+    if K > N and n_blocks <= 48:
+        return M <= (12 if K >= N * 3 else 10)
+    return M <= (16 if (tall_k_2xn or n_blocks < 48) else 8)
+
+
+if torch.version.hip is None:
+
+    @register_kernel("bitsandbytes::gemm_4bit", "cuda")
+    def _(
+        A: torch.Tensor,
+        B: torch.Tensor,
+        shapeB: Sequence[int],
+        absmax: torch.Tensor,
+        blocksize: int,
+        quant_type: str,
+        bias: Optional[torch.Tensor] = None,
+        absmax_8bit: Optional[torch.Tensor] = None,
+        absmax_code: Optional[torch.Tensor] = None,
+        absmax_offset: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        K = A.shape[-1]
+        M = A.numel() // K
+        N = shapeB[0]
+
+        # M>1536: dequant+F.linear wins (dequant savings negligible at very large batch).
+        # M<=4: always custom (custom kernel wins universally at small batch).
+        # M in [5, 1536]: shape/arch-dependent; cached per (device, dtype, M, N, K).
+        if M > 1536:
+            use_custom = False
+        elif K % blocksize != 0:
+            warn(
+                f"inner dimension ({K}) is not aligned for fast kernel "
+                f"with blocksize={blocksize}, falling back to slower implementation.",
+                UserWarning,
+            )
+            use_custom = False
+        else:
+            use_custom = M <= 4 or _gemm_4bit_use_custom(A.device.index, A.dtype, M, N, K)
+
+        if not use_custom:
+            return _gemm_4bit_default_impl(
+                A, B, shapeB, absmax, blocksize, quant_type, bias, absmax_8bit, absmax_code, absmax_offset
+            )
+
+        if K != shapeB[1]:
+            raise RuntimeError(f"A inner dim ({K}) does not match weight ({shapeB[1]})")
+        if absmax.dtype != torch.float32:
+            raise RuntimeError(f"absmax must be float32, got {absmax.dtype}")
+        if bias is not None:
+            if bias.ndim != 1:
+                raise RuntimeError(f"bias must be 1D, got {bias.ndim}D")
+            if bias.dtype != A.dtype:
+                raise RuntimeError(f"bias dtype ({bias.dtype}) must match A dtype ({A.dtype})")
+
+        quant_type_int = 1 if quant_type == "fp4" else 2
+
+        out = torch.empty((*A.shape[:-1], N), dtype=A.dtype, device=A.device)
+        stream = torch._C._cuda_getCurrentRawStream(A.device.index)
+
+        if A.dtype == torch.bfloat16:
+            fn = lib.cgemm_4bit_bf16
+        elif A.dtype == torch.float16:
+            fn = lib.cgemm_4bit_fp16
+        elif A.dtype == torch.float32:
+            fn = lib.cgemm_4bit_fp32
+        else:
+            raise RuntimeError(f"unsupported dtype {A.dtype}")
+
+        with _cuda_device_of(A):
+            fn(
+                A.data_ptr(),
+                B.data_ptr(),
+                absmax.data_ptr(),
+                absmax_8bit.data_ptr() if absmax_8bit is not None else None,
+                absmax_code.data_ptr() if absmax_code is not None else None,
+                absmax_offset.data_ptr() if absmax_offset is not None else None,
+                out.data_ptr(),
+                bias.data_ptr() if bias is not None else None,
+                M,
+                N,
+                K,
+                blocksize,
+                quant_type_int,
+                stream,
+            )
+
+        return out
+
+else:
+
+    @register_kernel("bitsandbytes::gemm_4bit", "cuda")
+    def _(
+        A: torch.Tensor,
+        B: torch.Tensor,
+        shapeB: Sequence[int],
+        absmax: torch.Tensor,
+        blocksize: int,
+        quant_type: str,
+        bias: Optional[torch.Tensor] = None,
+        absmax_8bit: Optional[torch.Tensor] = None,
+        absmax_code: Optional[torch.Tensor] = None,
+        absmax_offset: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        K = A.shape[-1]
+        M = A.numel() // K
+        N = shapeB[0]
+
+        if M == 1:
+            if K % blocksize == 0:
+                if absmax_8bit is not None:
+                    absmax = (
+                        torch.ops.bitsandbytes.dequantize_blockwise.default(
+                            absmax_8bit, absmax, absmax_code, 256, torch.float32
+                        )
+                        + absmax_offset
+                    )
+
+                code = _get_4bit_code(quant_type, A.device)
+                out = torch.empty((*A.shape[:-1], N), dtype=A.dtype, device=A.device)
+                _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
+
+                if bias is not None:
+                    out = out + bias
+                return out
+
+            warn(
+                f"inner dimension ({K}) is not aligned for fast kernel "
+                f"with blocksize={blocksize}, falling back to slower implementation.",
+                UserWarning,
+            )
+
+        return _gemm_4bit_default_impl(
+            A,
+            B,
+            shapeB,
+            absmax,
+            blocksize,
+            quant_type,
+            bias,
+            absmax_8bit=absmax_8bit,
+            absmax_code=absmax_code,
+            absmax_offset=absmax_offset,
+        )
 
 
 """C FUNCTIONS FOR OPTIMIZERS"""

@@ -6,10 +6,12 @@ HuggingFace Kernels Hub.
 
 from collections.abc import Sequence
 from math import prod
+from typing import Optional
 
 import torch
 
 from ..._ops import register_kernel
+from ..default.ops import _gemm_4bit_default_impl
 
 # ---------------------------------------------------------------------------
 # Quant-type mapping: BnB uses strings, our Metal kernel uses ints.
@@ -143,3 +145,48 @@ def _(
 ) -> None:
     result = _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize)
     out.copy_(result)
+
+
+@register_kernel("bitsandbytes::gemm_4bit", "mps")
+def _(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    shapeB: Sequence[int],
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    bias: Optional[torch.Tensor] = None,
+    absmax_8bit: Optional[torch.Tensor] = None,
+    absmax_code: Optional[torch.Tensor] = None,
+    absmax_offset: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    K = A.shape[-1]
+    M = A.numel() // K
+    N = shapeB[0]
+
+    if absmax_8bit is not None:
+        absmax = (
+            torch.ops.bitsandbytes.dequantize_blockwise.default(absmax_8bit, absmax, absmax_code, 256, torch.float32)
+            + absmax_offset
+        )
+
+    if M == 1:
+        if B.dtype != torch.uint8:
+            B = B.view(torch.uint8)
+
+        k = _get_kernel()
+        result = k.gemv_4bit(A, B, absmax.view(N, -1), N, blocksize, _QUANT_MAP[quant_type])
+
+        if bias is not None:
+            result = result + bias
+        return result
+
+    return _gemm_4bit_default_impl(
+        A,
+        B,
+        shapeB,
+        absmax,
+        blocksize,
+        quant_type,
+        bias,
+    )

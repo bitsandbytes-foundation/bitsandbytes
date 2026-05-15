@@ -229,6 +229,65 @@ def _(
 
 
 torch.library.define(
+    "bitsandbytes::gemm_4bit",
+    "(Tensor A, Tensor B, int[] shapeB, Tensor absmax, int blocksize, str quant_type, "
+    "Tensor? bias=None, Tensor? absmax_8bit=None, Tensor? absmax_code=None, Tensor? absmax_offset=None) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::gemm_4bit")
+def _(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    shapeB: Sequence[int],
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    bias: Optional[torch.Tensor] = None,
+    absmax_8bit: Optional[torch.Tensor] = None,
+    absmax_code: Optional[torch.Tensor] = None,
+    absmax_offset: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    torch._check(len(shapeB) == 2, lambda: f"shapeB must be 2D [N, K], got {list(shapeB)}")
+    torch._check(A.shape[-1] == shapeB[1], lambda: f"A inner dim ({A.shape[-1]}) must match shapeB ({shapeB[1]})")
+    torch._check(
+        A.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: f"A must be float16, bfloat16, or float32, got {A.dtype}",
+    )
+    torch._check(
+        B.dtype in (torch.uint8, torch.bfloat16, torch.float16, torch.float32),
+        lambda: f"B must be backed by storage of type uint8, bfloat16, float16, or float32, got {B.dtype}",
+    )
+    torch._check(blocksize in [32, 64, 128, 256, 512, 1024, 2048, 4096], lambda: f"invalid blocksize {blocksize}")
+    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be 'nf4' or 'fp4', got {quant_type!r}")
+    torch._check(absmax.dtype == torch.float32, lambda: f"absmax must be float32, got {absmax.dtype}")
+    if absmax_8bit is not None:
+        torch._check(absmax_8bit.ndim == 1, lambda: f"absmax_8bit must be 1D, got {absmax_8bit.ndim}D")
+        torch._check(absmax_8bit.dtype == torch.uint8, lambda: f"absmax_8bit must be uint8, got {absmax_8bit.dtype}")
+        torch._check(absmax_code is not None, lambda: "absmax_code required when absmax_8bit is provided")
+        torch._check(absmax_code.ndim == 1, lambda: f"absmax_code must be 1D, got {absmax_code.ndim}D")
+        torch._check(
+            absmax_code.shape[0] == 256, lambda: f"absmax_code must have 256 entries, got {absmax_code.shape[0]}"
+        )
+        torch._check(
+            absmax_code.dtype == torch.float32, lambda: f"absmax_code must be float32, got {absmax_code.dtype}"
+        )
+        torch._check(absmax_offset is not None, lambda: "absmax_offset required when absmax_8bit is provided")
+        torch._check(
+            absmax_offset.ndim == 0, lambda: f"absmax_offset must be a scalar (0-dim), got {absmax_offset.ndim}D"
+        )
+        torch._check(
+            absmax_offset.dtype == torch.float32, lambda: f"absmax_offset must be float32, got {absmax_offset.dtype}"
+        )
+    if bias is not None:
+        torch._check(bias.ndim == 1, lambda: f"bias must be 1D, got {bias.ndim}D")
+        torch._check(bias.shape[0] == shapeB[0], lambda: f"bias length ({bias.shape[0]}) must match N ({shapeB[0]})")
+        torch._check(bias.dtype == A.dtype, lambda: f"bias dtype ({bias.dtype}) must match A dtype ({A.dtype})")
+    N = shapeB[0]
+    return torch.empty((*A.shape[:-1], N), dtype=A.dtype, device=A.device)
+
+
+torch.library.define(
     "bitsandbytes::dequantize_blockwise",
     "(Tensor A, Tensor absmax, Tensor code, int blocksize, ScalarType dtype) -> Tensor",
 )
