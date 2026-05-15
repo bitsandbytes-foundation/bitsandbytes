@@ -1,6 +1,7 @@
 // sm80+ MMA (mma.sync.aligned.m16n8k16) 4-bit GEMM kernel (bf16 and fp16).
 
 #include <cstdint>
+#include <cstring>
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <type_traits>
@@ -325,10 +326,10 @@ __global__ void __launch_bounds__(CTA_SIZE) gemm_4bit_sm80_m16n8k16(
                     // clang-format on
                 }
                 uint8_t bytes[64];
-                __builtin_memcpy(bytes, &p0, 16);
-                __builtin_memcpy(bytes + 16, &p1, 16);
-                __builtin_memcpy(bytes + 32, &p2, 16);
-                __builtin_memcpy(bytes + 48, &p3, 16);
+                memcpy(bytes, &p0, 16);
+                memcpy(bytes + 16, &p1, 16);
+                memcpy(bytes + 32, &p2, 16);
+                memcpy(bytes + 48, &p3, 16);
 #pragma unroll
                 for (int j = 0; j < B_BYTES; j++) {
                     if (j > 0 && ((j * 2) & (blocksize - 1)) == 0 && n_global < N) {
@@ -359,8 +360,8 @@ __global__ void __launch_bounds__(CTA_SIZE) gemm_4bit_sm80_m16n8k16(
                     // clang-format on
                 }
                 uint8_t bytes[32];
-                __builtin_memcpy(bytes, &p0, 16);
-                __builtin_memcpy(bytes + 16, &p1, 16);
+                memcpy(bytes, &p0, 16);
+                memcpy(bytes + 16, &p1, 16);
 #pragma unroll
                 for (int j = 0; j < B_BYTES; j++) {
                     if (j > 0 && ((j * 2) & (blocksize - 1)) == 0 && n_global < N) {
