@@ -261,8 +261,13 @@ def test_linear8bitlt_torch_compile(device, threshold, bias, fullgraph, mode):
     if fullgraph and torch.__version__ < (2, 5):
         pytest.skip("fullgraph tracing of MatmulLtState requires torch >= 2.5")
 
-    if device == "cuda" and platform.system() == "Windows":
-        pytest.skip("Triton is not officially supported on Windows")
+    if platform.system() == "Windows":
+        if device == "cuda":
+            pytest.skip("Triton is not officially supported on Windows")
+        if device == "cpu" and torch.__version__ < (2, 7):
+            # torch.compile inductor on Windows CPU has include path bugs fixed in torch 2.7
+            # https://github.com/pytorch/pytorch/pull/148271
+            pytest.skip("torch.compile inductor on Windows CPU requires torch >= 2.7")
 
     if device == "cuda" and mode == "reduce-overhead" and fullgraph and threshold > 0 and torch.__version__ >= (2, 10):
         pytest.xfail("Failure due to regression in torch 2.10 related to reduced overhead mode and CUDA.")
