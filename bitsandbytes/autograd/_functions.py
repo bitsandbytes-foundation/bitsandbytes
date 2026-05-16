@@ -381,7 +381,8 @@ def matmul_4bit(
     out: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
 ):
-    assert quant_state is not None
+    if quant_state is None:
+        raise AssertionError
     if A.device.type == "cpu":
         if getattr(quant_state, "packing_format_for_cpu", False):
             out = F.gemv_4bit(A, B, out, state=quant_state)
