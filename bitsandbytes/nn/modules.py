@@ -799,12 +799,15 @@ class Int8Params(torch.nn.Parameter):
             has_fp16_weights=self.has_fp16_weights,
         )
 
-        # If we had already quantized, move the statistics appropriately.
+        # Always preserve CB and SCB across device/dtype moves.
         if is_quantized:
             new_param.CB = new_param.data
 
-            if device is not None and self.SCB is not None and self.SCB.device.type != "meta":
-                new_param.SCB = self.SCB.to(device)
+        if self.SCB is not None:
+            if device is not None and self.SCB.device.type != "meta":
+                new_param.SCB = self.SCB.to(device=device, non_blocking=non_blocking)
+            else:
+                new_param.SCB = self.SCB
 
         return new_param
 
