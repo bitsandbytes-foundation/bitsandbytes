@@ -7,6 +7,7 @@ HuggingFace Kernels Hub.
 from collections.abc import Sequence
 from math import prod
 from typing import Optional
+from warnings import warn
 
 import torch
 
@@ -171,15 +172,22 @@ def _(
         )
 
     if M == 1:
-        if B.dtype != torch.uint8:
-            B = B.view(torch.uint8)
+        if K % blocksize == 0:
+            if B.dtype != torch.uint8:
+                B = B.view(torch.uint8)
 
-        k = _get_kernel()
-        result = k.gemv_4bit(A, B, absmax.view(N, -1), N, blocksize, _QUANT_MAP[quant_type])
+            k = _get_kernel()
+            result = k.gemv_4bit(A, B, absmax.view(N, -1), N, blocksize, _QUANT_MAP[quant_type])
 
-        if bias is not None:
-            result = result + bias
-        return result
+            if bias is not None:
+                result = result + bias
+            return result
+
+        warn(
+            f"inner dimension ({K}) is not aligned for fast kernel "
+            f"with blocksize={blocksize}, falling back to slower implementation.",
+            UserWarning,
+        )
 
     return _gemm_4bit_default_impl(
         A,

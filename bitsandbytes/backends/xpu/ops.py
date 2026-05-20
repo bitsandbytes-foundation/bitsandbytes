@@ -2,6 +2,7 @@ from collections.abc import Sequence
 import ctypes as ct
 import logging
 from typing import Optional
+from warnings import warn
 
 from packaging import version
 import torch
@@ -169,20 +170,27 @@ def _(
     M = A.numel() // K
 
     if M == 1:
-        if absmax_8bit is not None:
-            absmax = (
-                torch.ops.bitsandbytes.dequantize_blockwise.default(
-                    absmax_8bit, absmax, absmax_code, 256, torch.float32
+        if K % blocksize == 0:
+            if absmax_8bit is not None:
+                absmax = (
+                    torch.ops.bitsandbytes.dequantize_blockwise.default(
+                        absmax_8bit, absmax, absmax_code, 256, torch.float32
+                    )
+                    + absmax_offset
                 )
-                + absmax_offset
-            )
 
-        code = _get_4bit_code(quant_type, A.device)
-        out = torch.ops.bitsandbytes.gemv_4bit.default(A, B, shapeB, absmax, code, blocksize)
+            code = _get_4bit_code(quant_type, A.device)
+            out = torch.ops.bitsandbytes.gemv_4bit.default(A, B, shapeB, absmax, code, blocksize)
 
-        if bias is not None:
-            out = out + bias
-        return out
+            if bias is not None:
+                out = out + bias
+            return out
+
+        warn(
+            f"inner dimension ({K}) is not aligned for fast kernel "
+            f"with blocksize={blocksize}, falling back to slower implementation.",
+            UserWarning,
+        )
 
     return _gemm_4bit_default_impl(
         A,
