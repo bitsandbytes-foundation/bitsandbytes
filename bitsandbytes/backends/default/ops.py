@@ -347,6 +347,31 @@ def _(
     )
 
 
+def _gemm_4bit_default_impl(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    shapeB: Sequence[int],
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    bias: Optional[torch.Tensor] = None,
+    absmax_8bit: Optional[torch.Tensor] = None,
+    absmax_code: Optional[torch.Tensor] = None,
+    absmax_offset: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    # When nested, per-block scale = absmax_code[absmax_8bit[i]] * absmax[i // 256] + absmax_offset
+    if absmax_8bit is not None:
+        absmax = (
+            torch.ops.bitsandbytes.dequantize_blockwise.default(absmax_8bit, absmax, absmax_code, 256, torch.float32)
+            + absmax_offset
+        )
+    B_dq = torch.ops.bitsandbytes.dequantize_4bit.default(B, absmax, blocksize, quant_type, shapeB, A.dtype)
+    return torch.nn.functional.linear(A, B_dq, bias)
+
+
+register_kernel("bitsandbytes::gemm_4bit", "default")(_gemm_4bit_default_impl)
+
+
 MOMENTUM = 0
 RMSPROP = 1
 ADAGRAD = 2

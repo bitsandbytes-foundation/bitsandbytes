@@ -234,6 +234,29 @@ if(BUILD_CUDA)
 
     list(APPEND SRC_FILES ${GPU_FILES})
 
+    # 4-bit GEMM SIMT and dispatch compile for all selected archs.
+    # sm75/sm80+ MMA files only compile if those archs are selected.
+    set(_cc_all ${COMPUTE_CAPABILITY} ${_LATEST_CAPABILITY})
+    list(APPEND SRC_FILES csrc/gemm_4bit_simt.cu csrc/gemm_4bit.cu)
+
+    if(75 IN_LIST _cc_all)
+        # Builds only on sm75
+        list(APPEND SRC_FILES csrc/gemm_4bit_sm75.cu)
+        add_compile_definitions(BNB_HAS_GEMM4BIT_SM75)
+    endif()
+
+    set(_cc_sm80plus)
+    foreach(_cc IN LISTS _cc_all)
+        if(_cc GREATER_EQUAL 80)
+            list(APPEND _cc_sm80plus ${_cc})
+        endif()
+    endforeach()
+    if(_cc_sm80plus)
+        # Builds only on sm80+
+        list(APPEND SRC_FILES csrc/gemm_4bit_sm80.cu)
+        add_compile_definitions(BNB_HAS_GEMM4BIT_SM80)
+    endif()
+
     string(APPEND BNB_OUTPUT_NAME "_cuda${CUDA_VERSION_SHORT}")
     add_compile_definitions(BUILD_CUDA)
 elseif(BUILD_HIP)

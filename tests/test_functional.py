@@ -20,6 +20,21 @@ from tests.helpers import (
 torch.set_printoptions(precision=5, sci_mode=False, linewidth=120, edgeitems=20, threshold=10000)
 k = 20
 
+_GEMM_4BIT_SHAPES = [
+    (1, 256, 128),  # SIMT path on all GPUs
+    (40, 2048, 128),  # 64x32-128 + sm75 tile
+    (9, 5120, 128),  # 32x64-128 on L40S/4090
+    (40, 5120, 128),  # 32x64-64 on A10/L40S/4090
+    (80, 8192, 128),  # 32x128-64 on L40S/4090
+    (7, 14336, 128),  # many tiles depending on GPU
+    (80, 14336, 128),  # 128x64-64 on L40S/4090/H100
+    (80, 21504, 128),  # 128x128-64 across many GPUs
+    (4, 28672, 128),  # sm75 32x128 + HBM 32x256-128
+    (40, 36864, 128),  # 64x128-64 wide-N
+    (48, 8192, 512),  # 64x64-64 on GDDR+A100, K=512
+    (48, 8192, 8192),  # 64x64-128, large K
+]
+
 
 def assert_all_approx_close(a, b, rtol=1e-3, atol=1e-3, count=0, throw=True):
     idx = torch.isclose(a, b, rtol=rtol, atol=atol)
@@ -798,8 +813,8 @@ class TestQuantize4BitFunctional:
                 qB, state = F._convert_weight_packed_for_cpu(qB, state)
                 qB = qB.t()
             C2 = F.gemv_4bit(A, qB.t(), state=state)
-            A.requires_grad = True
-            C1 = bnb.matmul_4bit(A, qB.t(), state)
+            # dequant+F.linear reference path
+            C1 = torch.nn.functional.linear(A, F.dequantize_4bit(qB, state).to(dtype))
 
             err1 = (C1 - C2).abs().float()
             err2 = (C3 - C2).abs().float()
@@ -931,6 +946,61 @@ class TestQuantize4BitFunctional:
             torch.testing.assert_close(A, C2)
         # torch.testing.assert_close(A, C1, rtol=1e-5, atol=0.00001)
         # torch.testing.assert_close(A, C2, rtol=1e-5, atol=0.080)
+
+    @pytest.mark.filterwarnings("ignore:inner dimension:UserWarning")
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
+    @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+    @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+    @pytest.mark.parametrize("blocksize", [32, 64, 128, 4096], ids=id_formatter("blocksize"))
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
+    @pytest.mark.parametrize("MNK", _GEMM_4BIT_SHAPES, ids=[f"M{m}N{n}K{k}" for m, n, k in _GEMM_4BIT_SHAPES])
+    def test_matmul_4bit(self, MNK, dtype, blocksize, quant_type, compress_statistics, has_bias, device):
+        M, N, K = MNK
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, torch.uint8):
+            pytest.skip("This configuration is not supported on HPU.")
+        if device == "cpu" and (blocksize == 4096 or K > 128 or M > 40 or N > 8192):
+            pytest.skip("narrowed on CPU")
+
+        B = torch.randn(N, K, dtype=dtype, device=device) / (K**0.5)
+        A = torch.randn(1, M, K, dtype=dtype, device=device)
+        bias = torch.randn(N, dtype=dtype, device=device) if has_bias else None
+        ref = torch.nn.functional.linear(A, B, bias)
+
+        qB, qs = F.quantize_4bit(
+            B, blocksize=blocksize, quant_type=quant_type, compress_statistics=compress_statistics
+        )
+        out = bnb.matmul_4bit(A, qB, qs, bias=bias)
+
+        mean_err = (ref.float() - out.float()).abs().mean().item()
+        if quant_type == "nf4" or blocksize <= 64:
+            threshold = 0.115
+        elif blocksize <= 256:
+            threshold = 0.13
+        else:
+            threshold = 0.16
+        assert mean_err < threshold
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_matmul_4bit_weight_orientation(self, device):
+        N, K = 256, 128
+        dtype = torch.float16
+        A = torch.randn(1, 4, K, dtype=dtype, device=device)
+        B = torch.randn(N, K, dtype=dtype, device=device) / (K**0.5)
+        ref = torch.nn.functional.linear(A, B)
+        qB, qs = F.quantize_4bit(B, blocksize=64, quant_type="nf4")
+
+        # B.t() and canonical B must give identical results.
+        out_canonical = bnb.matmul_4bit(A, qB, qs)
+        out_transposed = bnb.matmul_4bit(A, qB.t(), qs)
+        torch.testing.assert_close(out_canonical, out_transposed)
+
+        # [K, N] quant_state emits DeprecationWarning and still produces correct output.
+        B_kn = B.t().contiguous()
+        qB_kn, qs_kn = F.quantize_4bit(B_kn, blocksize=64, quant_type="nf4")
+        with pytest.warns(DeprecationWarning, match="Re-quantize from the weight"):
+            out_kn = bnb.matmul_4bit(A, qB_kn, qs_kn)
+        assert (ref.float() - out_kn.float()).abs().mean().item() < 0.115
 
 
 def test_normal_map_tree():

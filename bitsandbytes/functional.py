@@ -1042,7 +1042,10 @@ def dequantize_4bit(
             quant_state.dtype,
         )
 
-    if A.shape[0] == 1:  # is transposed, transpose back
+    # BC shim: callers that pass the packed weight in transposed [1, (N*K+1)//2] form
+    # receive the output transposed back to [K, N]. bnb's own paths no longer trigger
+    # this since B is normalized to [(N*K+1)//2, 1] at the matmul_4bit entry point.
+    if A.shape[0] == 1:
         return out.t()
     return out
 

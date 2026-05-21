@@ -149,6 +149,9 @@ ignore = [
 "bitsandbytes/**/triton/**/*.py" = [
     "I001",  # import order
 ]
+"bitsandbytes/backends/utils.py" = [
+    "I001",  # import order
+]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

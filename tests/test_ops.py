@@ -4,7 +4,7 @@ import pytest
 import torch
 
 import bitsandbytes
-from tests.helpers import TRUE_FALSE, get_available_devices, id_formatter, is_supported_on_hpu
+from tests.helpers import TRUE_FALSE, describe_dtype, get_available_devices, id_formatter, is_supported_on_hpu
 
 opcheck = torch.library.opcheck
 
@@ -265,6 +265,80 @@ class Test4bitBlockwiseQuantOps:
         assert out.isreal().all()
 
         opcheck(torch.ops.bitsandbytes.gemv_4bit.default, (A, B_q, B.shape, absmax, code, blocksize))
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("requires_grad", TRUE_FALSE, ids=id_formatter("requires_grad"))
+    @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
+    @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
+    @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
+    def test_gemm_4bit(self, device, dtype, quant_type, compress_statistics, has_bias, storage_dtype, requires_grad):
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
+            pytest.skip("This configuration is not supported on HPU.")
+
+        N, K, blocksize = 64, 64, 64
+
+        A = torch.randn(2, 2, K, dtype=dtype, device=device, requires_grad=requires_grad)
+        B = torch.randn(N, K, dtype=dtype, device=device)
+        B_q, qs = bitsandbytes.functional.quantize_4bit(
+            B,
+            blocksize=blocksize,
+            quant_type=quant_type,
+            compress_statistics=compress_statistics,
+            quant_storage=storage_dtype,
+        )
+        bias = torch.randn(N, dtype=dtype, device=device) if has_bias else None
+
+        if compress_statistics:
+            out = torch.ops.bitsandbytes.gemm_4bit.default(
+                A,
+                B_q,
+                list(B.shape),
+                qs.state2.absmax,
+                blocksize,
+                quant_type,
+                bias=bias,
+                absmax_8bit=qs.absmax,
+                absmax_code=qs.state2.code,
+                absmax_offset=qs.offset,
+            )
+        else:
+            out = torch.ops.bitsandbytes.gemm_4bit.default(
+                A,
+                B_q,
+                list(B.shape),
+                qs.absmax,
+                blocksize,
+                quant_type,
+                bias=bias,
+            )
+
+        assert out.shape == (2, 2, N)
+        assert out.dtype == dtype
+        assert out.device.type == A.device.type
+        assert out.isreal().all()
+
+        # TODO: remove detach when register_autograd is added for gemm_4bit.
+        # opcheck requires no autograd; detach A to skip the registration check.
+        A_op = A.detach()
+        if compress_statistics:
+            opcheck(
+                torch.ops.bitsandbytes.gemm_4bit.default,
+                (A_op, B_q, list(B.shape), qs.state2.absmax, blocksize, quant_type),
+                kwargs={
+                    "bias": bias,
+                    "absmax_8bit": qs.absmax,
+                    "absmax_code": qs.state2.code,
+                    "absmax_offset": qs.offset,
+                },
+            )
+        else:
+            opcheck(
+                torch.ops.bitsandbytes.gemm_4bit.default,
+                (A_op, B_q, list(B.shape), qs.absmax, blocksize, quant_type),
+                kwargs={"bias": bias},
+            )
 
 
 class TestNonContiguousInputs:

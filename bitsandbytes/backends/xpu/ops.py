@@ -1,6 +1,8 @@
 from collections.abc import Sequence
 import ctypes as ct
 import logging
+from typing import Optional
+from warnings import warn
 
 from packaging import version
 import torch
@@ -9,7 +11,8 @@ from bitsandbytes.functional import _get_tensor_stream, get_ptr
 
 from ..._ops import register_kernel
 from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
-from ..utils import triton_available
+from ..default.ops import _gemm_4bit_default_impl
+from ..utils import _get_4bit_code, triton_available
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +153,59 @@ def _gemv_4bit_impl(
         )
 
 
+@register_kernel("bitsandbytes::gemm_4bit", "xpu")
+def _(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    shapeB: Sequence[int],
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    bias: Optional[torch.Tensor] = None,
+    absmax_8bit: Optional[torch.Tensor] = None,
+    absmax_code: Optional[torch.Tensor] = None,
+    absmax_offset: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    K = A.shape[-1]
+    M = A.numel() // K
+
+    if M == 1:
+        if K % blocksize == 0:
+            if absmax_8bit is not None:
+                absmax = (
+                    torch.ops.bitsandbytes.dequantize_blockwise.default(
+                        absmax_8bit, absmax, absmax_code, 256, torch.float32
+                    )
+                    + absmax_offset
+                )
+
+            code = _get_4bit_code(quant_type, A.device)
+            out = torch.ops.bitsandbytes.gemv_4bit.default(A, B, shapeB, absmax, code, blocksize)
+
+            if bias is not None:
+                out = out + bias
+            return out
+
+        warn(
+            f"inner dimension ({K}) is not aligned for fast kernel "
+            f"with blocksize={blocksize}, falling back to slower implementation.",
+            UserWarning,
+        )
+
+    return _gemm_4bit_default_impl(
+        A,
+        B,
+        shapeB,
+        absmax,
+        blocksize,
+        quant_type,
+        bias,
+        absmax_8bit=absmax_8bit,
+        absmax_code=absmax_code,
+        absmax_offset=absmax_offset,
+    )
+
+
 # SYCL should be faster for xpu, so at first checking if it is available.
 if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
     logger.info("Register sycl bitsandbytes kernels for XPU")
@@ -229,6 +285,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         )
         torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
         _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
+
 elif triton_available:
     logger.info("Register triton bitsandbytes kernels for XPU")
     from ..triton import ops as triton_ops
