@@ -5,7 +5,7 @@
 // GPU properties queried once per device and cached in gemm_4bit.cu.
 // Passed through dispatch into MMA launchers to avoid repeated cudaGetDevice calls.
 struct GpuProps {
-    int num_sms, cc_major, cc_minor;
+    int device_index, num_sms, cc_major, cc_minor;
 };
 
 #include <cuda_bf16.h>
