@@ -15,15 +15,23 @@
 // 16-entry cache indexed by device ID. num_sms==0 means not yet populated.
 // Static storage is zero-initialized, so all entries start unpopulated (num_sms==0).
 GpuProps get_gpu_props() {
-    static GpuProps cache[16];
+    static GpuProps cache[16] = {};
     int dev = 0;
     cudaGetDevice(&dev);
-    if (dev < 16 && cache[dev].num_sms == 0) {
-        cudaDeviceGetAttribute(&cache[dev].num_sms, cudaDevAttrMultiProcessorCount, dev);
-        cudaDeviceGetAttribute(&cache[dev].cc_major, cudaDevAttrComputeCapabilityMajor, dev);
-        cudaDeviceGetAttribute(&cache[dev].cc_minor, cudaDevAttrComputeCapabilityMinor, dev);
-    }
-    return cache[dev];
+
+    if (dev < 16 && cache[dev].num_sms != 0)
+        return cache[dev];
+
+    GpuProps props = {};
+    props.device_index = dev;
+    cudaDeviceGetAttribute(&props.num_sms, cudaDevAttrMultiProcessorCount, dev);
+    cudaDeviceGetAttribute(&props.cc_major, cudaDevAttrComputeCapabilityMajor, dev);
+    cudaDeviceGetAttribute(&props.cc_minor, cudaDevAttrComputeCapabilityMinor, dev);
+
+    if (dev < 16)
+        cache[dev] = props;
+
+    return props;
 }
 
 /// @brief Fused 4-bit dequantize + GEMM. Computes out[M,N] = A[M,K] @ B[N,K]^T + bias.
