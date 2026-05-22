@@ -15,7 +15,6 @@ torch_accelerator_module = getattr(torch, device_type, torch.cuda)
 
 
 def quantize_blockwise(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     # torch._check(A.dtype == torch.float32, lambda: f"A must be float32 on xpu, got {A.dtype}")
     with torch_accelerator_module.device(A.device):
         out, absmax = kernels_8bit_quant.quantize_blockwise_triton(A.contiguous(), code, blocksize)
@@ -25,8 +24,8 @@ def quantize_blockwise(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> t
 def dequantize_blockwise(
     A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype
 ) -> torch.Tensor:
-    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
-    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
+    if A.dtype != torch.uint8:
+        raise ValueError(f"A must be uint8, got {A.dtype}")
     # torch._check(dtype == torch.float32, lambda: f"dtype must be float32 on xpu, got {dtype}")
     with torch_accelerator_module.device(A.device):
         out = kernels_8bit_quant.dequant_8bit_blockwise(
@@ -47,11 +46,14 @@ def dequantize_blockwise_inplace(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
-    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
-    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
-    torch._check(out.shape == A.shape, lambda: f"Expected out.shape == {A.shape}, got {out.shape}")
-    torch._check(out.device == A.device, lambda: f"Expected out.device == {A.device}, got {out.device}")
-    torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
+    if A.dtype != torch.uint8:
+        raise ValueError(f"A must be uint8, got {A.dtype}")
+    if out.shape != A.shape:
+        raise ValueError(f"Expected out.shape == {A.shape}, got {out.shape}")
+    if out.device != A.device:
+        raise ValueError(f"Expected out.device == {A.device}, got {out.device}")
+    if out.dtype != dtype:
+        raise ValueError(f"Expected out.dtype == {dtype}, got {out.dtype}")
 
     with torch_accelerator_module.device(A.device):
         kernels_8bit_quant.dequant_8bit_blockwise(
@@ -67,12 +69,9 @@ def dequantize_blockwise_inplace(
 def quantize_4bit(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     # torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on CPU, got {quant_type}")
-    torch._check(
-        A.dtype in [torch.bfloat16, torch.float16, torch.float32],
-        lambda: f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}",
-    )
+    if A.dtype not in (torch.bfloat16, torch.float16, torch.float32):
+        raise ValueError(f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}")
 
     n = A.numel()
 
@@ -109,12 +108,9 @@ def dequantize_4bit(
     shape: Sequence[int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
     # torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4 on XPU, got {quant_type}")
-    torch._check(
-        dtype in [torch.bfloat16, torch.float16, torch.float32],
-        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
-    )
+    if dtype not in (torch.bfloat16, torch.float16, torch.float32):
+        raise ValueError(f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}")
     # torch._check(
     #     A.dtype == torch.uint8,
     #     lambda: f"Blockwise 4bit dequantization on XPU only supports uint8 storage, got {A.dtype}",
@@ -139,8 +135,10 @@ def dequantize_4bit_inplace(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
-    torch._check(out.shape == shape, lambda: f"Expected out.shape == {shape}, got {out.shape}")
-    torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
+    if out.shape != tuple(shape):
+        raise ValueError(f"Expected out.shape == {shape}, got {out.shape}")
+    if out.dtype != dtype:
+        raise ValueError(f"Expected out.dtype == {dtype}, got {out.dtype}")
     with torch_accelerator_module.device(A.device):
         kernels_4bit.dequantize_4bit_impl(A, absmax, blocksize, quant_type, dtype, out=out)
 

@@ -391,10 +391,10 @@ def is_on_gpu(tensors: Iterable[Optional[torch.Tensor]]):
 
 def _get_tensor_stream(tensor: Tensor) -> ct.c_void_p:
     # We use the raw stream for performance reasons.
-    if tensor.device.type == "xpu":
-        return ct.c_void_p(torch._C._xpu_getCurrentRawStream(tensor.device.index))
     if tensor.device.type == "cuda":
         return ct.c_void_p(torch._C._cuda_getCurrentRawStream(tensor.device.index))
+    if tensor.device.type == "xpu":
+        return ct.c_void_p(torch._C._xpu_getCurrentRawStream(tensor.device.index))
     # For CPU tensors (e.g. paged optimizer states), use current device's stream.
     if hasattr(torch, "xpu") and torch.xpu.is_available():
         return ct.c_void_p(torch._C._xpu_getCurrentRawStream(torch.xpu.current_device()))
@@ -644,6 +644,11 @@ def quantize_blockwise(
         - [`QuantState`]: The state object used to undo the quantization.
     """
 
+    if blocksize <= 0:
+        raise ValueError(f"blocksize must be positive, got {blocksize}")
+    if A.dtype not in (torch.float32, torch.float16, torch.bfloat16):
+        raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
+
     if code is None:
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
@@ -721,7 +726,10 @@ def dequantize_blockwise(
             The dequantized tensor. The datatype is indicated by `quant_state.dtype` and defaults to `torch.float32`.
     """
 
-    assert quant_state is not None or absmax is not None
+    if quant_state is None and absmax is None:
+        raise ValueError("dequantize_blockwise requires either quant_state or absmax")
+    if A.dtype != torch.uint8:
+        raise ValueError(f"A must be uint8, got {A.dtype}")
     if code is None and quant_state is None:
         if "dynamic" not in name2qmap:
             name2qmap["dynamic"] = create_dynamic_map().to(A.device)
@@ -729,6 +737,9 @@ def dequantize_blockwise(
 
     if quant_state is None:
         quant_state = QuantState(absmax=absmax, code=code, blocksize=blocksize, dtype=torch.float32)
+
+    if quant_state.blocksize <= 0:
+        raise ValueError(f"blocksize must be positive, got {quant_state.blocksize}")
 
     absmax = quant_state.absmax
     if quant_state.nested:
@@ -905,6 +916,13 @@ def quantize_4bit(
     if blocksize is None:
         blocksize = 64
 
+    if blocksize not in (32, 64, 128, 256, 512, 1024, 2048, 4096):
+        raise ValueError(f"invalid blocksize {blocksize}")
+    if quant_type not in ("nf4", "fp4"):
+        raise ValueError(f"quant_type must be 'nf4' or 'fp4', got {quant_type!r}")
+    if A.dtype not in (torch.bfloat16, torch.float16, torch.float32):
+        raise ValueError(f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}")
+
     input_shape = A.shape
 
     _out, _absmax = torch.ops.bitsandbytes.quantize_4bit.default(
@@ -1009,7 +1027,8 @@ def dequantize_4bit(
         blocksize = 64
 
     if quant_state is None:
-        assert absmax is not None and out is not None
+        if absmax is None or out is None:
+            raise ValueError("dequantize_4bit requires both absmax and out when quant_state is not provided")
 
         quant_state = QuantState(
             absmax=absmax,
@@ -1021,6 +1040,13 @@ def dequantize_4bit(
 
     else:
         absmax = quant_state.absmax
+
+    if quant_state.blocksize not in (32, 64, 128, 256, 512, 1024, 2048, 4096):
+        raise ValueError(f"invalid blocksize {quant_state.blocksize}")
+    if quant_state.quant_type not in ("nf4", "fp4"):
+        raise ValueError(f"quant_type must be 'nf4' or 'fp4', got {quant_state.quant_type!r}")
+    if quant_state.dtype not in (torch.bfloat16, torch.float16, torch.float32):
+        raise ValueError(f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {quant_state.dtype}")
 
     if quant_state.nested:
         absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)

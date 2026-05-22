@@ -25,12 +25,10 @@ def _(
     shape: Sequence[int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
-    torch._check(quant_type == "nf4", lambda: f"quant_type must be nf4, got {quant_type}")
-    torch._check(
-        A.dtype in [torch.bfloat16, torch.uint8],
-        lambda: f"quant_storage supports uint8 or bfloat16, but got {A.dtype}",
-    )
+    if quant_type != "nf4":
+        raise ValueError(f"HPU backend only supports quant_type 'nf4', got {quant_type!r}")
+    if A.dtype not in (torch.bfloat16, torch.uint8):
+        raise ValueError(f"HPU backend only supports uint8 or bfloat16 storage, got {A.dtype}")
 
     # Enable non uint8 dtype
     if A.dtype != torch.uint8:
