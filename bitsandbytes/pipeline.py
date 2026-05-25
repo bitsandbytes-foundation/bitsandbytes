@@ -111,7 +111,7 @@ class PipelineEngine:
 
         self.schedule = generate_1f1b_schedule(self.num_stages, num_micro_batches)
 
-    def step(self, micro_batch_inputs, micro_batch_labels=None):
+    def step(self, micro_batch_inputs, micro_batch_labels=None, loss_weights=None):
         """Run one training step with 1F1B schedule (single-process mode).
 
         Executes all stages sequentially in a single process, following the
@@ -125,6 +125,11 @@ class PipelineEngine:
         Args:
             micro_batch_inputs: List of M input tensors, one per micro-batch.
             micro_batch_labels: List of M label tensors. Required if loss_fn is set.
+            loss_weights: Optional list of M floats for per-micro-batch loss
+                scaling.  When provided, each micro-batch's loss is multiplied
+                by ``loss_weights[m]`` before backward (should sum to 1 for
+                proper gradient scaling).  When None, defaults to uniform
+                ``1/M`` (legacy per-sample weighting).
 
         Returns:
             dict with:
@@ -135,6 +140,9 @@ class PipelineEngine:
         M = self.num_micro_batches
 
         assert len(micro_batch_inputs) == M, f"Expected {M} micro-batch inputs, got {len(micro_batch_inputs)}"
+
+        # Store loss weights for _backward_step
+        self._loss_weights = loss_weights
 
         # Storage for intermediate activations
         # fwd_inputs[s][m] = input tensor to stage s for micro-batch m (requires_grad)
@@ -212,13 +220,16 @@ class PipelineEngine:
         if stage == S - 1:
             # Last stage: backward from loss
             if losses[micro_batch] is not None:
-                # Scale loss by 1/M for gradient accumulation
-                scaled_loss = losses[micro_batch] / self.num_micro_batches
+                lw = self._loss_weights
+                weight = lw[micro_batch] if lw else 1.0 / self.num_micro_batches
+                scaled_loss = losses[micro_batch] * weight
                 scaled_loss.backward(retain_graph=False)
             else:
                 # If no loss_fn, backward on output directly
+                lw = self._loss_weights
+                weight = lw[micro_batch] if lw else 1.0 / self.num_micro_batches
                 output.backward(
-                    torch.ones_like(output) / self.num_micro_batches,
+                    torch.ones_like(output) * weight,
                     retain_graph=False,
                 )
         else:
@@ -370,12 +381,17 @@ class DistributedPipelineEngine:
         schedule = generate_1f1b_schedule(world_size, num_micro_batches)
         self.my_schedule = schedule[rank]
 
-    def step(self, micro_batch_inputs=None, micro_batch_labels=None):
+    def step(self, micro_batch_inputs=None, micro_batch_labels=None, loss_weights=None):
         """Run one distributed training step.
 
         Args:
             micro_batch_inputs: List of M input tensors (only used by rank 0).
             micro_batch_labels: List of M label tensors (only used by last rank).
+            loss_weights: Optional list of M floats for per-micro-batch loss
+                scaling.  When provided, each micro-batch's loss is multiplied
+                by ``loss_weights[m]`` before backward (should sum to 1 for
+                proper gradient scaling).  When None, defaults to uniform
+                ``1/M`` (legacy per-sample weighting).
 
         Returns:
             dict with loss info (only meaningful on last rank).
@@ -445,7 +461,8 @@ class DistributedPipelineEngine:
                 if s == S - 1:
                     # Last stage: backward from loss
                     if losses[m] is not None:
-                        scaled_loss = losses[m] / M
+                        weight = loss_weights[m] if loss_weights else 1.0 / M
+                        scaled_loss = losses[m] * weight
                         scaled_loss.backward(retain_graph=False)
                 else:
                     # Receive gradient from next stage
