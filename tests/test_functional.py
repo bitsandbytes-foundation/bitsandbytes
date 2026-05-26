@@ -807,14 +807,20 @@ class TestQuantize4BitFunctional:
                 compress_statistics=double_quant,
                 quant_storage=quant_storage,
             )
+
+            # dequant+F.linear reference path.
+            C1 = torch.nn.functional.linear(A, F.dequantize_4bit(qB, state).to(dtype))
+
+            # original matmul reference path.
             C3 = torch.matmul(A, B.t())
+
             # CPU requires convert weight packed for gemv
             if device == "cpu" and F.has_avx512bf16():
                 qB, state = F._convert_weight_packed_for_cpu(qB, state)
                 qB = qB.t()
+
+            # GEMV test
             C2 = F.gemv_4bit(A, qB.t(), state=state)
-            # dequant+F.linear reference path
-            C1 = torch.nn.functional.linear(A, F.dequantize_4bit(qB, state).to(dtype))
 
             err1 = (C1 - C2).abs().float()
             err2 = (C3 - C2).abs().float()
