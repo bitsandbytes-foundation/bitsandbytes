@@ -114,29 +114,6 @@ class CudaBNBNativeLibrary(BNBNativeLibrary):
         lib.get_context.restype = ct.c_void_p
         lib.cget_managed_ptr.restype = ct.c_void_p
 
-        # argtypes for the 4-bit GEMM entry points.
-        _gemm4bit_argtypes = [
-            ct.c_void_p,  # A
-            ct.c_void_p,  # B
-            ct.c_void_p,  # absmax
-            ct.c_void_p,  # absmax_8bit
-            ct.c_void_p,  # absmax_code
-            ct.c_void_p,  # absmax_offset
-            ct.c_void_p,  # out
-            ct.c_void_p,  # bias
-            ct.c_int32,  # M
-            ct.c_int32,  # N
-            ct.c_int32,  # K
-            ct.c_int32,  # blocksize
-            ct.c_int32,  # quant_type
-            ct.c_void_p,  # stream
-        ]
-        for _fn_name in ("cgemm_4bit_bf16", "cgemm_4bit_fp16", "cgemm_4bit_fp32"):
-            _fn = getattr(lib, _fn_name, None)
-            if _fn is not None:
-                _fn.argtypes = _gemm4bit_argtypes
-                _fn.restype = None
-
 
 class XpuBNBNativeLibrary(BNBNativeLibrary):
     """XPU native library with SYCL USM paged memory support."""

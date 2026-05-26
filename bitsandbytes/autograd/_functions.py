@@ -304,7 +304,7 @@ class MatMul4Bit(torch.autograd.Function):
     def forward(ctx, A, B, out=None, bias=None, quant_state: Optional[F.QuantState] = None):
         # default of pytorch behavior if inputs are empty
         ctx.is_empty = False
-        if prod(A.shape) == 0:
+        if A.numel() == 0:
             ctx.is_empty = True
             ctx.A = A
             ctx.B = B
