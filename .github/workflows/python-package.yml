@@ -38,6 +38,8 @@ jobs:
             arch: aarch64
           - os: windows-2025
             arch: x86_64
+          - os: windows-11-arm
+            arch: arm64
           - os: macos-15
             arch: arm64
     runs-on: ${{ matrix.os }}
@@ -46,6 +48,8 @@ jobs:
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
         uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+        with:
+          arch: ${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}
       - name: Build C++
         run: bash .github/scripts/build-cpu.sh
         env:
@@ -188,7 +192,7 @@ jobs:
       - build-xpu
     strategy:
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, macos-15]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, windows-11-arm, macos-15]
         include:
           - os: ubuntu-22.04
             arch: x86_64
@@ -196,6 +200,8 @@ jobs:
             arch: aarch64
           - os: windows-2025
             arch: x86_64
+          - os: windows-11-arm
+            arch: arm64
           - os: macos-15
             arch: arm64
         # The specific Python version is irrelevant in this context as we are only packaging non-C extension
@@ -327,6 +333,8 @@ jobs:
               echo "### Linux (aarch64)" >> body.md
             elif [[ "$fname" == *"win_amd64"* ]]; then
               echo "### Windows (x86_64)" >> body.md
+            elif [[ "$fname" == *"win_arm64"* ]]; then
+              echo "### Windows (arm64)" >> body.md
             elif [[ "$fname" == *"macosx"* ]]; then
               echo "### macOS 14+ (arm64)" >> body.md
             else
