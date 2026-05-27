@@ -2,6 +2,7 @@ import ctypes as ct
 import functools
 import logging
 import os
+import platform
 from pathlib import Path
 import re
 from typing import Optional
@@ -19,6 +20,12 @@ from bitsandbytes.cuda_specs import (
 logger = logging.getLogger(__name__)
 
 
+def _env_var_guidance(var_name: str, example_value: str) -> tuple[str, str]:
+    if platform.system() == "Windows":
+        return (f"set {var_name}={example_value}", f"set {var_name}=")
+    return (f"export {var_name}={example_value}", f"unset {var_name}")
+
+
 def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
     """
     Get the disk path to the CUDA BNB native library specified by the
@@ -32,44 +39,46 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
 
     cuda_override_value = os.environ.get("BNB_CUDA_VERSION")
     rocm_override_value = os.environ.get("BNB_ROCM_VERSION")
+    set_rocm, clear_rocm = _env_var_guidance("BNB_ROCM_VERSION", "<version>")
+    set_cuda, clear_cuda = _env_var_guidance("BNB_CUDA_VERSION", "<version>")
 
     if torch.version.hip:
         if cuda_override_value:
             if not rocm_override_value:
                 raise RuntimeError(
                     f"BNB_CUDA_VERSION={cuda_override_value} detected but this is not a CUDA build!\n"
-                    "Use BNB_ROCM_VERSION instead: export BNB_ROCM_VERSION=<version>\n"
-                    "Clear the variable and retry: unset BNB_CUDA_VERSION\n"
+                    f"Use BNB_ROCM_VERSION instead: {set_rocm}\n"
+                    f"Clear the variable and retry: {clear_cuda}\n"
                 )
             logger.warning(
                 f"WARNING: BNB_CUDA_VERSION={cuda_override_value} is set but ignored on this ROCm build. "
-                "Clear the variable: unset BNB_CUDA_VERSION",
+                f"Clear the variable: {clear_cuda}",
             )
         if rocm_override_value:
             library_name = re.sub(r"rocm\d+", f"rocm{rocm_override_value}", library_name, count=1)
             logger.warning(
                 f"WARNING: BNB_ROCM_VERSION={rocm_override_value} environment variable detected; loading {library_name}.\n"
                 "This can be used to load a bitsandbytes version built with a ROCm version that is different from the PyTorch ROCm version.\n"
-                "If this was unintended clear the variable and retry: unset BNB_ROCM_VERSION\n",
+                f"If this was unintended clear the variable and retry: {clear_rocm}\n",
             )
     elif torch.version.cuda:
         if rocm_override_value:
             if not cuda_override_value:
                 raise RuntimeError(
                     f"BNB_ROCM_VERSION={rocm_override_value} detected but this is not a ROCm build!\n"
-                    "Use BNB_CUDA_VERSION instead: export BNB_CUDA_VERSION=<version>\n"
-                    "Clear the variable and retry: unset BNB_ROCM_VERSION\n"
+                    f"Use BNB_CUDA_VERSION instead: {set_cuda}\n"
+                    f"Clear the variable and retry: {clear_rocm}\n"
                 )
             logger.warning(
                 f"WARNING: BNB_ROCM_VERSION={rocm_override_value} is set but ignored on this CUDA build. "
-                "Clear the variable: unset BNB_ROCM_VERSION",
+                f"Clear the variable: {clear_rocm}",
             )
         if cuda_override_value:
             library_name = re.sub(r"cuda\d+", f"cuda{cuda_override_value}", library_name, count=1)
             logger.warning(
                 f"WARNING: BNB_CUDA_VERSION={cuda_override_value} environment variable detected; loading {library_name}.\n"
                 "This can be used to load a bitsandbytes version built with a CUDA version that is different from the PyTorch CUDA version.\n"
-                "If this was unintended clear the variable and retry: unset BNB_CUDA_VERSION\n",
+                f"If this was unintended clear the variable and retry: {clear_cuda}\n",
             )
     else:
         if rocm_override_value or cuda_override_value:
