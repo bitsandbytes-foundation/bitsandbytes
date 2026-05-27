@@ -323,7 +323,9 @@ void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* ou
         absmax[b] = absmax_block;
 
         if (absmax_block == 0.0f) {
-            std::fill(out + block_start, out + block_end, 0);
+            for (long long i = block_start; i < block_end; ++i) {
+                out[i] = 0;
+            }
             continue;
         }
 
