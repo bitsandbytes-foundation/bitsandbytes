@@ -469,14 +469,16 @@ static void launch_tile(
     int M, int N, int K,
     int blocksize,
     int quant_type,
+    GpuProps gpu,
     cudaStream_t stream
     // clang-format on
 ) {
     constexpr int smem = smem_bytes_for<T, MT, NT, KC>();
-    static bool cfg = false;
-    if (!cfg) {
+    static bool cfg[16] = {};
+    if (gpu.device_index >= 16 || !cfg[gpu.device_index]) {
         cudaFuncSetAttribute(gemm_4bit_sm80_m16n8k16<T, MT, NT, KC>, cudaFuncAttributeMaxDynamicSharedMemorySize, smem);
-        cfg = true;
+        if (gpu.device_index < 16)
+            cfg[gpu.device_index] = true;
     }
     dim3 grid((M + MT - 1) / MT, (N + NT - 1) / NT);
     gemm_4bit_sm80_m16n8k16<T, MT, NT, KC><<<grid, dim3(CTA_SIZE), smem, stream>>>(
@@ -662,7 +664,7 @@ void launch_gemm_4bit_sm80_m16n8k16(
 
     // clang-format off
 #define LAUNCH_SM80(MT, NT, KC) \
-    launch_tile<T, MT, NT, KC>(A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type, stream)
+    launch_tile<T, MT, NT, KC>(A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type, gpu, stream)
 
     if (kc == 64) {
         if      (mt ==  32 && nt ==  64) LAUNCH_SM80( 32,  64,  64);

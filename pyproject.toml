@@ -101,6 +101,7 @@ markers = [
     "deprecated: mark test as covering a deprecated feature",
     "slow: mark test as slow",
 ]
+testpaths = ["tests"]
 
 [tool.ruff]
 src = [

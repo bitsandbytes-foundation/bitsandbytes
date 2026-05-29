@@ -251,8 +251,10 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         dtype: torch.dtype,
         out: torch.Tensor,
     ) -> None:
-        torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
-        torch._check(out.shape == A.shape, lambda: f"Expected out.shape == {A.shape}, got {out.shape}")
+        if out.dtype != dtype:
+            raise ValueError(f"Expected out.dtype == {dtype}, got {out.dtype}")
+        if out.shape != A.shape:
+            raise ValueError(f"Expected out.shape == {A.shape}, got {out.shape}")
         _dequantize_blockwise_impl(A, absmax, code, blocksize, dtype, out=out)
 
     @register_kernel("bitsandbytes::gemv_4bit", "xpu")
@@ -279,11 +281,11 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         blocksize: int,
         out: torch.Tensor,
     ) -> None:
-        torch._check(
-            out.shape == (*A.shape[:-1], shapeB[0]),
-            lambda: f"Expected out.shape == {(*A.shape[:-1], shapeB[0])}, got {out.shape}",
-        )
-        torch._check(out.dtype == A.dtype, lambda: f"Expected out.dtype == {A.dtype}, got {out.dtype}")
+        expected_shape = (*A.shape[:-1], shapeB[0])
+        if out.shape != expected_shape:
+            raise ValueError(f"Expected out.shape == {expected_shape}, got {out.shape}")
+        if out.dtype != A.dtype:
+            raise ValueError(f"Expected out.dtype == {A.dtype}, got {out.dtype}")
         _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
 
 elif triton_available:

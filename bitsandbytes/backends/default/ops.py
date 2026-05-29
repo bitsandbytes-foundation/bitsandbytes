@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from functools import wraps
-from math import prod, sqrt
+from math import sqrt
 from typing import Optional
 
 import torch
@@ -43,9 +43,12 @@ def _(
     dtype: Optional[torch.dtype] = None,
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    torch._check(A.dtype == torch.int32, lambda: f"A must be int32, got {A.dtype}")
-    torch._check(row_stats.dtype == torch.float32, lambda: f"row_stats must be float32, got {row_stats.dtype}")
-    torch._check(col_stats.dtype == torch.float32, lambda: f"col_stats must be float32, got {col_stats.dtype}")
+    if A.dtype != torch.int32:
+        raise ValueError(f"A must be int32, got {A.dtype}")
+    if row_stats.dtype != torch.float32:
+        raise ValueError(f"row_stats must be float32, got {row_stats.dtype}")
+    if col_stats.dtype != torch.float32:
+        raise ValueError(f"col_stats must be float32, got {col_stats.dtype}")
 
     A_calc = A.view(-1, A.shape[-1])
     row_stats = row_stats.reshape(-1).unsqueeze(-1)
@@ -123,7 +126,8 @@ def _(A: torch.Tensor, B: torch.Tensor):
 
 @register_kernel("bitsandbytes::int8_linear_matmul.out", "default")
 def _(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor):
-    torch._check(out.dtype == torch.int32)
+    if out.dtype != torch.int32:
+        raise ValueError(f"out must be int32, got {out.dtype}")
     _int8_linear_matmul_impl(A, B, out)
 
 
@@ -137,7 +141,7 @@ def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: Optional[tor
 
 @register_kernel("bitsandbytes::int8_vectorwise_quant", "default")
 def _(A: torch.Tensor, threshold=0.0):
-    rows = prod(A.shape[:-1])
+    rows = A.numel() // A.shape[-1]
     outlier_cols = None
 
     outlier_restore = None
@@ -175,8 +179,6 @@ def _(A: torch.Tensor, threshold=0.0):
 
 @register_kernel("bitsandbytes::quantize_blockwise", "default")
 def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
-
     n = A.numel()
     rem = n % blocksize
     has_rem = rem > 0
@@ -201,9 +203,6 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
 
 @register_kernel("bitsandbytes::dequantize_blockwise", "default")
 def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype) -> torch.Tensor:
-    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
-    torch._check(A.dtype == torch.uint8, lambda: f"A must be uint8, got {A.dtype}")
-
     out = code[A.reshape(-1).int()]
     blocks = out.shape[-1] // blocksize
     res = out.shape[-1] % blocksize
@@ -220,13 +219,6 @@ def _(A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int,
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
-    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
-    torch._check(
-        A.dtype in [torch.bfloat16, torch.float16, torch.float32],
-        lambda: f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}",
-    )
-
     n = A.numel()
     full_blocks = n // blocksize
     rem = n % blocksize
@@ -317,13 +309,6 @@ def _(
     shape: Sequence[int],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    torch._check(blocksize >= 0, lambda: f"Blocksize must be non-negative, got {blocksize}")
-    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be nf4 or fp4, got {quant_type}")
-    torch._check(
-        dtype in [torch.bfloat16, torch.float16, torch.float32],
-        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
-    )
-
     return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
 
 
