@@ -45,10 +45,22 @@ static inline void neon_nf4_lut(float32x4_t lut[4]) {
     // Indices 0-15 map to NF4 dequantized values
     // Order: index 0 = -1.0, index 1 = -0.6962, ..., index 7 = 0.0, ..., index 15 = 1.0
     static const float nf4_values[16] = {
-        -1.0f, -0.6961928009986877f, -0.5250730514526367f, -0.39491748809814453f,
-        -0.28444138169288635f, -0.18477343022823334f, -0.09105003625154495f, 0.0f,
-        0.07958029955625534f, 0.16093020141124725f, 0.24611230194568634f, 0.33791524171829224f,
-        0.44070982933044434f, 0.5626170039176941f, 0.7229568362236023f, 1.0f
+        -1.0f,
+        -0.6961928009986877f,
+        -0.5250730514526367f,
+        -0.39491748809814453f,
+        -0.28444138169288635f,
+        -0.18477343022823334f,
+        -0.09105003625154495f,
+        0.0f,
+        0.07958029955625534f,
+        0.16093020141124725f,
+        0.24611230194568634f,
+        0.33791524171829224f,
+        0.44070982933044434f,
+        0.5626170039176941f,
+        0.7229568362236023f,
+        1.0f
     };
     lut[0] = vld1q_f32(nf4_values);
     lut[1] = vld1q_f32(nf4_values + 4);
@@ -59,10 +71,8 @@ static inline void neon_nf4_lut(float32x4_t lut[4]) {
 // ARM NEON FP4 lookup table
 static inline void neon_fp4_lut(float32x4_t lut[4]) {
     static const float fp4_values[16] = {
-        0.0f, 5.208333333e-03f, 0.66666667f, 1.0f,
-        0.33333333f, 0.5f, 0.16666667f, 0.25f,
-        0.0f, -5.208333333e-03f, -0.66666667f, -1.0f,
-        -0.33333333f, -0.5f, -0.16666667f, -0.25f
+        0.0f, 5.208333333e-03f,  0.66666667f,  1.0f,  0.33333333f,  0.5f,  0.16666667f,  0.25f,
+        0.0f, -5.208333333e-03f, -0.66666667f, -1.0f, -0.33333333f, -0.5f, -0.16666667f, -0.25f
     };
     lut[0] = vld1q_f32(fp4_values);
     lut[1] = vld1q_f32(fp4_values + 4);
@@ -72,22 +82,19 @@ static inline void neon_fp4_lut(float32x4_t lut[4]) {
 
 // Efficient NEON float LUT lookup using indexed lane extraction
 // The LUT has 16 float entries stored as a flat array for direct indexing
-static inline float neon_lut_lookup_flat(const float* flat_lut, uint8_t idx) {
-    return flat_lut[idx];
-}
+static inline float neon_lut_lookup_flat(const float* flat_lut, uint8_t idx) { return flat_lut[idx]; }
 
 // Vectorized 4-bit dequantization: process 8 packed bytes = 16 output values
 // Each byte contains two 4-bit values: high nibble first, low nibble second
-static inline void neon_dequant_4bit_16values(
-    const uint8_t* packed, float scale, const float32x4_t lut[4], float* out
-) {
+static inline void
+    neon_dequant_4bit_16values(const uint8_t* packed, float scale, const float32x4_t lut[4], float* out) {
     // Load 8 bytes = 16 x 4-bit values
     uint8x8_t raw = vld1_u8(packed);
 
     // Extract high and low nibbles
     uint8x8_t mask4 = vdup_n_u8(0x0F);
-    uint8x8_t lo_nibbles = vand_u8(raw, mask4);         // low nibble (second value)
-    uint8x8_t hi_nibbles = vshr_n_u8(raw, 4);           // high nibble (first value)
+    uint8x8_t lo_nibbles = vand_u8(raw, mask4); // low nibble (second value)
+    uint8x8_t hi_nibbles = vshr_n_u8(raw, 4);   // high nibble (first value)
 
     // Interleave hi/lo into 16-element index array for output ordering
     // output[2*i] = hi_nibble[i], output[2*i+1] = lo_nibble[i]
@@ -111,14 +118,22 @@ static inline void neon_dequant_4bit_16values(
 
     // Process 4 values at a time with NEON - load from temp buffer
     float tmp_vals[16];
-    tmp_vals[0]  = flat_lut[idx_arr[0]];  tmp_vals[1]  = flat_lut[idx_arr[1]];
-    tmp_vals[2]  = flat_lut[idx_arr[2]];  tmp_vals[3]  = flat_lut[idx_arr[3]];
-    tmp_vals[4]  = flat_lut[idx_arr[4]];  tmp_vals[5]  = flat_lut[idx_arr[5]];
-    tmp_vals[6]  = flat_lut[idx_arr[6]];  tmp_vals[7]  = flat_lut[idx_arr[7]];
-    tmp_vals[8]  = flat_lut[idx_arr[8]];  tmp_vals[9]  = flat_lut[idx_arr[9]];
-    tmp_vals[10] = flat_lut[idx_arr[10]]; tmp_vals[11] = flat_lut[idx_arr[11]];
-    tmp_vals[12] = flat_lut[idx_arr[12]]; tmp_vals[13] = flat_lut[idx_arr[13]];
-    tmp_vals[14] = flat_lut[idx_arr[14]]; tmp_vals[15] = flat_lut[idx_arr[15]];
+    tmp_vals[0] = flat_lut[idx_arr[0]];
+    tmp_vals[1] = flat_lut[idx_arr[1]];
+    tmp_vals[2] = flat_lut[idx_arr[2]];
+    tmp_vals[3] = flat_lut[idx_arr[3]];
+    tmp_vals[4] = flat_lut[idx_arr[4]];
+    tmp_vals[5] = flat_lut[idx_arr[5]];
+    tmp_vals[6] = flat_lut[idx_arr[6]];
+    tmp_vals[7] = flat_lut[idx_arr[7]];
+    tmp_vals[8] = flat_lut[idx_arr[8]];
+    tmp_vals[9] = flat_lut[idx_arr[9]];
+    tmp_vals[10] = flat_lut[idx_arr[10]];
+    tmp_vals[11] = flat_lut[idx_arr[11]];
+    tmp_vals[12] = flat_lut[idx_arr[12]];
+    tmp_vals[13] = flat_lut[idx_arr[13]];
+    tmp_vals[14] = flat_lut[idx_arr[14]];
+    tmp_vals[15] = flat_lut[idx_arr[15]];
     float32x4_t v0 = vld1q_f32(tmp_vals);
     float32x4_t v1 = vld1q_f32(tmp_vals + 4);
     float32x4_t v2 = vld1q_f32(tmp_vals + 8);
@@ -190,9 +205,7 @@ static inline uint16x4_t neon_norm_to_lut_index_x4(float32x4_t vals) {
     vals = vmaxq_f32(vals, vdupq_n_f32(-1.0f));
     vals = vminq_f32(vals, vdupq_n_f32(1.0f));
     // (val + 1.0) * 0.5 * 65535 + 0.5
-    float32x4_t result = vmlaq_f32(vdupq_n_f32(0.5f),
-                                    vaddq_f32(vals, vdupq_n_f32(1.0f)),
-                                    vdupq_n_f32(0.5f * 65535.0f));
+    float32x4_t result = vmlaq_f32(vdupq_n_f32(0.5f), vaddq_f32(vals, vdupq_n_f32(1.0f)), vdupq_n_f32(0.5f * 65535.0f));
     uint32x4_t u32 = vcvtq_u32_f32(result);
     return vmovn_u32(u32);
 }
@@ -563,7 +576,7 @@ void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* ou
                 uint16x4_t indices = neon_norm_to_lut_index_x4(v);
                 uint16_t idx_arr[4];
                 vst1_u16(idx_arr, indices);
-                out[block_start + i]     = lut[idx_arr[0]];
+                out[block_start + i] = lut[idx_arr[0]];
                 out[block_start + i + 1] = lut[idx_arr[1]];
                 out[block_start + i + 2] = lut[idx_arr[2]];
                 out[block_start + i + 3] = lut[idx_arr[3]];
