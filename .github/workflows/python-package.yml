@@ -196,18 +196,23 @@ jobs:
         include:
           - os: ubuntu-22.04
             arch: x86_64
+            python-version: "3.10"
           - os: ubuntu-22.04-arm
             arch: aarch64
+            python-version: "3.10"
           - os: windows-2025
             arch: x86_64
+            python-version: "3.10"
           - os: windows-11-arm
             arch: arm64
+            # Python for Windows ARM64 is only available from 3.12+
+            python-version: "3.12"
           - os: macos-15
             arch: arm64
+            python-version: "3.10"
         # The specific Python version is irrelevant in this context as we are only packaging non-C extension
         # code. This ensures compatibility across Python versions, as compatibility is
         # dictated by the packaged code itself, not the Python version used for packaging.
-        python-version: ["3.10"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
