@@ -191,9 +191,8 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
         am = A_flat[full:].abs().max().clamp(min=1e-38)
         absmax = torch.cat([absmax, am.unsqueeze(0)])
         scaled = torch.cat([scaled, torch.clamp(A_flat[full:] / am, -1, 1)])
-    sorted_code, order = torch.sort(code)
-    bounds = (sorted_code[:-1] + sorted_code[1:]) / 2
-    q = order[torch.bucketize(scaled, bounds, out_int32=True)].to(torch.uint8)
+    bounds = (code[:-1] + code[1:]) / 2  # code is always sorted (same assumption as CUDA kernel)
+    q = torch.bucketize(scaled, bounds, out_int32=True).to(torch.uint8)
     return q.reshape(A.shape), absmax
 
 
