@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [linux-x64, linux-aarch64, macos, windows]
+        platform: [linux-x64, linux-aarch64, macos, windows, windows-arm64]
         # default runners don't have AVX-512 support, but icelake does
         cpu_type: ["", icelake]
         torch_version: ["2.4.1", "2.12.0", "nightly"]
@@ -33,12 +33,21 @@ jobs:
             cpu_type: icelake
           - platform: windows
             cpu_type: icelake
+          - platform: windows-arm64
+            cpu_type: icelake
+          # windows-arm64: torch >= 2.7.0 required (first version with official WoA wheels)
+          - platform: windows-arm64
+            torch_version: "2.4.1"
 
         include:
           # Add aarch64 with torch 2.5.1
           - platform: linux-aarch64
             cpu_type: ""
             torch_version: "2.5.1"
+          # Add windows-arm64 with minimum torch 2.7.1
+          - platform: windows-arm64
+            cpu_type: ""
+            torch_version: "2.7.1"
 
     uses: ./.github/workflows/test-runner.yml
     with:
