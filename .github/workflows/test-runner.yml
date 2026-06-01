@@ -42,6 +42,7 @@ jobs:
         inputs.platform == 'linux-x64' && 'ubuntu-22.04' ||
         inputs.platform == 'linux-aarch64' && 'ubuntu-22.04-arm' ||
         inputs.platform == 'macos' && 'macos-15' ||
+        inputs.platform == 'windows-arm64' && 'windows-11-arm' ||
         'windows-2025'
       }}
     outputs:
