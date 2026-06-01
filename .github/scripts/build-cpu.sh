@@ -9,6 +9,8 @@ pip install cmake==3.28.3
 # Temporary: vectorization reporting
 if [[ "${build_os}" == windows* ]]; then
     EXTRA_CXX_FLAGS="/Qvec-report:2 /Qpar-report:1"
+elif [[ "${build_os:0:5}" == macos ]]; then
+    EXTRA_CXX_FLAGS="-Rpass=loop-vectorize -Rpass-missed=loop-vectorize -Rpass-analysis=loop-vectorize"
 else
     EXTRA_CXX_FLAGS="-fopt-info-vec-missed -fopt-info-vec -fopt-info-loop-optimized"
 fi
