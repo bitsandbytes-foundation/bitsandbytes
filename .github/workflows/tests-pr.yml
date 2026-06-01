@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [linux-x64, linux-aarch64, macos]
+        platform: [linux-x64, linux-aarch64, macos, windows-arm64]
         # default runners don't have AVX-512 support, but icelake does
         cpu_type: ["", icelake]
         torch_version: ["2.4.1", "2.12.0"]
@@ -42,6 +42,12 @@ jobs:
             cpu_type: icelake
           - platform: macos
             cpu_type: icelake
+          # icelake doesn't apply to windows-arm64
+          - platform: windows-arm64
+            cpu_type: icelake
+          # Windows ARM64 minimum torch version is 2.12.0
+          - platform: windows-arm64
+            torch_version: "2.4.1"
 
         include:
           # Add aarch64 with torch 2.5.1 instead of 2.4.1
