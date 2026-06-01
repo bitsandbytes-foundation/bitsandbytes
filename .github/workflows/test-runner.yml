@@ -6,7 +6,7 @@ on:
       platform:
         type: string
         required: true
-        description: "Platform: linux-x64, linux-aarch64, windows, macos"
+        description: "Platform: linux-x64, linux-aarch64, windows, windows-arm64, macos"
       backend:
         type: string
         required: true
@@ -42,6 +42,7 @@ jobs:
         inputs.platform == 'linux-x64' && 'ubuntu-22.04' ||
         inputs.platform == 'linux-aarch64' && 'ubuntu-22.04-arm' ||
         inputs.platform == 'macos' && 'macos-15' ||
+        inputs.platform == 'windows-arm64' && 'windows-11-arm' ||
         'windows-2025'
       }}
     outputs:
@@ -112,6 +113,11 @@ jobs:
                 TEST_RUNNER="windows-2025"
               fi
               ;;
+            windows-arm64)
+              BUILD_OS="windows-11-arm"
+              ARCH="arm64"
+              TEST_RUNNER="windows-11-arm"
+              ;;
             *)
               echo "::error::Unsupported platform: ${{ inputs.platform }}"
               exit 1
@@ -152,8 +158,10 @@ jobs:
 
       # Windows: Setup MSVC (needed for both CPU and CUDA builds)
       - name: Setup MSVC
-        if: inputs.platform == 'windows'
+        if: startsWith(inputs.platform, 'windows')
         uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch: ${{ inputs.platform == 'windows-arm64' && 'arm64' || 'x64' }}
 
       # Build CPU backend
       - name: Build C++
@@ -198,12 +206,15 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          # Python for Windows ARM64 is only available from 3.12+
+          python-version: ${{ inputs.platform == 'windows-arm64' && '3.12' || '3.10' }}
 
       # Windows: Setup MSVC for torch.compile
       - name: Setup MSVC
-        if: inputs.platform == 'windows'
+        if: startsWith(inputs.platform, 'windows')
         uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          arch: ${{ inputs.platform == 'windows-arm64' && 'arm64' || 'x64' }}
 
       - name: Install torch (nightly)
         if: inputs.torch_version == 'nightly'
