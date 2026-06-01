@@ -6,10 +6,17 @@ set -xeuo pipefail
 
 pip install cmake==3.28.3
 
-if [ "${build_os:0:5}" == macos ] && [ "${build_arch}" == aarch64 ]; then
-	cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DCOMPUTE_BACKEND=cpu .
+# Temporary: vectorization reporting
+if [[ "${build_os}" == windows* ]]; then
+    EXTRA_CXX_FLAGS="/Qvec-report:2 /Qpar-report:1"
 else
-	cmake -DCOMPUTE_BACKEND=cpu .
+    EXTRA_CXX_FLAGS="-fopt-info-vec-missed -fopt-info-vec -fopt-info-loop-optimized"
+fi
+
+if [ "${build_os:0:5}" == macos ] && [ "${build_arch}" == aarch64 ]; then
+	cmake -DCMAKE_OSX_ARCHITECTURES=arm64 -DCOMPUTE_BACKEND=cpu -DCMAKE_CXX_FLAGS="${EXTRA_CXX_FLAGS}" .
+else
+	cmake -DCOMPUTE_BACKEND=cpu -DCMAKE_CXX_FLAGS="${EXTRA_CXX_FLAGS}" .
 fi
 cmake --build . --config Release
 
