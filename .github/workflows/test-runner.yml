@@ -6,7 +6,7 @@ on:
       platform:
         type: string
         required: true
-        description: "Platform: linux-x64, linux-aarch64, windows, macos"
+        description: "Platform: linux-x64, linux-aarch64, windows, windows-arm64, macos"
       backend:
         type: string
         required: true
@@ -206,6 +206,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
+          # Python for Windows ARM64 is only available from 3.12+
           python-version: ${{ inputs.platform == 'windows-arm64' && '3.12' || '3.10' }}
 
       # Windows: Setup MSVC for torch.compile
