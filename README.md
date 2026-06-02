@@ -10,18 +10,19 @@
 
 `bitsandbytes` enables accessible large language models via k-bit quantization for PyTorch. We provide three main features for dramatically reducing memory consumption for inference and training:
 
-* 8-bit optimizers uses block-wise quantization to maintain 32-bit performance at a small fraction of the memory cost.
-* LLM.int8() or 8-bit quantization enables large language model inference with only half the required memory and without any performance degradation. This method is based on vector-wise quantization to quantize most features to 8-bits and separately treating outliers with 16-bit matrix multiplication.
-* QLoRA or 4-bit quantization enables large language model training with several memory-saving techniques that don't compromise performance. This method quantizes a model to 4-bits and inserts a small set of trainable low-rank adaptation (LoRA) weights to allow training.
+- 8-bit optimizers uses block-wise quantization to maintain 32 bit performance at a small fraction of the memory cost.
+- LLM.int8() or 8-bit quantization enables large language model inference with only half the required memory and without any performance degradation. This method is based on vector-wise quantization to quantize most features to 8-bits and separately treating outliers with 16-bit matrix multiplication.
+- QLoRA or 4-bit quantization enables large language model training with several memory-saving techniques that don't compromise performance. This method quantizes a model to 4-bits and inserts a small set of trainable low-rank adaptation (LoRA) weights to allow training.
 
 The library includes quantization primitives for 8-bit & 4-bit operations, through `bitsandbytes.nn.Linear8bitLt` and `bitsandbytes.nn.Linear4bit` and 8-bit optimizers through `bitsandbytes.optim` module.
 
 ## System Requirements
+
 bitsandbytes has the following minimum requirements for all platforms:
 
-* Python 3.10+
-* [PyTorch](https://pytorch.org/get-started/locally/) 2.4+
-  * _Note: While we aim to provide wide backwards compatibility, we recommend using the latest version of PyTorch for the best experience._
+- Python 3.10+
+- [PyTorch](https://pytorch.org/get-started/locally/) 2.4+
+  - _Note: While we aim to provide wide backwards compatibility, we recommend using the latest version of PyTorch for the best experience._
 
 #### Accelerator support:
 
@@ -30,6 +31,7 @@ bitsandbytes has the following minimum requirements for all platforms:
 </small>
 
 ##### Legend:
+
 🚧 = In Development,
 〰️ = Partially Supported,
 ✅ = Supported,
@@ -178,12 +180,14 @@ bitsandbytes has the following minimum requirements for all platforms:
 </table>
 
 ## :book: Documentation
-* [Official Documentation](https://huggingface.co/docs/bitsandbytes/main)
-* 🤗 [Transformers](https://huggingface.co/docs/transformers/quantization/bitsandbytes)
-* 🤗 [Diffusers](https://huggingface.co/docs/diffusers/quantization/bitsandbytes)
-* 🤗 [PEFT](https://huggingface.co/docs/peft/developer_guides/quantization#quantize-a-model)
+
+- [Official Documentation](https://huggingface.co/docs/bitsandbytes/main)
+- 🤗 [Transformers](https://huggingface.co/docs/transformers/quantization/bitsandbytes)
+- 🤗 [Diffusers](https://huggingface.co/docs/diffusers/quantization/bitsandbytes)
+- 🤗 [PEFT](https://huggingface.co/docs/peft/developer_guides/quantization#quantize-a-model)
 
 ## :heart: Sponsors
+
 The continued maintenance and development of `bitsandbytes` is made possible thanks to the generous support of our sponsors. Their contributions help ensure that we can keep improving the project and delivering valuable updates to the community.
 
 <kbd><a href="https://hf.co" target="_blank"><img width="100" src="https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.svg" alt="Hugging Face"></a></kbd>
@@ -191,9 +195,11 @@ The continued maintenance and development of `bitsandbytes` is made possible tha
 <kbd><a href="https://intel.com" target="_blank"><img width="100" src="https://avatars.githubusercontent.com/u/17888862?s=100&v=4" alt="Intel"></a></kbd>
 
 ## License
+
 `bitsandbytes` is MIT licensed.
 
 ## How to cite us
+
 If you found this library useful, please consider citing our work:
 
 ### QLoRA
