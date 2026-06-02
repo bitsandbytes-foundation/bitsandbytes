@@ -3,7 +3,6 @@ import ctypes as ct
 import logging
 import math
 from math import prod
-import platform
 from typing import Optional
 
 import torch
@@ -22,10 +21,9 @@ _has_avx512 = torch.backends.cpu.get_cpu_capability() == "AVX512"
 # This is fixed in torch 2.6+, so we set this as the minimum to be safe.
 # For more information: https://github.com/pytorch/pytorch/pull/136942
 #
-# On aarch64, torch._int_mm uses a scalar fallback that is much slower
-# than fp32 matmul. Skip it and let the default backend handle this.
-_is_arm64 = platform.machine().lower() in ("arm64", "aarch64")
-if torch.__version__ >= (2, 6) and not _is_arm64:
+# Without AVX-512 (including aarch64), torch._int_mm uses a scalar fallback
+# that is much slower than fp32 matmul. Only use it when AVX-512 is available.
+if torch.__version__ >= (2, 6) and _has_avx512:
 
     @register_kernel("bitsandbytes::int8_linear_matmul", "cpu")
     def _(A: torch.Tensor, B: torch.Tensor):
