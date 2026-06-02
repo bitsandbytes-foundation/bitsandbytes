@@ -118,6 +118,11 @@ if (BUILD_CPU)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" HOST_ARCH)
+    if(MSVC)
+        # Use the experimental OpenMP runtime for persistent thread pool support.
+        # Requires CMake 3.30+; silently ignored on older CMake versions.
+        set(OpenMP_RUNTIME_MSVC "experimental")
+    endif()
     find_package(OpenMP)
 endif()
 

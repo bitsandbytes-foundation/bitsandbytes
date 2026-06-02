@@ -439,7 +439,7 @@ void dequantizeBlockwise8bitCpu(
 // which would SIGILL on non-AVX512 CPUs like Zen3. These functions are scalar C++ and don't need AVX512.
 #if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 #pragma GCC push_options
-#pragma GCC target("no-avx512f")
+#pragma GCC target("avx2,fma,no-avx512f")
 #endif
 
 // Precomputed direct lookup table: maps quantized uint16 index [0..65535] to codebook index.

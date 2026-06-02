@@ -4,7 +4,11 @@ declare build_os
 
 set -xeuo pipefail
 
-pip install cmake==3.28.3
+if [[ "${build_os}" == windows* ]]; then
+    pip install cmake==3.30.9
+else
+    pip install cmake==3.28.3
+fi
 
 # Temporary: vectorization reporting
 if [[ "${build_os}" == windows* ]]; then
