@@ -263,7 +263,7 @@ static inline __m512 set_fp4_lut() {
 // DATA_TYPE: 1 = FP4, 2 = NF4
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwise4bitCpu(
-    unsigned char* A, const float* absmax, T* out, long long blocksize, long long m, long long n
+    unsigned char* __restrict A, const float* __restrict absmax, T* __restrict out, long long blocksize, long long m, long long n
 ) {
     static_assert(DATA_TYPE == 1 || DATA_TYPE == 2, "dequantizeBlockwise4bitCpu called with non 4-bit DATA_TYPE");
     if (blocksize <= 0 || m < 0 || n <= 0)
@@ -408,7 +408,7 @@ void dequantizeBlockwise4bitCpu(
 
 template <typename T>
 void dequantizeBlockwise8bitCpu(
-    float* code, unsigned char* A, const float* absmax, T* out, long long blocksize, long long n
+    float* __restrict code, unsigned char* __restrict A, const float* __restrict absmax, T* __restrict out, long long blocksize, long long n
 ) {
     if (blocksize <= 0 || n <= 0)
         return;
@@ -518,7 +518,7 @@ static inline uint16_t norm_to_lut_index(float val) {
 }
 
 template <typename T>
-void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
+void quantize_cpu_impl(float* __restrict code, const T* __restrict A, float* __restrict absmax, unsigned char* __restrict out, long long blocksize, long long n) {
     if (blocksize <= 0 || n <= 0)
         return;
 
