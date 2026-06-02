@@ -1,9 +1,6 @@
-import os
-from os.path import join
-import shutil
+import io
 import sys
 import time
-import uuid
 
 from lion_pytorch import Lion
 import pytest
@@ -26,15 +23,6 @@ def assert_most_approx_close(a, b, rtol=1e-3, atol=1e-3, max_error_count=0):
         print(f"Too many values not close: assert {error_count} < {max_error_count}")
         torch.testing.assert_close(a, b, rtol=rtol, atol=atol)
 
-
-def get_temp_dir():
-    path = f"/tmp/autoswap/{uuid.uuid4()}"
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def rm_path(path):
-    shutil.rmtree(path)
 
 
 str2optimizers = {}
@@ -223,13 +211,13 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name, device):
         assert_most_approx_close(p1, p2.float(), atol=atol, rtol=rtol, max_error_count=15)
 
         if i % (k // 5) == 0 and i > 0:
-            path = get_temp_dir()
-            torch.save(bnb_optimizer.state_dict(), join(path, "opt.pt"))
+            buf = io.BytesIO()
+            torch.save(bnb_optimizer.state_dict(), buf)
             del bnb_optimizer
             bnb_optimizer = None
             bnb_optimizer = str2optimizers[optim_name][1]([p2])
-            bnb_optimizer.load_state_dict(torch.load(join(path, "opt.pt")))
-            rm_path(path)
+            buf.seek(0)
+            bnb_optimizer.load_state_dict(torch.load(buf))
             # since Lion can have pretty noisy updates where things lie at the boundary
             # allow up to 10 errors for Lion
             assert_most_approx_close(p1, p2.float(), atol=atol, rtol=rtol, max_error_count=10)
@@ -441,13 +429,13 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
                 raws1cpy = bnb_optimizer.state[p2][name2].clone()
                 qmap1 = bnb_optimizer.state[p2][qmap].clone()
 
-                path = get_temp_dir()
-                torch.save(bnb_optimizer.state_dict(), join(path, "opt.pt"))
+                buf = io.BytesIO()
+                torch.save(bnb_optimizer.state_dict(), buf)
                 del bnb_optimizer
                 bnb_optimizer = None
                 bnb_optimizer = str2optimizers[optim_name][1]([p2])
-                bnb_optimizer.load_state_dict(torch.load(join(path, "opt.pt")))
-                rm_path(path)
+                buf.seek(0)
+                bnb_optimizer.load_state_dict(torch.load(buf))
                 torch.testing.assert_close(raws1cpy, bnb_optimizer.state[p2][name2])
                 torch.testing.assert_close(qmap1, bnb_optimizer.state[p2][qmap])
 
@@ -577,16 +565,18 @@ def test_ademamix_state_dict_no_nan(optim_name, optim_factory, device):
     # Save state
     model_sd = {k: v.clone() for k, v in model.state_dict().items()}
     opt_sd = opt.state_dict()
-    path = get_temp_dir()
-    torch.save(opt_sd, join(path, "opt.pt"))
-    torch.save(model_sd, join(path, "model.pt"))
+    opt_buf = io.BytesIO()
+    model_buf = io.BytesIO()
+    torch.save(opt_sd, opt_buf)
+    torch.save(model_sd, model_buf)
 
     # Create fresh model and optimizer, load state
     model2 = nn.Linear(256, 64).to(device)
-    model2.load_state_dict(torch.load(join(path, "model.pt")))
+    model_buf.seek(0)
+    model2.load_state_dict(torch.load(model_buf))
     opt2 = optim_factory(model2.parameters())
-    opt2.load_state_dict(torch.load(join(path, "opt.pt")))
-    rm_path(path)
+    opt_buf.seek(0)
+    opt2.load_state_dict(torch.load(opt_buf))
 
     # Verify loaded state matches original byte-for-byte
     orig_params = list(model.parameters())
