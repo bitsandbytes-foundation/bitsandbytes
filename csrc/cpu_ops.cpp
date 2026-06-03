@@ -102,42 +102,28 @@ static inline void
     // interleaved.val[0] has elements 0-7, interleaved.val[1] has elements 8-15
     uint8x16_t indices = vcombine_u8(interleaved.val[0], interleaved.val[1]);
 
-    // Use flat LUT for fast indexed access
-    // Store LUT as flat float array on stack (likely in L1 cache)
-    float flat_lut[16];
-    vst1q_f32(flat_lut, lut[0]);
-    vst1q_f32(flat_lut + 4, lut[1]);
-    vst1q_f32(flat_lut + 8, lut[2]);
-    vst1q_f32(flat_lut + 12, lut[3]);
-
-    // Extract indices and do lookups in groups of 4 for NEON multiply
-    uint8_t idx_arr[16];
-    vst1q_u8(idx_arr, indices);
-
+    // Reinterpret float LUT as 64-byte table for vqtbl4q_u8 lookup.
+    // Each 4-bit index i maps to bytes [i*4 .. i*4+3] in the table.
+    uint8x16x4_t lut_bytes = {
+        vreinterpretq_u8_f32(lut[0]), vreinterpretq_u8_f32(lut[1]), vreinterpretq_u8_f32(lut[2]),
+        vreinterpretq_u8_f32(lut[3])
+    };
+    // Multiply each index by 4 to get byte offset (max 15*4=60 < 64, safe)
+    uint8x16_t base = vshlq_n_u8(indices, 2);
+    // Expand each base offset to 4 consecutive bytes via zip
+    static const uint8x16_t off = {0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3};
+    uint8x8_t lo = vget_low_u8(base), hi = vget_high_u8(base);
+    uint8x8x2_t z0 = vzip_u8(lo, lo);
+    uint8x8x2_t z1 = vzip_u8(hi, hi);
+    uint8x8x2_t zlo = vzip_u8(z0.val[0], z0.val[0]);
+    uint8x8x2_t zhi = vzip_u8(z0.val[1], z0.val[1]);
+    uint8x8x2_t zlo2 = vzip_u8(z1.val[0], z1.val[0]);
+    uint8x8x2_t zhi2 = vzip_u8(z1.val[1], z1.val[1]);
     float32x4_t vscale = vdupq_n_f32(scale);
-
-    // Process 4 values at a time with NEON - load from temp buffer
-    float tmp_vals[16];
-    tmp_vals[0] = flat_lut[idx_arr[0]];
-    tmp_vals[1] = flat_lut[idx_arr[1]];
-    tmp_vals[2] = flat_lut[idx_arr[2]];
-    tmp_vals[3] = flat_lut[idx_arr[3]];
-    tmp_vals[4] = flat_lut[idx_arr[4]];
-    tmp_vals[5] = flat_lut[idx_arr[5]];
-    tmp_vals[6] = flat_lut[idx_arr[6]];
-    tmp_vals[7] = flat_lut[idx_arr[7]];
-    tmp_vals[8] = flat_lut[idx_arr[8]];
-    tmp_vals[9] = flat_lut[idx_arr[9]];
-    tmp_vals[10] = flat_lut[idx_arr[10]];
-    tmp_vals[11] = flat_lut[idx_arr[11]];
-    tmp_vals[12] = flat_lut[idx_arr[12]];
-    tmp_vals[13] = flat_lut[idx_arr[13]];
-    tmp_vals[14] = flat_lut[idx_arr[14]];
-    tmp_vals[15] = flat_lut[idx_arr[15]];
-    float32x4_t v0 = vld1q_f32(tmp_vals);
-    float32x4_t v1 = vld1q_f32(tmp_vals + 4);
-    float32x4_t v2 = vld1q_f32(tmp_vals + 8);
-    float32x4_t v3 = vld1q_f32(tmp_vals + 12);
+    float32x4_t v0 = vreinterpretq_f32_u8(vqtbl4q_u8(lut_bytes, vaddq_u8(vcombine_u8(zlo.val[0], zlo.val[1]), off)));
+    float32x4_t v1 = vreinterpretq_f32_u8(vqtbl4q_u8(lut_bytes, vaddq_u8(vcombine_u8(zhi.val[0], zhi.val[1]), off)));
+    float32x4_t v2 = vreinterpretq_f32_u8(vqtbl4q_u8(lut_bytes, vaddq_u8(vcombine_u8(zlo2.val[0], zlo2.val[1]), off)));
+    float32x4_t v3 = vreinterpretq_f32_u8(vqtbl4q_u8(lut_bytes, vaddq_u8(vcombine_u8(zhi2.val[0], zhi2.val[1]), off)));
 
     vst1q_f32(out, vmulq_f32(v0, vscale));
     vst1q_f32(out + 4, vmulq_f32(v1, vscale));
@@ -180,25 +166,31 @@ static inline float32x4_t neon_fp16x4_to_f32(const fp16_t* src) {
 }
 
 // NEON-optimized absmax computation for a block of float32, bf16, or fp16.
-template <typename T>
-static inline float neon_absmax(const T* data, long long n) {
+template <typename T> static inline float neon_absmax(const T* data, long long n) {
     float32x4_t vmax = vdupq_n_f32(0.0f);
     long long i = 0;
     for (; i + 16 <= n; i += 16) {
         float32x4_t v0, v1, v2, v3;
         if constexpr (std::is_same<T, float>::value) {
             const float* p = reinterpret_cast<const float*>(data + i);
-            v0 = vld1q_f32(p);      v1 = vld1q_f32(p + 4);
-            v2 = vld1q_f32(p + 8);  v3 = vld1q_f32(p + 12);
+            v0 = vld1q_f32(p);
+            v1 = vld1q_f32(p + 4);
+            v2 = vld1q_f32(p + 8);
+            v3 = vld1q_f32(p + 12);
         } else if constexpr (std::is_same<T, bf16_t>::value) {
-            v0 = neon_bf16x4_to_f32(data + i);     v1 = neon_bf16x4_to_f32(data + i + 4);
-            v2 = neon_bf16x4_to_f32(data + i + 8); v3 = neon_bf16x4_to_f32(data + i + 12);
+            v0 = neon_bf16x4_to_f32(data + i);
+            v1 = neon_bf16x4_to_f32(data + i + 4);
+            v2 = neon_bf16x4_to_f32(data + i + 8);
+            v3 = neon_bf16x4_to_f32(data + i + 12);
         } else {
-            v0 = neon_fp16x4_to_f32(data + i);     v1 = neon_fp16x4_to_f32(data + i + 4);
-            v2 = neon_fp16x4_to_f32(data + i + 8); v3 = neon_fp16x4_to_f32(data + i + 12);
+            v0 = neon_fp16x4_to_f32(data + i);
+            v1 = neon_fp16x4_to_f32(data + i + 4);
+            v2 = neon_fp16x4_to_f32(data + i + 8);
+            v3 = neon_fp16x4_to_f32(data + i + 12);
         }
-        vmax = vmaxq_f32(vmax, vmaxq_f32(vmaxq_f32(vabsq_f32(v0), vabsq_f32(v1)),
-                                         vmaxq_f32(vabsq_f32(v2), vabsq_f32(v3))));
+        vmax = vmaxq_f32(
+            vmax, vmaxq_f32(vmaxq_f32(vabsq_f32(v0), vabsq_f32(v1)), vmaxq_f32(vabsq_f32(v2), vabsq_f32(v3)))
+        );
     }
     for (; i + 4 <= n; i += 4) {
         float32x4_t v;
@@ -213,9 +205,12 @@ static inline float neon_absmax(const T* data, long long n) {
     float result = vmaxvq_f32(vmax);
     for (; i < n; ++i) {
         float val;
-        if constexpr (std::is_same<T, float>::value)       val = data[i];
-        else if constexpr (std::is_same<T, bf16_t>::value) val = bf16_to_float(data[i].v);
-        else                                                val = fp16_to_float(data[i].v);
+        if constexpr (std::is_same<T, float>::value)
+            val = data[i];
+        else if constexpr (std::is_same<T, bf16_t>::value)
+            val = bf16_to_float(data[i].v);
+        else
+            val = fp16_to_float(data[i].v);
         result = std::max(result, std::fabs(val));
     }
     return result;
@@ -296,50 +291,63 @@ void dequantizeBlockwise4bitCpu(
     {
         long long dim_0 = m;
         long long dim_1 = n;
-        long long input_dim_1 = dim_1 >> 1;
-        long long absmax_dim_1 = dim_1 / blocksize;
-        // NEON path: process 16 output values at a time (8 packed bytes)
-        // Only use when blocksize evenly divides dim_1 to ensure correct scale indexing
-        constexpr long long VEC_LEN = 16;
-        if (dim_1 % VEC_LEN == 0 && blocksize >= VEC_LEN && (dim_1 % blocksize == 0)) {
-            float32x4_t lut[4];
-            if constexpr (DATA_TYPE == 1) {
-                neon_fp4_lut(lut);
-            } else {
-                neon_nf4_lut(lut);
-            }
-            constexpr long long k_step = VEC_LEN / 2; // 8 bytes per iteration
-            BNB_OMP_PARALLEL_FOR
-            for (long long block_idx = 0; block_idx < dim_0; ++block_idx) {
-                for (long long k = 0; k < input_dim_1; k += k_step) {
-                    long long scale_idx = k * 2 / blocksize;
-                    float scale = absmax[block_idx * absmax_dim_1 + scale_idx];
-                    const uint8_t* p = &A[block_idx * input_dim_1 + k];
-
-                    // Dequantize 16 values into a temp float buffer
-                    float tmp_f32[16];
-                    neon_dequant_4bit_16values(p, scale, lut, tmp_f32);
-
-                    // Store results (convert to output type using NEON)
-                    T* pout = &out[block_idx * dim_1 + k * 2];
-                    if constexpr (std::is_same<T, float>()) {
-                        // Direct copy - already float
-                        std::memcpy(pout, tmp_f32, 16 * sizeof(float));
-                    } else if constexpr (std::is_same<T, bf16_t>()) {
-                        neon_f32_to_bf16x4(vld1q_f32(tmp_f32), pout);
-                        neon_f32_to_bf16x4(vld1q_f32(tmp_f32 + 4), pout + 4);
-                        neon_f32_to_bf16x4(vld1q_f32(tmp_f32 + 8), pout + 8);
-                        neon_f32_to_bf16x4(vld1q_f32(tmp_f32 + 12), pout + 12);
-                    } else if constexpr (std::is_same<T, fp16_t>()) {
-                        neon_f32_to_fp16x4(vld1q_f32(tmp_f32), pout);
-                        neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 4), pout + 4);
-                        neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 8), pout + 8);
-                        neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 12), pout + 12);
-                    }
+        long long input_dim_1 = (dim_1 + 1) >> 1; // ceil(dim_1/2): handles odd dim_1
+        long long absmax_dim_1 = (dim_1 + blocksize - 1) / blocksize;
+        float32x4_t lut[4];
+        if constexpr (DATA_TYPE == 1) {
+            neon_fp4_lut(lut);
+        } else {
+            neon_nf4_lut(lut);
+        }
+        constexpr long long k_step = 8; // 8 packed bytes = 16 output values
+        BNB_OMP_PARALLEL_FOR
+        for (long long block_idx = 0; block_idx < dim_0; ++block_idx) {
+            long long k = 0;
+            for (; k + k_step <= input_dim_1; k += k_step) {
+                long long scale_idx = k * 2 / blocksize;
+                float scale = absmax[block_idx * absmax_dim_1 + scale_idx];
+                const uint8_t* p = &A[block_idx * input_dim_1 + k];
+                float tmp_f32[16];
+                neon_dequant_4bit_16values(p, scale, lut, tmp_f32);
+                T* pout = &out[block_idx * dim_1 + k * 2];
+                if constexpr (std::is_same<T, float>()) {
+                    std::memcpy(pout, tmp_f32, 16 * sizeof(float));
+                } else if constexpr (std::is_same<T, bf16_t>()) {
+                    neon_f32_to_bf16x4(vld1q_f32(tmp_f32), pout);
+                    neon_f32_to_bf16x4(vld1q_f32(tmp_f32 + 4), pout + 4);
+                    neon_f32_to_bf16x4(vld1q_f32(tmp_f32 + 8), pout + 8);
+                    neon_f32_to_bf16x4(vld1q_f32(tmp_f32 + 12), pout + 12);
+                } else {
+                    neon_f32_to_fp16x4(vld1q_f32(tmp_f32), pout);
+                    neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 4), pout + 4);
+                    neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 8), pout + 8);
+                    neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 12), pout + 12);
                 }
             }
-            return;
+            // Scalar remainder for dim_1 not divisible by 16, and last nibble when dim_1 is odd
+            for (; k < input_dim_1; ++k) {
+                long long out_base = block_idx * dim_1 + k * 2;
+                long long scale_idx = k * 2 / blocksize;
+                float scale = absmax[block_idx * absmax_dim_1 + scale_idx];
+                unsigned char byte = A[block_idx * input_dim_1 + k];
+                float v0 = (DATA_TYPE == 1 ? dDequantizeFP4(byte >> 4) : dDequantizeNF4(byte >> 4)) * scale;
+                float v1 = (DATA_TYPE == 1 ? dDequantizeFP4(byte & 0x0F) : dDequantizeNF4(byte & 0x0F)) * scale;
+                if constexpr (std::is_same<T, float>()) {
+                    out[out_base] = v0;
+                    if (k * 2 + 1 < dim_1)
+                        out[out_base + 1] = v1;
+                } else if constexpr (std::is_same<T, bf16_t>()) {
+                    out[out_base] = float_to_bf16(v0);
+                    if (k * 2 + 1 < dim_1)
+                        out[out_base + 1] = float_to_bf16(v1);
+                } else {
+                    out[out_base] = float_to_fp16(v0);
+                    if (k * 2 + 1 < dim_1)
+                        out[out_base + 1] = float_to_fp16(v1);
+                }
+            }
         }
+        return;
     }
 #endif // _M_ARM64 || __aarch64__
 
@@ -446,7 +454,7 @@ void dequantizeBlockwise8bitCpu(
             float32x4_t vscale = vdupq_n_f32(scale);
             long long i = block_idx;
             for (; i + 4 <= block_end; i += 4) {
-                float tmp[4] = { code[A[i]], code[A[i+1]], code[A[i+2]], code[A[i+3]] };
+                float tmp[4] = {code[A[i]], code[A[i + 1]], code[A[i + 2]], code[A[i + 3]]};
                 float32x4_t v = vmulq_f32(vld1q_f32(tmp), vscale);
                 if constexpr (std::is_same<T, float>::value)
                     vst1q_f32(reinterpret_cast<float*>(out + i), v);
@@ -630,7 +638,7 @@ void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* ou
                 uint16x4_t indices = neon_norm_to_lut_index_x4(v);
                 uint16_t idx_arr[4];
                 vst1_u16(idx_arr, indices);
-                out[block_start + i]     = lut[idx_arr[0]];
+                out[block_start + i] = lut[idx_arr[0]];
                 out[block_start + i + 1] = lut[idx_arr[1]];
                 out[block_start + i + 2] = lut[idx_arr[2]];
                 out[block_start + i + 3] = lut[idx_arr[3]];
