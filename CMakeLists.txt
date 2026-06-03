@@ -380,6 +380,7 @@ if (BUILD_CPU)
             -mprefer-vector-width=256
             -mfma
             -mavx2
+            -mf16c
             -mlzcnt
             -mbmi
             -mbmi2

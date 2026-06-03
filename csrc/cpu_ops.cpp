@@ -231,7 +231,6 @@ static inline uint16x4_t neon_norm_to_lut_index_x4(float32x4_t vals) {
 #endif // _M_ARM64 || __aarch64__
 
 #if defined(__AVX512F__)
-#include <immintrin.h>
 
 inline __m256i cvt_fp32_to_fp16(const __m512 src) {
     return _mm512_cvtps_ph(src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
@@ -277,6 +276,29 @@ static inline __m512 set_fp4_lut() {
 }
 #endif
 
+static constexpr float fp4_lut[16] = {
+    0.0f,  0.005208333333f,  0.66666667f,  1.0f,  0.33333333f,  0.5f,  0.16666667f,  0.25f,
+    -0.0f, -0.005208333333f, -0.66666667f, -1.0f, -0.33333333f, -0.5f, -0.16666667f, -0.25f,
+};
+static constexpr float nf4_lut[16] = {
+    -1.0f,
+    -0.6961928009986877f,
+    -0.5250730514526367f,
+    -0.39491748809814453f,
+    -0.28444138169288635f,
+    -0.18477343022823334f,
+    -0.09105003625154495f,
+    0.0f,
+    0.07958029955625534f,
+    0.16093020141124725f,
+    0.24611230194568634f,
+    0.33791524171829224f,
+    0.44070982933044434f,
+    0.5626170039176941f,
+    0.7229568362236023f,
+    1.0f,
+};
+
 // 4-bit (FP4 / NF4) dequantization helper extracted from the original else branch.
 // DATA_TYPE: 1 = FP4, 2 = NF4
 template <typename T, int DATA_TYPE>
@@ -293,8 +315,8 @@ void dequantizeBlockwise4bitCpu(
     if (n % blocksize == 0) {
         long long dim_0 = m;
         long long dim_1 = n;
-        long long input_dim_1 = dim_1 >> 1;
-        long long absmax_dim_1 = dim_1 / blocksize;
+        long long input_dim_1 = (dim_1 + 1) >> 1; // ceil(dim_1/2): handles odd dim_1
+        long long absmax_dim_1 = (dim_1 + blocksize - 1) / blocksize;
         float32x4_t lut[4];
         if constexpr (DATA_TYPE == 1) {
             neon_fp4_lut(lut);
@@ -304,7 +326,8 @@ void dequantizeBlockwise4bitCpu(
         constexpr long long k_step = 8; // 8 packed bytes = 16 output values
         BNB_OMP_PARALLEL_FOR
         for (long long block_idx = 0; block_idx < dim_0; ++block_idx) {
-            for (long long k = 0; k < input_dim_1; k += k_step) {
+            long long k = 0;
+            for (; k + k_step <= input_dim_1; k += k_step) {
                 long long scale_idx = k * 2 / blocksize;
                 float scale = absmax[block_idx * absmax_dim_1 + scale_idx];
                 const uint8_t* p = &A[block_idx * input_dim_1 + k];
@@ -323,6 +346,28 @@ void dequantizeBlockwise4bitCpu(
                     neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 4), pout + 4);
                     neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 8), pout + 8);
                     neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 12), pout + 12);
+                }
+            }
+            // Scalar remainder for dim_1 not divisible by 16, and last nibble when dim_1 is odd
+            for (; k < input_dim_1; ++k) {
+                long long out_base = block_idx * dim_1 + k * 2;
+                long long scale_idx = k * 2 / blocksize;
+                float scale = absmax[block_idx * absmax_dim_1 + scale_idx];
+                unsigned char byte = A[block_idx * input_dim_1 + k];
+                float v0 = lut[byte >> 4] * scale;
+                float v1 = lut[byte & 0x0F] * scale;
+                if constexpr (std::is_same<T, float>()) {
+                    out[out_base] = v0;
+                    if (k * 2 + 1 < dim_1)
+                        out[out_base + 1] = v1;
+                } else if constexpr (std::is_same<T, bf16_t>()) {
+                    out[out_base] = float_to_bf16(v0);
+                    if (k * 2 + 1 < dim_1)
+                        out[out_base + 1] = float_to_bf16(v1);
+                } else {
+                    out[out_base] = float_to_fp16(v0);
+                    if (k * 2 + 1 < dim_1)
+                        out[out_base + 1] = float_to_fp16(v1);
                 }
             }
         }
@@ -381,6 +426,7 @@ void dequantizeBlockwise4bitCpu(
     }
 #endif
     // Scalar fallback branch
+    const float* lut = DATA_TYPE == 1 ? fp4_lut : nf4_lut;
     long long total = m * n;
     BNB_OMP_PARALLEL_FOR
     for (long long block_idx = 0; block_idx < total; block_idx += blocksize) {
@@ -391,9 +437,9 @@ void dequantizeBlockwise4bitCpu(
             unsigned char byte = A[byte_index];
 
             // High nibble first (matches previous code logic)
-            float v0 = (DATA_TYPE == 1 ? dDequantizeFP4(byte >> 4) : dDequantizeNF4(byte >> 4)) * scale;
+            float v0 = lut[byte >> 4] * scale;
             // Low nibble second
-            float v1 = (DATA_TYPE == 1 ? dDequantizeFP4(byte & 0x0F) : dDequantizeNF4(byte & 0x0F)) * scale;
+            float v1 = lut[byte & 0x0F] * scale;
 
             if constexpr (std::is_same<T, bf16_t>::value) {
                 out[block_idx + i] = float_to_bf16(v0);
