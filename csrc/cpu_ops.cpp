@@ -288,7 +288,9 @@ void dequantizeBlockwise4bitCpu(
         return;
 
 #if defined(_M_ARM64) || defined(__aarch64__)
-    {
+    // n % blocksize == 0: absmax is organized by flat element blocks; row and block
+    // boundaries must align or the 2D absmax indexing gives wrong scale values.
+    if (n % blocksize == 0) {
         long long dim_0 = m;
         long long dim_1 = n;
         long long input_dim_1 = (dim_1 + 1) >> 1; // ceil(dim_1/2): handles odd dim_1
