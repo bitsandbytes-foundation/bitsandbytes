@@ -173,27 +173,50 @@ static inline void neon_f32_to_fp16x4(const float32x4_t src, fp16_t* dst) {
     vst1_u16(reinterpret_cast<uint16_t*>(dst), vreinterpret_u16_f16(half));
 }
 
-// NEON-optimized absmax computation for a block of float32
-static inline float neon_absmax_f32(const float* data, long long n) {
+// NEON-optimized FP16 to float conversion (4 values at a time)
+static inline float32x4_t neon_fp16x4_to_f32(const fp16_t* src) {
+    uint16x4_t raw = vld1_u16(reinterpret_cast<const uint16_t*>(src));
+    return vcvt_f32_f16(vreinterpret_f16_u16(raw));
+}
+
+// NEON-optimized absmax computation for a block of float32, bf16, or fp16.
+template <typename T>
+static inline float neon_absmax(const T* data, long long n) {
     float32x4_t vmax = vdupq_n_f32(0.0f);
     long long i = 0;
-    // Process 16 elements per iteration for better throughput
     for (; i + 16 <= n; i += 16) {
-        float32x4_t v0 = vabsq_f32(vld1q_f32(data + i));
-        float32x4_t v1 = vabsq_f32(vld1q_f32(data + i + 4));
-        float32x4_t v2 = vabsq_f32(vld1q_f32(data + i + 8));
-        float32x4_t v3 = vabsq_f32(vld1q_f32(data + i + 12));
-        vmax = vmaxq_f32(vmax, vmaxq_f32(vmaxq_f32(v0, v1), vmaxq_f32(v2, v3)));
+        float32x4_t v0, v1, v2, v3;
+        if constexpr (std::is_same<T, float>::value) {
+            const float* p = reinterpret_cast<const float*>(data + i);
+            v0 = vld1q_f32(p);      v1 = vld1q_f32(p + 4);
+            v2 = vld1q_f32(p + 8);  v3 = vld1q_f32(p + 12);
+        } else if constexpr (std::is_same<T, bf16_t>::value) {
+            v0 = neon_bf16x4_to_f32(data + i);     v1 = neon_bf16x4_to_f32(data + i + 4);
+            v2 = neon_bf16x4_to_f32(data + i + 8); v3 = neon_bf16x4_to_f32(data + i + 12);
+        } else {
+            v0 = neon_fp16x4_to_f32(data + i);     v1 = neon_fp16x4_to_f32(data + i + 4);
+            v2 = neon_fp16x4_to_f32(data + i + 8); v3 = neon_fp16x4_to_f32(data + i + 12);
+        }
+        vmax = vmaxq_f32(vmax, vmaxq_f32(vmaxq_f32(vabsq_f32(v0), vabsq_f32(v1)),
+                                         vmaxq_f32(vabsq_f32(v2), vabsq_f32(v3))));
     }
     for (; i + 4 <= n; i += 4) {
-        float32x4_t v = vld1q_f32(data + i);
+        float32x4_t v;
+        if constexpr (std::is_same<T, float>::value)
+            v = vld1q_f32(reinterpret_cast<const float*>(data + i));
+        else if constexpr (std::is_same<T, bf16_t>::value)
+            v = neon_bf16x4_to_f32(data + i);
+        else
+            v = neon_fp16x4_to_f32(data + i);
         vmax = vmaxq_f32(vmax, vabsq_f32(v));
     }
-    // Horizontal max
     float result = vmaxvq_f32(vmax);
-    // Handle remainder
     for (; i < n; ++i) {
-        result = std::max(result, std::fabs(data[i]));
+        float val;
+        if constexpr (std::is_same<T, float>::value)       val = data[i];
+        else if constexpr (std::is_same<T, bf16_t>::value) val = bf16_to_float(data[i].v);
+        else                                                val = fp16_to_float(data[i].v);
+        result = std::max(result, std::fabs(val));
     }
     return result;
 }
@@ -418,6 +441,31 @@ void dequantizeBlockwise8bitCpu(
         long long valid_items = (n - block_idx >= blocksize ? blocksize : n - block_idx);
         long long block_end = block_idx + valid_items;
         float scale = absmax[block_idx / blocksize];
+#if defined(_M_ARM64) || defined(__aarch64__)
+        {
+            float32x4_t vscale = vdupq_n_f32(scale);
+            long long i = block_idx;
+            for (; i + 4 <= block_end; i += 4) {
+                float tmp[4] = { code[A[i]], code[A[i+1]], code[A[i+2]], code[A[i+3]] };
+                float32x4_t v = vmulq_f32(vld1q_f32(tmp), vscale);
+                if constexpr (std::is_same<T, float>::value)
+                    vst1q_f32(reinterpret_cast<float*>(out + i), v);
+                else if constexpr (std::is_same<T, bf16_t>::value)
+                    neon_f32_to_bf16x4(v, out + i);
+                else
+                    neon_f32_to_fp16x4(v, out + i);
+            }
+            for (; i < block_end; ++i) {
+                float v = code[A[i]] * scale;
+                if constexpr (std::is_same<T, bf16_t>::value)
+                    out[i] = float_to_bf16(v);
+                else if constexpr (std::is_same<T, fp16_t>::value)
+                    out[i] = float_to_fp16(v);
+                else
+                    out[i] = static_cast<T>(v);
+            }
+        }
+#else
 #ifdef _MSC_VER
 #pragma loop(ivdep)
 #endif
@@ -431,6 +479,7 @@ void dequantizeBlockwise8bitCpu(
                 out[i] = static_cast<T>(v);
             }
         }
+#endif
     }
 }
 
@@ -540,24 +589,19 @@ void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* ou
         float absmax_block = 0.0f;
 
 #if defined(_M_ARM64) || defined(__aarch64__)
-        if constexpr (std::is_same<T, float>::value) {
-            // Use NEON-optimized absmax for float32
-            absmax_block = neon_absmax_f32(reinterpret_cast<const float*>(A + block_start), block_len);
-        } else
-#endif
-        {
-            for (long long i = block_start; i < block_end; ++i) {
-                float val;
-                if constexpr (std::is_same<T, float>::value) {
-                    val = A[i];
-                } else if constexpr (std::is_same<T, bf16_t>::value) {
-                    val = bf16_to_float(A[i].v);
-                } else if constexpr (std::is_same<T, fp16_t>::value) {
-                    val = fp16_to_float(A[i].v);
-                }
-                absmax_block = std::max(absmax_block, std::fabs(val));
-            }
+        absmax_block = neon_absmax<T>(A + block_start, block_len);
+#else
+        for (long long i = block_start; i < block_end; ++i) {
+            float val;
+            if constexpr (std::is_same<T, float>::value)
+                val = A[i];
+            else if constexpr (std::is_same<T, bf16_t>::value)
+                val = bf16_to_float(A[i].v);
+            else
+                val = fp16_to_float(A[i].v);
+            absmax_block = std::max(absmax_block, std::fabs(val));
         }
+#endif
 
         absmax[b] = absmax_block;
 
@@ -571,41 +615,49 @@ void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* ou
         const float inv_absmax = 1.0f / absmax_block;
 
 #if defined(_M_ARM64) || defined(__aarch64__)
-        if constexpr (std::is_same<T, float>::value) {
-            // NEON-optimized normalize + LUT index for float32
-            const float* src = A + block_start;
+        {
             long long i = 0;
             float32x4_t vinv = vdupq_n_f32(inv_absmax);
             for (; i + 4 <= block_len; i += 4) {
-                float32x4_t v = vmulq_f32(vld1q_f32(src + i), vinv);
+                float32x4_t v;
+                if constexpr (std::is_same<T, float>::value)
+                    v = vld1q_f32(reinterpret_cast<const float*>(A + block_start + i));
+                else if constexpr (std::is_same<T, bf16_t>::value)
+                    v = neon_bf16x4_to_f32(A + block_start + i);
+                else
+                    v = neon_fp16x4_to_f32(A + block_start + i);
+                v = vmulq_f32(v, vinv);
                 uint16x4_t indices = neon_norm_to_lut_index_x4(v);
                 uint16_t idx_arr[4];
                 vst1_u16(idx_arr, indices);
-                out[block_start + i] = lut[idx_arr[0]];
+                out[block_start + i]     = lut[idx_arr[0]];
                 out[block_start + i + 1] = lut[idx_arr[1]];
                 out[block_start + i + 2] = lut[idx_arr[2]];
                 out[block_start + i + 3] = lut[idx_arr[3]];
             }
             for (; i < block_len; ++i) {
-                float normed_value = src[i] * inv_absmax;
-                out[block_start + i] = lut[norm_to_lut_index(normed_value)];
-            }
-        } else
-#endif
-        {
-            for (long long i = block_start; i < block_end; ++i) {
                 float val;
-                if constexpr (std::is_same<T, float>::value) {
-                    val = A[i];
-                } else if constexpr (std::is_same<T, bf16_t>::value) {
-                    val = bf16_to_float(A[i].v);
-                } else if constexpr (std::is_same<T, fp16_t>::value) {
-                    val = fp16_to_float(A[i].v);
-                }
-                float normed_value = val * inv_absmax;
-                out[i] = lut[norm_to_lut_index(normed_value)];
+                if constexpr (std::is_same<T, float>::value)
+                    val = A[block_start + i];
+                else if constexpr (std::is_same<T, bf16_t>::value)
+                    val = bf16_to_float(A[block_start + i].v);
+                else
+                    val = fp16_to_float(A[block_start + i].v);
+                out[block_start + i] = lut[norm_to_lut_index(val * inv_absmax)];
             }
         }
+#else
+        for (long long i = block_start; i < block_end; ++i) {
+            float val;
+            if constexpr (std::is_same<T, float>::value)
+                val = A[i];
+            else if constexpr (std::is_same<T, bf16_t>::value)
+                val = bf16_to_float(A[i].v);
+            else
+                val = fp16_to_float(A[i].v);
+            out[i] = lut[norm_to_lut_index(val * inv_absmax)];
+        }
+#endif
     }
 }
 
