@@ -111,7 +111,7 @@ static inline void
     // Multiply each index by 4 to get byte offset (max 15*4=60 < 64, safe)
     uint8x16_t base = vshlq_n_u8(indices, 2);
     // Expand each base offset to 4 consecutive bytes via zip
-    static const uint8x16_t off = {0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3};
+    const uint8x16_t off = vreinterpretq_u8_u32(vdupq_n_u32(0x03020100));
     uint8x8_t lo = vget_low_u8(base), hi = vget_high_u8(base);
     uint8x8x2_t z0 = vzip_u8(lo, lo);
     uint8x8x2_t z1 = vzip_u8(hi, hi);

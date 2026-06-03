@@ -32,7 +32,7 @@ template <typename T> inline int get_cache_blocks(int chunk_size) {
 }
 
 // forced unroll for perf critical path
-#if __has_attribute(always_inline)
+#if defined(__has_attribute) && __has_attribute(always_inline)
 #define ALWAYS_INLINE __attribute__((__always_inline__)) inline
 #else
 #define ALWAYS_INLINE inline
