@@ -293,8 +293,8 @@ void dequantizeBlockwise4bitCpu(
     if (n % blocksize == 0) {
         long long dim_0 = m;
         long long dim_1 = n;
-        long long input_dim_1 = (dim_1 + 1) >> 1; // ceil(dim_1/2): handles odd dim_1
-        long long absmax_dim_1 = (dim_1 + blocksize - 1) / blocksize;
+        long long input_dim_1 = dim_1 >> 1;
+        long long absmax_dim_1 = dim_1 / blocksize;
         float32x4_t lut[4];
         if constexpr (DATA_TYPE == 1) {
             neon_fp4_lut(lut);
@@ -304,8 +304,7 @@ void dequantizeBlockwise4bitCpu(
         constexpr long long k_step = 8; // 8 packed bytes = 16 output values
         BNB_OMP_PARALLEL_FOR
         for (long long block_idx = 0; block_idx < dim_0; ++block_idx) {
-            long long k = 0;
-            for (; k + k_step <= input_dim_1; k += k_step) {
+            for (long long k = 0; k < input_dim_1; k += k_step) {
                 long long scale_idx = k * 2 / blocksize;
                 float scale = absmax[block_idx * absmax_dim_1 + scale_idx];
                 const uint8_t* p = &A[block_idx * input_dim_1 + k];
@@ -324,28 +323,6 @@ void dequantizeBlockwise4bitCpu(
                     neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 4), pout + 4);
                     neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 8), pout + 8);
                     neon_f32_to_fp16x4(vld1q_f32(tmp_f32 + 12), pout + 12);
-                }
-            }
-            // Scalar remainder for dim_1 not divisible by 16, and last nibble when dim_1 is odd
-            for (; k < input_dim_1; ++k) {
-                long long out_base = block_idx * dim_1 + k * 2;
-                long long scale_idx = k * 2 / blocksize;
-                float scale = absmax[block_idx * absmax_dim_1 + scale_idx];
-                unsigned char byte = A[block_idx * input_dim_1 + k];
-                float v0 = (DATA_TYPE == 1 ? dDequantizeFP4(byte >> 4) : dDequantizeNF4(byte >> 4)) * scale;
-                float v1 = (DATA_TYPE == 1 ? dDequantizeFP4(byte & 0x0F) : dDequantizeNF4(byte & 0x0F)) * scale;
-                if constexpr (std::is_same<T, float>()) {
-                    out[out_base] = v0;
-                    if (k * 2 + 1 < dim_1)
-                        out[out_base + 1] = v1;
-                } else if constexpr (std::is_same<T, bf16_t>()) {
-                    out[out_base] = float_to_bf16(v0);
-                    if (k * 2 + 1 < dim_1)
-                        out[out_base + 1] = float_to_bf16(v1);
-                } else {
-                    out[out_base] = float_to_fp16(v0);
-                    if (k * 2 + 1 < dim_1)
-                        out[out_base + 1] = float_to_fp16(v1);
                 }
             }
         }
