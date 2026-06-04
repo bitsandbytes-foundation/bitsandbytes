@@ -275,10 +275,6 @@ class Test8BitBlockwiseQuantizeFunctional:
 
     @pytest.mark.parametrize("device", get_available_devices())
     def test_fp8_quant(self, device):
-        # TODO
-        if device == "cpu":
-            pytest.skip("CPU implementation segfaults")
-
         for e_bits in range(1, 7):
             p_bits = 7 - e_bits
             code = F.create_fp8_map(True, e_bits, p_bits).to(device)
