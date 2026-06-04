@@ -366,22 +366,16 @@ void dequantizeBlockwise4bitCpu(
             BNB_OMP_PARALLEL_FOR
             for (int block_idx = 0; block_idx < dim_0; ++block_idx) {
                 for (int k = 0; k < input_dim_1; k += k_step) {
-                    // Load 64 bits of nf4 data and a single scale data
-                    uint8_t* p = &A[block_idx * input_dim_1 + k];
-                    uint64_t packed;
-                    std::memcpy(&packed, p, sizeof(uint64_t));
+                    const uint8_t* p = &A[block_idx * input_dim_1 + k];
                     auto scale_idx = k * 2 / blocksize;
                     auto vscales = _mm512_set1_ps((float)absmax[block_idx * absmax_dim_1 + scale_idx]);
-                    // unpack nf4 data to 32-bit integers
-                    uint64_t high = 0;
-                    uint64_t low = 0;
-                    for (int i = 0; i < 4; ++i) {
-                        low |= ((packed >> (2 * i * 4)) & 0xf) << ((2 * i + 1) * 8);
-                        low |= ((packed >> ((2 * i + 1) * 4)) & 0xf) << (2 * i * 8);
-                        high |= ((packed >> (2 * i * 4 + 32)) & 0xf) << ((2 * i + 1) * 8);
-                        high |= ((packed >> ((2 * i + 1) * 4 + 32)) & 0xf) << (2 * i * 8);
-                    }
-                    __m128i packed_128 = _mm_set_epi64x(high, low);
+                    // Unpack 8 packed bytes into 16 nibble indices using SSE.
+                    // Each byte holds two 4-bit values; high nibble is the first output element.
+                    __m128i raw = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(p));
+                    __m128i mask4 = _mm_set1_epi8(0x0f);
+                    __m128i hi = _mm_and_si128(_mm_srli_epi16(raw, 4), mask4);
+                    __m128i lo = _mm_and_si128(raw, mask4);
+                    __m128i packed_128 = _mm_unpacklo_epi8(hi, lo);
                     __m512i vint32 = _mm512_cvtepu8_epi32(packed_128);
                     // Table look-up
                     __m512 vout = _mm512_permutexvar_ps(vint32, lut);

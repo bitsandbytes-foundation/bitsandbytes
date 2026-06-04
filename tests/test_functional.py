@@ -896,6 +896,30 @@ class TestQuantize4BitFunctional:
 
         dim_key = "le512" if dim <= 512 else "gt512"
         thresholds = gemv_thresholds[dtype][dim_key]
+
+        # On CPU with AVX512BF16, fp16/fp32 inputs are downcast to bf16 for the fused
+        # kernel for performance. Thresholds calibrated from 100 iterations on CPU.
+        cpu_bf16_cast = device == "cpu" and F.has_avx512bf16() and dtype in (torch.float16, torch.float32)
+        if cpu_bf16_cast:
+            thresholds = {
+                "le512": {
+                    "err1": (2.72e-4, 9.96e-5),
+                    "relerr1": (
+                        1.88e-3 if dtype == torch.float16 else 1.64e-3,
+                        1.27e-2 if dtype == torch.float16 else 3.61e-3,
+                    ),
+                    "maxerr1": (1.22e-3, 3.80e-4),
+                },
+                "gt512": {
+                    "err1": (1.00e-4, 3.48e-5),
+                    "relerr1": (
+                        6.92e-4 if dtype == torch.float16 else 6.31e-4,
+                        9.21e-4 if dtype == torch.float16 else 4.71e-4,
+                    ),
+                    "maxerr1": (5.16e-4, 1.68e-4),
+                },
+            }[dim_key]
+
         for metric_name, metric_val in [("err1", err1), ("relerr1", relerr1), ("maxerr1", maxerr1)]:
             mean_val, std_val = thresholds[metric_name]
             limit = mean_val + N_SIGMA * std_val
@@ -906,11 +930,12 @@ class TestQuantize4BitFunctional:
 
         # Ratios check that gemv_4bit and matmul_4bit produce consistent results.
         # These are tight bounds on internal consistency, not absolute accuracy.
-        if dtype == torch.float16:
+        # On CPU with AVX512BF16, fp16/fp32 use bf16 arithmetic so get bf16-level bounds.
+        if dtype == torch.float16 and not cpu_bf16_cast:
             assert absratio < 1.005 and absratio > 0.995
             assert relratio < 1.005 and relratio > 0.992
             assert maxratio < 1.005 and maxratio > 0.992
-        elif dtype == torch.float32:
+        elif dtype == torch.float32 and not cpu_bf16_cast:
             assert absratio < 1.005 and absratio > 0.995
             assert relratio < 1.005 and relratio > 0.995
             assert maxratio < 1.005 and maxratio > 0.995
@@ -918,6 +943,10 @@ class TestQuantize4BitFunctional:
             assert absratio < 1.005 and absratio > 0.995
             assert relratio < 1.05 and relratio > 0.96
             assert maxratio < 1.05 and maxratio > 0.97
+        elif cpu_bf16_cast:
+            assert absratio < 1.02 and absratio > 0.98
+            assert relratio < 1.1 and relratio > 0.90
+            assert maxratio < 1.1 and maxratio > 0.90
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("storage_type", ["nf4", "fp4"], ids=["nf4", "fp4"])
