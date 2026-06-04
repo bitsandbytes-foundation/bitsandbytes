@@ -221,9 +221,6 @@ def test_params4bit_torch_chunk_split(device, quant_type):
     if device == "hpu" and not is_supported_on_hpu(quant_type, torch.float16, torch.uint8):
         pytest.skip("This configuration is not supported on HPU.")
 
-    if device == "cpu":
-        pytest.skip("CPU quantization causes segfault, skipping CPU test")
-
     original_tensor = torch.randn(8, 4, dtype=torch.float16, device="cpu")
 
     params4bit = bnb.nn.Params4bit(data=original_tensor, quant_type=quant_type, requires_grad=False)
