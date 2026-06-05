@@ -355,36 +355,50 @@ set_source_files_properties(${CPP_FILES} PROPERTIES LANGUAGE CXX)
 add_library(bitsandbytes SHARED ${SRC_FILES})
 target_compile_features(bitsandbytes PUBLIC cxx_std_17)
 target_include_directories(bitsandbytes PUBLIC csrc)
+set_target_properties(bitsandbytes PROPERTIES VISIBILITY_INLINES_HIDDEN ON)
 
 if (BUILD_CPU)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT ipo_supported OUTPUT ipo_output)
+    if (ipo_supported)
+        set_property(TARGET bitsandbytes PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
+
     if (OpenMP_CXX_FOUND)
         target_link_libraries(bitsandbytes PRIVATE OpenMP::OpenMP_CXX)
         add_definitions(-DHAS_OPENMP)
     endif()
 
-    if ((HOST_ARCH MATCHES "x86_64|amd64") AND (NOT MSVC))
-        include(CheckCXXCompilerFlag)
-        check_cxx_compiler_flag(-mavx512f HAS_AVX512F_FLAG)
-        check_cxx_compiler_flag(-mavx512bf16 HAS_AVX512BF16_FLAG)
-        if (HAS_AVX512F_FLAG)
-            target_compile_options(bitsandbytes PRIVATE -mavx512f)
-            target_compile_options(bitsandbytes PRIVATE -mavx512dq)
-            target_compile_options(bitsandbytes PRIVATE -mavx512bw)
-            target_compile_options(bitsandbytes PRIVATE -mavx512vl)
+    if (NOT MSVC)
+        target_compile_options(bitsandbytes PRIVATE -fno-semantic-interposition)
+
+        if (HOST_ARCH MATCHES "x86_64|amd64")
+            include(CheckCXXCompilerFlag)
+            check_cxx_compiler_flag(-mavx512f HAS_AVX512F_FLAG)
+            check_cxx_compiler_flag(-mavx512bf16 HAS_AVX512BF16_FLAG)
+            if (HAS_AVX512F_FLAG)
+                target_compile_options(
+                    bitsandbytes PRIVATE
+                    -mavx512f
+                    -mavx512dw
+                    -mavx512bw
+                    -mavx512vl
+                )
+            endif()
+            if (HAS_AVX512BF16_FLAG)
+                target_compile_options(bitsandbytes PRIVATE -mavx512bf16)
+            endif()
+            target_compile_options(
+                bitsandbytes PRIVATE
+                -mprefer-vector-width=256
+                -mfma
+                -mavx2
+                -mf16c
+                -mlzcnt
+                -mbmi
+                -mbmi2
+            )
         endif()
-        if (HAS_AVX512BF16_FLAG)
-            target_compile_options(bitsandbytes PRIVATE -mavx512bf16)
-        endif()
-        target_compile_options(
-            bitsandbytes PRIVATE
-            -mprefer-vector-width=256
-            -mfma
-            -mavx2
-            -mf16c
-            -mlzcnt
-            -mbmi
-            -mbmi2
-        )
     endif()
 endif()
 
