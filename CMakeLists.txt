@@ -380,8 +380,8 @@ if (BUILD_CPU)
                 target_compile_options(
                     bitsandbytes PRIVATE
                     -mavx512f
-                    -mavx512dw
                     -mavx512bw
+                    -mavx512dq
                     -mavx512vl
                 )
             endif()
