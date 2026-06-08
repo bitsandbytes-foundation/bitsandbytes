@@ -473,6 +473,7 @@ void dequantizeBlockwise8bitCpu(
 #ifdef _MSC_VER
 #pragma loop(ivdep)
 #endif
+#pragma omp simd
         for (long long i = block_idx; i < block_end; ++i) {
             float v = code[A[i]] * scale;
             if constexpr (std::is_same<T, bf16_t>::value) {
@@ -595,6 +596,7 @@ void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* ou
 #if defined(_M_ARM64) || defined(__aarch64__)
         absmax_block = neon_absmax<T>(A + block_start, block_len);
 #else
+#pragma omp simd reduction(max:absmax_block)
         for (long long i = block_start; i < block_end; ++i) {
             float val;
             if constexpr (std::is_same<T, float>::value)
