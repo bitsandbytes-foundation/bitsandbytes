@@ -104,7 +104,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td></td>
       <td>✅</td>
       <td>✅</td>
-      <td>❌</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
@@ -157,6 +157,14 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>✅</td>
     </tr>
     <tr>
+      <td align="right">arm64</td>
+      <td>◻️ CPU</td>
+      <td></td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
+    </tr>
+    <tr>
       <td colspan="6">🍎 <strong>macOS 14+</strong></td>
     </tr>
     <tr>
@@ -165,7 +173,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>Apple M1+</td>
       <td>✅</td>
       <td>✅</td>
-      <td>❌</td>
+      <td>✅</td>
     </tr>
     <tr>
       <td></td>
@@ -173,7 +181,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>Apple M1+</td>
       <td>🐢</td>
       <td>🐢</td>
-      <td>❌</td>
+      <td>🚧</td>
   </tbody>
 </table>
 
