@@ -370,7 +370,9 @@ if (BUILD_CPU)
     endif()
 
     if (NOT MSVC)
-        target_compile_options(bitsandbytes PRIVATE -fno-semantic-interposition)
+        if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            target_compile_options(bitsandbytes PRIVATE -fno-semantic-interposition)
+        endif()
 
         if (HOST_ARCH MATCHES "x86_64|amd64")
             include(CheckCXXCompilerFlag)
