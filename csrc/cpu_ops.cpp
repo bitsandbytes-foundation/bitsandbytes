@@ -470,9 +470,6 @@ void dequantizeBlockwise8bitCpu(
             }
         }
 #else
-#ifdef _MSC_VER
-#pragma loop(ivdep)
-#endif
 #pragma omp simd
         for (long long i = block_idx; i < block_end; ++i) {
             float v = code[A[i]] * scale;
