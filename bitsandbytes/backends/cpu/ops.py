@@ -149,9 +149,13 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         shape_fallback = shape[-1] % 2 != 0
 
         if avx512_fallback or shape_fallback:
-            from ..default.ops import _dequantize_4bit_impl
+            from ..default.ops import _dequantize_4bit_compute
+            from ..utils import _get_4bit_code
 
-            return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
+            if A.dtype != torch.uint8:
+                A = A.view(torch.uint8)
+            code = _get_4bit_code(quant_type, A.device)
+            return _dequantize_4bit_compute(A.reshape(-1), absmax, code, blocksize, shape, dtype)
 
         # Enable non uint8 dtype
         if A.dtype != torch.uint8:
