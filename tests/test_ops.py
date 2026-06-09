@@ -118,7 +118,6 @@ class TestInt8BlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("blocksize", [64, 128, 256, 512])
     def test_dequantize_blockwise(self, device, dtype, blocksize):
-
         A = torch.randint(0, 255, (1024, 1024), dtype=torch.uint8, device=device)
         code = bitsandbytes.functional.create_dynamic_map().to(device, dtype=torch.float32)
 

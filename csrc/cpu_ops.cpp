@@ -593,7 +593,7 @@ void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* ou
 #if defined(_M_ARM64) || defined(__aarch64__)
         absmax_block = neon_absmax<T>(A + block_start, block_len);
 #else
-#pragma omp simd reduction(max:absmax_block)
+#pragma omp simd reduction(max : absmax_block)
         for (long long i = block_start; i < block_end; ++i) {
             float val;
             if constexpr (std::is_same<T, float>::value)

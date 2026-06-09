@@ -24,7 +24,6 @@ def assert_most_approx_close(a, b, rtol=1e-3, atol=1e-3, max_error_count=0):
         torch.testing.assert_close(a, b, rtol=rtol, atol=atol)
 
 
-
 str2optimizers = {}
 
 ## TODO: maybe remove these three.
