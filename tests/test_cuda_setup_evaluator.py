@@ -1,6 +1,11 @@
 import pytest
 
-from bitsandbytes.cextension import BNB_BACKEND, get_cuda_bnb_library_path
+from bitsandbytes.cextension import (
+    BNB_BACKEND,
+    _format_env_clear_instruction,
+    _format_env_set_instruction,
+    get_cuda_bnb_library_path,
+)
 from bitsandbytes.cuda_specs import CUDASpecs
 
 
@@ -12,6 +17,32 @@ def cuda120_spec() -> CUDASpecs:
         highest_compute_capability=(8, 6),
         cuda_version_tuple=(12, 0),
     )
+
+
+def test_format_env_set_instruction_windows(monkeypatch):
+    monkeypatch.setattr("bitsandbytes.cextension.platform.system", lambda: "Windows")
+    assert _format_env_set_instruction("BNB_CUDA_VERSION", "<version>") == (
+        "Set it in PowerShell with `$env:BNB_CUDA_VERSION='<version>'` or in Command Prompt with"
+        " `set BNB_CUDA_VERSION=<version>`."
+    )
+
+
+def test_format_env_clear_instruction_windows(monkeypatch):
+    monkeypatch.setattr("bitsandbytes.cextension.platform.system", lambda: "Windows")
+    assert _format_env_clear_instruction("BNB_CUDA_VERSION") == (
+        "Clear it in PowerShell with `Remove-Item Env:BNB_CUDA_VERSION` or in Command Prompt with"
+        " `set BNB_CUDA_VERSION=`."
+    )
+
+
+def test_format_env_set_instruction_unix(monkeypatch):
+    monkeypatch.setattr("bitsandbytes.cextension.platform.system", lambda: "Linux")
+    assert _format_env_set_instruction("BNB_CUDA_VERSION", "<version>") == "Set it with `export BNB_CUDA_VERSION=<version>`."
+
+
+def test_format_env_clear_instruction_unix(monkeypatch):
+    monkeypatch.setattr("bitsandbytes.cextension.platform.system", lambda: "Linux")
+    assert _format_env_clear_instruction("BNB_CUDA_VERSION") == "Clear it with `unset BNB_CUDA_VERSION`."
 
 
 @pytest.mark.skipif(BNB_BACKEND != "CUDA", reason="this test requires a CUDA backend")

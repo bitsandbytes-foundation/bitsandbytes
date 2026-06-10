@@ -2,6 +2,7 @@ import ctypes as ct
 import functools
 import logging
 import os
+import platform
 from pathlib import Path
 import re
 from typing import Optional
@@ -17,6 +18,26 @@ from bitsandbytes.cuda_specs import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _format_env_set_instruction(var_name: str, value: str) -> str:
+    if platform.system() == "Windows":
+        return (
+            f"Set it in PowerShell with `$env:{var_name}='{value}'` or in Command Prompt with"
+            f" `set {var_name}={value}`."
+        )
+
+    return f"Set it with `export {var_name}={value}`."
+
+
+def _format_env_clear_instruction(var_name: str) -> str:
+    if platform.system() == "Windows":
+        return (
+            f"Clear it in PowerShell with `Remove-Item Env:{var_name}` or in Command Prompt with"
+            f" `set {var_name}=`."
+        )
+
+    return f"Clear it with `unset {var_name}`."
 
 
 def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
@@ -38,38 +59,38 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
             if not rocm_override_value:
                 raise RuntimeError(
                     f"BNB_CUDA_VERSION={cuda_override_value} detected but this is not a CUDA build!\n"
-                    "Use BNB_ROCM_VERSION instead: export BNB_ROCM_VERSION=<version>\n"
-                    "Clear the variable and retry: unset BNB_CUDA_VERSION\n"
+                    f"Use BNB_ROCM_VERSION instead. {_format_env_set_instruction('BNB_ROCM_VERSION', '<version>')}\n"
+                    f"{_format_env_clear_instruction('BNB_CUDA_VERSION')}\n"
                 )
             logger.warning(
                 f"WARNING: BNB_CUDA_VERSION={cuda_override_value} is set but ignored on this ROCm build. "
-                "Clear the variable: unset BNB_CUDA_VERSION",
+                f"{_format_env_clear_instruction('BNB_CUDA_VERSION')}",
             )
         if rocm_override_value:
             library_name = re.sub(r"rocm\d+", f"rocm{rocm_override_value}", library_name, count=1)
             logger.warning(
                 f"WARNING: BNB_ROCM_VERSION={rocm_override_value} environment variable detected; loading {library_name}.\n"
                 "This can be used to load a bitsandbytes version built with a ROCm version that is different from the PyTorch ROCm version.\n"
-                "If this was unintended clear the variable and retry: unset BNB_ROCM_VERSION\n",
+                f"If this was unintended, {_format_env_clear_instruction('BNB_ROCM_VERSION')}\n",
             )
     elif torch.version.cuda:
         if rocm_override_value:
             if not cuda_override_value:
                 raise RuntimeError(
                     f"BNB_ROCM_VERSION={rocm_override_value} detected but this is not a ROCm build!\n"
-                    "Use BNB_CUDA_VERSION instead: export BNB_CUDA_VERSION=<version>\n"
-                    "Clear the variable and retry: unset BNB_ROCM_VERSION\n"
+                    f"Use BNB_CUDA_VERSION instead. {_format_env_set_instruction('BNB_CUDA_VERSION', '<version>')}\n"
+                    f"{_format_env_clear_instruction('BNB_ROCM_VERSION')}\n"
                 )
             logger.warning(
                 f"WARNING: BNB_ROCM_VERSION={rocm_override_value} is set but ignored on this CUDA build. "
-                "Clear the variable: unset BNB_ROCM_VERSION",
+                f"{_format_env_clear_instruction('BNB_ROCM_VERSION')}",
             )
         if cuda_override_value:
             library_name = re.sub(r"cuda\d+", f"cuda{cuda_override_value}", library_name, count=1)
             logger.warning(
                 f"WARNING: BNB_CUDA_VERSION={cuda_override_value} environment variable detected; loading {library_name}.\n"
                 "This can be used to load a bitsandbytes version built with a CUDA version that is different from the PyTorch CUDA version.\n"
-                "If this was unintended clear the variable and retry: unset BNB_CUDA_VERSION\n",
+                f"If this was unintended, {_format_env_clear_instruction('BNB_CUDA_VERSION')}\n",
             )
     else:
         if rocm_override_value or cuda_override_value:
