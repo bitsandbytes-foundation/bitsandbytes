@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 import pytest
+import torch
 
 from bitsandbytes.cextension import BNB_BACKEND, get_cuda_bnb_library_path
-from bitsandbytes.cuda_specs import CUDASpecs
+from bitsandbytes.cuda_specs import CUDASpecs, get_rocm_gpu_arch
 
 
 @pytest.fixture
@@ -96,3 +99,21 @@ def test_get_rocm_bnb_library_path_rejects_cuda_override(monkeypatch, rocm70_spe
     monkeypatch.setenv("BNB_CUDA_VERSION", "110")
     with pytest.raises(RuntimeError, match=r"BNB_CUDA_VERSION.*not a CUDA build"):
         get_cuda_bnb_library_path(rocm70_spec)
+
+
+def test_get_rocm_gpu_arch_from_torch(monkeypatch):
+    """With a visible GPU, the architecture comes from torch device properties, without a subprocess."""
+    monkeypatch.setattr(torch.version, "hip", "7.0.0")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(
+        torch.cuda,
+        "get_device_properties",
+        lambda device: SimpleNamespace(gcnArchName="gfx90a:sramecc+:xnack-"),
+    )
+    assert get_rocm_gpu_arch() == "gfx90a"
+
+
+def test_get_rocm_gpu_arch_non_rocm(monkeypatch):
+    """On non-ROCm builds, no detection is attempted."""
+    monkeypatch.setattr(torch.version, "hip", None)
+    assert get_rocm_gpu_arch() == "unknown"
