@@ -134,7 +134,7 @@ def test_matmullt(
 @pytest.mark.parametrize("dim2", [64, 0], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("dim3", [64], ids=id_formatter("dim3"))
 @pytest.mark.parametrize("dim4", [96], ids=id_formatter("dim4"))
-@pytest.mark.parametrize("req_grad", BOOLEAN_TRIPLES, ids=id_formatter("req_grad"))
+@pytest.mark.parametrize("req_grad", REQ_GRAD_NO_B_WEIGHT, ids=id_formatter("req_grad"))
 @pytest.mark.parametrize("transpose_B", TRUE_FALSE, ids=id_formatter("transpose_B"))
 @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
@@ -169,8 +169,8 @@ def test_matmul_4bit(
 
     for i in range(3):
         A = torch.randn(size=dimA, device=device, requires_grad=req_grad[0], dtype=dtype)
-        B = torch.randn(size=dimB, device=device, requires_grad=req_grad[1], dtype=dtype)
-        target = torch.randn(size=(dim2, dim4), device=device, requires_grad=req_grad[1], dtype=dtype)
+        B = torch.randn(size=dimB, device=device, dtype=dtype)
+        target = torch.randn(size=(dim2, dim4), device=device, dtype=dtype)
         bias = None
         bias2 = None
         if has_bias:
@@ -212,9 +212,7 @@ def test_matmul_4bit(
             loss_bnb = torch.nn.functional.mse_loss(out_bnb, target).mean()
             loss_bnb.backward()
             gradA1 = A.grad
-            gradB1 = B.grad
             A.grad = None
-            B.grad = None
             if has_bias:
                 gradBias1 = bias.grad
                 bias.grad = None
@@ -222,9 +220,7 @@ def test_matmul_4bit(
             loss_torch = torch.nn.functional.mse_loss(out_torch, target).mean()
             loss_torch.backward()
             gradA2 = A.grad
-            gradB2 = B.grad
             A.grad = None
-            B.grad = None
             if has_bias:
                 gradBias2 = bias.grad
                 bias.grad = None

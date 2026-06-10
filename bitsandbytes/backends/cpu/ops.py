@@ -20,8 +20,10 @@ _has_avx512 = torch.backends.cpu.get_cpu_capability() == "AVX512"
 # However, we can overflow if we use this without AVX512_VNNI support.
 # This is fixed in torch 2.6+, so we set this as the minimum to be safe.
 # For more information: https://github.com/pytorch/pytorch/pull/136942
-# TODO(matthewdouglas): aarch64?
-if torch.__version__ >= (2, 6):
+#
+# Without AVX-512 (including aarch64), torch._int_mm uses a scalar fallback
+# that is much slower than fp32 matmul. Only use it when AVX-512 is available.
+if torch.__version__ >= (2, 6) and _has_avx512:
 
     @register_kernel("bitsandbytes::int8_linear_matmul", "cpu")
     def _(A: torch.Tensor, B: torch.Tensor):
