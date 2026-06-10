@@ -304,7 +304,10 @@ jobs:
 
       - name: Delete old pre-release (if exists)
         run: |
-          cd repo && gh release delete continuous-release_main --cleanup-tag -y
+          cd repo
+          if gh release view continuous-release_main &>/dev/null; then
+            gh release delete continuous-release_main --cleanup-tag -y
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
