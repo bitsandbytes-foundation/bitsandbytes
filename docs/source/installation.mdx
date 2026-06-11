@@ -29,6 +29,9 @@ These are the minimum requirements for `bitsandbytes` across all platforms. Plea
 * Python >= 3.10
 * PyTorch >= 2.4
 
+> [!NOTE]
+> Windows ARM64 requires Python >= 3.12, as earlier Python versions do not provide official ARM64 Windows builds.
+
 ## NVIDIA CUDA[[cuda]]
 
 `bitsandbytes` is currently supported on NVIDIA GPUs with [Compute Capability](https://developer.nvidia.com/cuda-gpus) 6.0+.
@@ -178,6 +181,7 @@ The currently distributed `bitsandbytes` packages are built with the following c
 | **Linux x86-64**   | GCC 11.4             | AVX2                 |
 | **Linux aarch64**  | GCC 11.4             |                      |
 | **Windows x86-64** | MSVC 19.43+ (VS2022) | AVX2                 |
+| **Windows arm64**  | MSVC 19.43+ (VS2022) | ARM NEON             |
 | **macOS arm64**    | Apple Clang 17       |                      |
 
 The Linux build has a minimum glibc version of 2.24.
@@ -192,10 +196,37 @@ pip install bitsandbytes
 
 To compile from source, simply install the package from source using `pip`. The package will be built for CPU only at this time.
 
+<hfoptions id="cpu-source">
+<hfoption id="Linux / macOS">
+
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 pip install -e .
 ```
+
+</hfoption>
+<hfoption id="Windows (x86-64)">
+
+```bash
+git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
+pip install -e .
+```
+
+</hfoption>
+<hfoption id="Windows (ARM64)">
+
+Requires Visual Studio 2022 with the **ARM64 C++ build tools** component, Python >= **3.12**, and PyTorch >= **2.12**.
+
+```bash
+git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
+pip install -e .
+```
+
+> [!NOTE]
+> The build system will detect the ARM64 architecture automatically via CMake. Only the CPU backend is supported on Windows ARM64 at this time (no CUDA).
+
+</hfoption>
+</hfoptions>
 
 ## AMD ROCm (Preview)[[rocm]]
 
@@ -300,11 +331,19 @@ pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsand
 ```
 
 </hfoption>
-<hfoption id="Windows">
+<hfoption id="Windows (x86-64)">
 
 ```bash
 # Note: if you don't want to reinstall our dependencies, append the `--no-deps` flag!
 pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-win_amd64.whl
+```
+</hfoption>
+<hfoption id="Windows (ARM64)">
+
+```bash
+# Note: if you don't want to reinstall our dependencies, append the `--no-deps` flag!
+# Requires Python >= 3.12
+pip install --force-reinstall https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-win_arm64.whl
 ```
 </hfoption>
 <hfoption id="macOS">

@@ -20,8 +20,10 @@ _has_avx512 = torch.backends.cpu.get_cpu_capability() == "AVX512"
 # However, we can overflow if we use this without AVX512_VNNI support.
 # This is fixed in torch 2.6+, so we set this as the minimum to be safe.
 # For more information: https://github.com/pytorch/pytorch/pull/136942
-# TODO(matthewdouglas): aarch64?
-if torch.__version__ >= (2, 6):
+#
+# Without AVX-512 (including aarch64), torch._int_mm uses a scalar fallback
+# that is much slower than fp32 matmul. Only use it when AVX-512 is available.
+if torch.__version__ >= (2, 6) and _has_avx512:
 
     @register_kernel("bitsandbytes::int8_linear_matmul", "cpu")
     def _(A: torch.Tensor, B: torch.Tensor):
@@ -149,9 +151,13 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         shape_fallback = shape[-1] % 2 != 0
 
         if avx512_fallback or shape_fallback:
-            from ..default.ops import _dequantize_4bit_impl
+            from ..default.ops import _dequantize_4bit_compute
+            from ..utils import _get_4bit_code
 
-            return _dequantize_4bit_impl(A, absmax, blocksize, quant_type, shape, dtype)
+            if A.dtype != torch.uint8:
+                A = A.view(torch.uint8)
+            code = _get_4bit_code(quant_type, A.device)
+            return _dequantize_4bit_compute(A.reshape(-1), absmax, code, blocksize, shape, dtype)
 
         # Enable non uint8 dtype
         if A.dtype != torch.uint8:

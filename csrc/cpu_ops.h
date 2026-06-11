@@ -13,6 +13,10 @@
 #include <omp.h>
 #endif
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
+
 // amx-bf16
 #define TILE_M 16
 #define TILE_N 16
@@ -32,7 +36,7 @@ template <typename T> inline int get_cache_blocks(int chunk_size) {
 }
 
 // forced unroll for perf critical path
-#if __has_attribute(always_inline)
+#if defined(__has_attribute) && __has_attribute(always_inline)
 #define ALWAYS_INLINE __attribute__((__always_inline__)) inline
 #else
 #define ALWAYS_INLINE inline
@@ -147,6 +151,12 @@ static float bf16_to_float(uint16_t bf16) {
 }
 
 static inline fp16_t float_to_fp16(float x) {
+#if defined(__AVX2__)
+    // F16C is guaranteed on all AVX2 CPUs; matches CUDA round-to-nearest-even behavior
+    return fp16_t{
+        (uint16_t)_mm_extract_epi16(_mm_cvtps_ph(_mm_set_ss(x), _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC), 0)
+    };
+#else
     uint32_t bits;
     std::memcpy(&bits, &x, 4);
     uint32_t sign = (bits >> 31) & 0x1;
@@ -186,9 +196,13 @@ static inline fp16_t float_to_fp16(float x) {
         h = (sign << 15) | ((uint16_t)exp_h << 10) | ((uint16_t)(mant_rounded >> 13));
     }
     return fp16_t{h};
+#endif
 }
 
 static inline float fp16_to_float(uint16_t h) {
+#if defined(__AVX2__)
+    return _mm_cvtss_f32(_mm_cvtph_ps(_mm_cvtsi32_si128(h)));
+#else
     uint32_t sign = (h >> 15) & 0x1;
     uint32_t exp = (h >> 10) & 0x1F;
     uint32_t mant = h & 0x3FF;
@@ -216,6 +230,7 @@ static inline float fp16_to_float(uint16_t h) {
     float f;
     std::memcpy(&f, &bits, sizeof(f));
     return f;
+#endif
 }
 
 inline float dDequantizeFP4(unsigned char val) {
