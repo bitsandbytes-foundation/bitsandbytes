@@ -333,6 +333,50 @@ class Test4bitBlockwiseQuantOps:
                 kwargs={"bias": bias},
             )
 
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
+    @pytest.mark.parametrize("offset_dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
+    def test_gemm_4bit_non_float32_offset(self, device, dtype, offset_dtype):
+        """Regression test: offset tensors not in float32 must still produce correct results.
+
+        Pre-quantized models (e.g. Unsloth bnb-4bit) may store qs.offset in non-float32 dtype.
+        """
+        N, K, blocksize = 64, 64, 64
+        A = torch.randn(4, K, dtype=dtype, device=device)
+        B = torch.randn(N, K, dtype=dtype, device=device)
+        B_q, qs = bitsandbytes.functional.quantize_4bit(
+            B, blocksize=blocksize, quant_type="nf4", compress_statistics=True
+        )
+
+        # Simulate a pre-quantized model where offset may not be float32.
+        offset_non_f32 = qs.offset.to(dtype=offset_dtype)
+
+        # Reference: explicitly use the rounded float32 value.
+        offset_as_f32 = offset_non_f32.to(dtype=torch.float32)
+        ref = torch.ops.bitsandbytes.gemm_4bit.default(
+            A,
+            B_q,
+            list(B.shape),
+            qs.state2.absmax,
+            blocksize,
+            "nf4",
+            absmax_8bit=qs.absmax,
+            absmax_code=qs.state2.code,
+            absmax_offset=offset_as_f32,
+        )
+        out = torch.ops.bitsandbytes.gemm_4bit.default(
+            A,
+            B_q,
+            list(B.shape),
+            qs.state2.absmax,
+            blocksize,
+            "nf4",
+            absmax_8bit=qs.absmax,
+            absmax_code=qs.state2.code,
+            absmax_offset=offset_non_f32,
+        )
+        torch.testing.assert_close(out, ref)
+
 
 class TestNonContiguousInputs:
     """Regression tests for #1342 and #1690: quantization must handle non-contiguous tensors correctly."""

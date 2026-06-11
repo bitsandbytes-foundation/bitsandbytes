@@ -867,6 +867,9 @@ if torch.version.hip is None:
         else:
             raise RuntimeError(f"unsupported dtype {A.dtype}")
 
+        # Offset is expected to be a float32 tensor.
+        absmax_offset_f32 = absmax_offset.to(dtype=torch.float32) if absmax_offset is not None else None
+
         with _cuda_device_of(A):
             fn(
                 A.data_ptr(),
@@ -874,7 +877,7 @@ if torch.version.hip is None:
                 absmax.data_ptr(),
                 absmax_8bit.data_ptr() if absmax_8bit is not None else None,
                 absmax_code.data_ptr() if absmax_code is not None else None,
-                absmax_offset.data_ptr() if absmax_offset is not None else None,
+                absmax_offset_f32.data_ptr() if absmax_offset_f32 is not None else None,
                 out.data_ptr(),
                 bias.data_ptr() if bias is not None else None,
                 M,
