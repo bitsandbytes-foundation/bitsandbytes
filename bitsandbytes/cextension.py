@@ -2,8 +2,8 @@ import ctypes as ct
 import functools
 import logging
 import os
-import platform
 from pathlib import Path
+import platform
 import re
 from typing import Optional
 
