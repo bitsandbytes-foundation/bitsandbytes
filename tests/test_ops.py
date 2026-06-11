@@ -337,10 +337,7 @@ class Test4bitBlockwiseQuantOps:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("offset_dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
     def test_gemm_4bit_non_float32_offset(self, device, dtype, offset_dtype):
-        """Regression test: offset tensors not in float32 must still produce correct results.
-
-        Pre-quantized models (e.g. Unsloth bnb-4bit) may store qs.offset in non-float32 dtype.
-        """
+        """Regression test: offset tensors not in float32 must still produce correct results."""
         N, K, blocksize = 64, 64, 64
         A = torch.randn(4, K, dtype=dtype, device=device)
         B = torch.randn(N, K, dtype=dtype, device=device)
