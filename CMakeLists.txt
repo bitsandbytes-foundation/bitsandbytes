@@ -136,21 +136,14 @@ if(BUILD_CUDA)
     # NVCC normally will only work with MSVC up to 1939. VS2022 17.10+ starts using versions 1940+.
     # Workaround: use --allow-unsupported-compiler
     # This needs to be added *before* we try to enable the CUDA language so CMake's compiler check passes.
-
     if(MSVC AND MSVC_VERSION VERSION_GREATER_EQUAL 1940)
         string(APPEND CMAKE_CUDA_FLAGS " --allow-unsupported-compiler")
 
         # Suppress MSVC STL version mismatch errors when using a newer compiler than CUDA officially supports.
+        # This is needed to build with VS2022 17.11+ and CUDA < 12.4.
         if (MSVC_VERSION VERSION_GREATER_EQUAL 1941)
             string(APPEND CMAKE_CUDA_FLAGS " -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
         endif()
-
-        # VS2026 (MSVC 1950+): may need _ENABLE_EXTENDED_ALIGNED_STORAGE if CUDA headers
-        # use aligned_storage with extended alignment. This is independent of C++ standard.
-        # Commented out to verify if CMAKE_CUDA_STANDARD 17 alone is sufficient.
-        # if (MSVC_VERSION VERSION_GREATER_EQUAL 1950)
-        #     string(APPEND CMAKE_CUDA_FLAGS " -D_ENABLE_EXTENDED_ALIGNED_STORAGE")
-        # endif()
     endif()
 
     enable_language(CUDA) # This will fail if CUDA is not found
