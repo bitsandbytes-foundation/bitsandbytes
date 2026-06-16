@@ -24,8 +24,6 @@ if [ "${RUNNER_OS}" == "Linux" ]; then
 else
     bnb_rocm_arch="gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1200;gfx1201"
 
-    pip install ninja cmake==3.31.6
-
     # Install ROCm SDK wheels from repo.radeon.com.
     rocm_base_url="https://repo.radeon.com/rocm/windows/rocm-rel-${ROCM_VERSION}"
     pip install \
