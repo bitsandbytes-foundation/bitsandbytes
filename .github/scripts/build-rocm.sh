@@ -35,15 +35,15 @@ else
     # Expand the devel tarball
     rocm-sdk init
 
-    ROCM_PATH="$(rocm-sdk path --root)"
-    export ROCM_PATH
-    export PATH="${ROCM_PATH}/bin:${PATH}"
+    ROCM_PATH="$(rocm-sdk path --root | tr '\\' '/')"
+    export ROCM_PATH PATH="${ROCM_PATH}/bin:${PATH}"
 
     cmake -G Ninja \
         -DCOMPUTE_BACKEND=hip \
         -DBNB_ROCM_ARCH="${bnb_rocm_arch}" \
         -DCMAKE_BUILD_TYPE=MinSizeRel \
         -DCMAKE_HIP_FLAGS="--offload-compress" \
+        -DCMAKE_HIP_COMPILER_ROCM_ROOT="${ROCM_PATH}" \
         -S .
     cmake --build .
 fi
