@@ -159,6 +159,8 @@ jobs:
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
         uses: ilammy/msvc-dev-cmd@v1.13.0
+        with:
+          toolset: "14.44"
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
         env:
