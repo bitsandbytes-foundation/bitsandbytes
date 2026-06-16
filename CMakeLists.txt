@@ -145,9 +145,6 @@ if(BUILD_CUDA)
             string(APPEND CMAKE_CUDA_FLAGS " -D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH")
         endif()
 
-        if (MSVC_VERSION VERSION_GREATER_EQUAL 1950)
-            string(APPEND CMAKE_CUDA_FLAGS " -D_ENABLE_EXTENDED_ALIGNED_STORAGE")
-        endif()
     endif()
 
     enable_language(CUDA) # This will fail if CUDA is not found

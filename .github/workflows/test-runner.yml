@@ -43,6 +43,7 @@ jobs:
         inputs.platform == 'linux-aarch64' && 'ubuntu-22.04-arm' ||
         inputs.platform == 'macos' && 'macos-15' ||
         inputs.platform == 'windows-arm64' && 'windows-11-arm' ||
+        (inputs.platform == 'windows' && inputs.backend == 'cuda') && 'windows-2022' ||
         'windows-2025'
       }}
     outputs:
@@ -140,11 +141,6 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Set build environment variables
-        shell: bash
-        run: |
-          echo "build_os=${{ steps.config.outputs.build_os }}" >> $GITHUB_ENV
-          echo "build_arch=${{ steps.config.outputs.arch }}" >> $GITHUB_ENV
 
       # Windows + CUDA: Install CUDA Toolkit
       - name: Install CUDA Toolkit
@@ -173,14 +169,14 @@ jobs:
         if: inputs.backend == 'cuda'
         run: bash .github/scripts/build-cuda.sh
         env:
-          cuda_version: ${{ inputs.cuda_version }}
-          cuda_targets: "75;80;89"
+          CUDA_VERSION: ${{ inputs.cuda_version }}
+          CUDA_TARGETS: "75;80;89"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.config.outputs.artifact_name }}
-          path: output/${{ steps.config.outputs.build_os }}/${{ steps.config.outputs.arch }}/*
+          path: output/${{ runner.os }}/${{ runner.arch }}/*
           retention-days: 7
 
   test:

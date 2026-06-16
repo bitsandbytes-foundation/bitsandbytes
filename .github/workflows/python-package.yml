@@ -52,13 +52,10 @@ jobs:
           arch: ${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}
       - name: Build C++
         run: bash .github/scripts/build-cpu.sh
-        env:
-          build_os: ${{ matrix.os }}
-          build_arch: ${{ matrix.arch }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shared_library_${{ matrix.os }}_${{ matrix.arch }}
+          name: shared_library_${{ runner.os }}_${{ runner.arch }}
           path: output/*
           retention-days: 7
 
@@ -69,13 +66,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2022]
         include:
           - os: ubuntu-22.04
             arch: x86_64
           - os: ubuntu-22.04-arm
             arch: aarch64
-          - os: windows-2025
+          - os: windows-2022
             arch: x86_64
         cuda_version:
           ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.2", "13.2.0"]
@@ -93,45 +90,39 @@ jobs:
           sub-packages: ${{ format('["nvcc"{0},"cudart","cublas","thrust","cublas_dev"]', startsWith(matrix.cuda_version, '13.') && ',"crt","nvvm","nvptxcompiler"' || '') }}
           use-github-cache: false
           use-local-cache: false
-          log-file-suffix: ${{matrix.os}}-${{matrix.cuda_version}}.txt
+          log-file-suffix: ${{ runner.os }}-${{ runner.arch }}-${{matrix.cuda_version}}.txt
       - name: Setup MSVC
         if: startsWith(matrix.os, 'windows')
         uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
       - name: Build C++
         run: bash .github/scripts/build-cuda.sh
         env:
-          build_os: ${{ matrix.os }}
-          build_arch: ${{ matrix.arch }}
-          cuda_version: ${{ matrix.cuda_version }}
+          CUDA_VERSION: ${{ matrix.cuda_version }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda_version }}
+          name: shared_library_cuda_${{ runner.os }}_${{ runner.arch }}_${{ matrix.cuda_version }}
           path: output/*
           retention-days: 7
 
   build-xpu:
     strategy:
       matrix:
-        os: [ubuntu-22.04, windows-2025]
+        os: [ubuntu-22.04, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Build C++ (Linux)
         if: runner.os == 'Linux'
         run: bash .github/scripts/build-xpu.sh
-        env:
-          build_os: ${{ matrix.os }}
       - name: Build C++ (Windows)
         if: runner.os == 'Windows'
         run: .github/scripts/build-xpu-windows.bat
         shell: cmd
-        env:
-          build_os: ${{ matrix.os }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shared_library_xpu_${{ matrix.os }}_x86_64
+          name: shared_library_xpu_${{ runner.os }}_${{ runner.arch }}
           path: output/*
           retention-days: 7
 
@@ -171,13 +162,11 @@ jobs:
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
         env:
-          build_os: ${{ matrix.os }}
-          build_arch: ${{ matrix.arch }}
-          rocm_version: ${{ matrix.rocm_version }}
+          ROCM_VERSION: ${{ matrix.rocm_version }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: shared_library_rocm_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.rocm_version }}
+          name: shared_library_rocm_${{ runner.os }}_${{ runner.arch }}_${{ matrix.rocm_version }}
           path: output/*
           retention-days: 7
 
@@ -220,13 +209,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
-          pattern: "shared_library*_${{ matrix.os }}_${{ matrix.arch }}*"
+          pattern: "shared_library*_${{ runner.os }}_${{ runner.arch }}*"
           path: output/
       - name: Copy correct platform shared library
         shell: bash
         run: |
           ls -lR output/
-          cp output/${{ matrix.os }}/${{ matrix.arch }}/* bitsandbytes/
+          cp output/${{ runner.os }}/${{ runner.arch }}/* bitsandbytes/
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
@@ -243,7 +232,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
+          name: bdist_wheel_${{ runner.os }}_${{ runner.arch }}
           path: dist/bitsandbytes-*.whl
           retention-days: 7
 
@@ -406,7 +395,7 @@ jobs:
       - name: Download wheel
         uses: actions/download-artifact@v4
         with:
-          name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
+          name: bdist_wheel_${{ runner.os }}_${{ runner.arch }}
           path: wheels/
       - name: Set up Python
         uses: actions/setup-python@v5
