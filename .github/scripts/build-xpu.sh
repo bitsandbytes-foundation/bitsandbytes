@@ -14,7 +14,7 @@ if [ "${RUNNER_OS}" == "Linux" ]; then
       && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         cmake bison intel-fw-gpu intel-ocloc \
       && cmake -DCOMPUTE_BACKEND=xpu . \
-      && cmake --build . --config Release"
+      && cmake --build . --config Release --parallel"
 fi
 
 output_dir="output/${RUNNER_OS}/X64"

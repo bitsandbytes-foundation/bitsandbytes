@@ -26,8 +26,6 @@ else
     [[ "${CUDA_VERSION}" == 13.*.* ]] && build_capability="75;80;86;89;90;100;120"
 fi
 
-[[ "${RUNNER_OS}" == "Windows" ]] && python3 -m pip install ninja
-
 if [ "${RUNNER_OS}" == "Linux" ]; then
     # We'll use Rocky Linux 8 in order to maintain manylinux 2.24 compatibility.
     image="nvidia/cuda:${CUDA_VERSION}-devel-rockylinux8"
@@ -40,7 +38,6 @@ if [ "${RUNNER_OS}" == "Linux" ]; then
         && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"${build_capability}\" . \
         && cmake --build . --config Release"
 else
-    pip install cmake==3.28.3
     cmake -G Ninja -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY="${build_capability}" -DCMAKE_BUILD_TYPE=Release -S .
     cmake --build . --config Release
 fi
