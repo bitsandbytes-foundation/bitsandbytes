@@ -174,7 +174,7 @@ The currently distributed `bitsandbytes` packages are built with the following c
 |--------------------|----------------------|----------------------|
 | **Linux x86-64**   | GCC 11.4             | AVX2                 |
 | **Linux aarch64**  | GCC 11.4             |                      |
-| **Windows x86-64** | MSVC 19.43+ (VS2022) | AVX2                 |
+| **Windows x86-64** | MSVC 19.51+ (VS2026) | AVX2                 |
 | **Windows arm64**  | MSVC 19.43+ (VS2022) | ARM NEON             |
 | **macOS arm64**    | Apple Clang 17       |                      |
 
@@ -201,6 +201,8 @@ pip install -e .
 </hfoption>
 <hfoption id="Windows (x86-64)">
 
+Requires Visual Studio 2022 or 2026.
+
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 pip install -e .
@@ -209,7 +211,7 @@ pip install -e .
 </hfoption>
 <hfoption id="Windows (ARM64)">
 
-Requires Visual Studio 2022 with the **ARM64 C++ build tools** component, Python >= **3.12**, and PyTorch >= **2.12**.
+Requires Visual Studio 2022 or 2026 with the **ARM64 C++ build tools** component, Python >= **3.12**, and PyTorch >= **2.12**.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -280,7 +282,7 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 </hfoption>
 <hfoption id="Windows">
 
-Compilation on Windows requires Visual Studio with C++ support, CMake, Ninja, and Python >= **3.10**.
+Compilation on Windows requires Visual Studio 2022 with C++ support, CMake, Ninja, and Python >= **3.10**.
 
 Instead of a system-wide ROCm installation, you can use the pip-installable ROCm SDK wheels from [repo.radeon.com](https://repo.radeon.com/rocm/windows/):
 

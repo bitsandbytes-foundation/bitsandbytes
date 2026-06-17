@@ -29,6 +29,6 @@ if ERRORLEVEL 1 (
 )
 echo ::endgroup::
 
-set output_dir=output\%build_os%\x86_64
+set output_dir=output\Windows\X64
 if not exist "%output_dir%" mkdir "%output_dir%"
 copy bitsandbytes\*.dll "%output_dir%\" 2>nul
