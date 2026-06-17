@@ -31,17 +31,7 @@ jobs:
   build-cpu:
     strategy:
       matrix:
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-          - os: windows-2025
-            arch: x86_64
-          - os: windows-11-arm
-            arch: arm64
-          - os: macos-15
-            arch: arm64
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, windows-11-arm, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +39,7 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
         with:
-          arch: ${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}
+          arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
       - name: Build C++
         run: bash .github/scripts/build-cpu.sh
       - name: Upload build artifact
@@ -67,13 +57,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-          - os: windows-2025
-            arch: x86_64
         cuda_version:
           ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.2", "13.2.0"]
     runs-on: ${{ matrix.os }}
@@ -132,11 +115,9 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04]
-        arch: [x86_64]
         rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1.1", "7.2.3"]
         include:
           - os: windows-2025
-            arch: x86_64
             rocm_version: "7.2.1"
     runs-on: ${{ matrix.os }}
     steps:
@@ -186,23 +167,6 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, windows-11-arm, macos-15]
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-            python-version: "3.10"
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-            python-version: "3.10"
-          - os: windows-2025
-            arch: x86_64
-            python-version: "3.10"
-          - os: windows-11-arm
-            arch: arm64
-            # Python for Windows ARM64 is only available from 3.12+
-            python-version: "3.12"
-          - os: macos-15
-            arch: arm64
-            python-version: "3.10"
         # The specific Python version is irrelevant in this context as we are only packaging non-C extension
         # code. This ensures compatibility across Python versions, as compatibility is
         # dictated by the packaged code itself, not the Python version used for packaging.
@@ -220,17 +184,18 @@ jobs:
         run: |
           ls -lR output/
           cp output/${{ runner.os }}/${{ runner.arch }}/* bitsandbytes/
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          # Python for Windows ARM64 is only available from 3.12+
+          python-version: ${{ matrix.os == 'windows-11-arm' && '3.12' || '3.10' }}
           cache: pip
       - run: pip install build wheel
       - run: python -m build .
       - name: Determine and Set Platform Tag, then Tag Wheel
         shell: bash
         run: |
-          PLATFORM_TAG=$(python .github/scripts/set_platform_tag.py "${{ matrix.arch }}")
+          PLATFORM_TAG=$(python .github/scripts/set_platform_tag.py "${{ runner.arch }}")
           echo "PLATFORM_TAG=$PLATFORM_TAG"
           wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbytes-*.whl
       - name: Upload build artifact
@@ -386,11 +351,6 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm]
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
     runs-on: ${{ matrix.os }}
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: 1

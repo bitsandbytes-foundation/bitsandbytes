@@ -48,8 +48,6 @@ jobs:
     outputs:
       test_runner: ${{ steps.config.outputs.test_runner }}
       artifact_name: ${{ steps.config.outputs.artifact_name }}
-      build_os: ${{ steps.config.outputs.build_os }}
-      arch: ${{ steps.config.outputs.arch }}
     steps:
       - name: Configure test runner and paths
         id: config
@@ -135,8 +133,6 @@ jobs:
 
           echo "test_runner=${TEST_RUNNER}" >> $GITHUB_OUTPUT
           echo "artifact_name=${ARTIFACT}" >> $GITHUB_OUTPUT
-          echo "build_os=${BUILD_OS}" >> $GITHUB_OUTPUT
-          echo "arch=${ARCH}" >> $GITHUB_OUTPUT
 
       - uses: actions/checkout@v4
 

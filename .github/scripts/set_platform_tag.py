@@ -4,14 +4,16 @@ import sys
 
 
 def get_platform_tag(architecture):
+    arch = architecture.lower()
+    is_x64 = arch in ("x86_64", "x64")
     system = platform.system()
 
     if system == "Linux":
-        tag = "manylinux_2_24_x86_64" if architecture == "x86_64" else "manylinux_2_24_aarch64"
+        tag = "manylinux_2_24_x86_64" if is_x64 else "manylinux_2_24_aarch64"
     elif system == "Darwin":
         tag = "macosx_14_0_arm64"
     elif system == "Windows":
-        tag = "win_amd64" if architecture == "x86_64" else "win_arm64"
+        tag = "win_amd64" if is_x64 else "win_arm64"
     else:
         sys.exit(f"Unsupported system: {system}")
 
@@ -20,7 +22,7 @@ def get_platform_tag(architecture):
 
 def main():
     parser = argparse.ArgumentParser(description="Determine platform tag.")
-    parser.add_argument("arch", type=str, help="Architecture (e.g., x86_64, aarch64)")
+    parser.add_argument("arch", type=str, help="Architecture (e.g., x86_64, aarch64, X64, ARM64)")
     args = parser.parse_args()
 
     tag = get_platform_tag(args.arch)
