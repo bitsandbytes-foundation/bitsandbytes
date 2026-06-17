@@ -43,7 +43,6 @@ jobs:
         inputs.platform == 'linux-aarch64' && 'ubuntu-22.04-arm' ||
         inputs.platform == 'macos' && 'macos-15' ||
         inputs.platform == 'windows-arm64' && 'windows-11-arm' ||
-        (inputs.platform == 'windows' && inputs.backend == 'cuda') && 'windows-2022' ||
         'windows-2025'
       }}
     outputs:
@@ -158,6 +157,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1.13.0
         with:
           arch: ${{ inputs.platform == 'windows-arm64' && 'arm64' || 'x64' }}
+          toolset: ${{ (inputs.platform == 'windows' && inputs.backend == 'cuda') && '14.44' || '' }}
 
       # Build CPU backend
       - name: Build C++
