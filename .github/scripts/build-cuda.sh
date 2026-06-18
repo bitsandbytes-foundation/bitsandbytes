@@ -36,7 +36,7 @@ if [ "${RUNNER_OS}" == "Linux" ]; then
         && dnf -y install cmake gcc-toolset-11-toolchain --setopt=install_weak_deps=False --setopt=tsflags=nodocs \
         && source scl_source enable gcc-toolset-11 \
         && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"${build_capability}\" . \
-        && cmake --build . --config Release"
+        && cmake --build . --config Release --parallel"
 else
     cmake -G Ninja -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY="${build_capability}" -DCMAKE_BUILD_TYPE=Release -S .
     cmake --build . --config Release
