@@ -191,7 +191,7 @@ jobs:
           python-version: ${{ matrix.os == 'windows-11-arm' && '3.12' || '3.10' }}
           cache: pip
       - run: pip install build wheel
-      - run: python -m build .
+      - run: python -m build -w .
       - name: Determine and Set Platform Tag, then Tag Wheel
         shell: bash
         run: |

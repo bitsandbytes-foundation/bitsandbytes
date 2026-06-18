@@ -17,8 +17,7 @@ if [ "${RUNNER_OS}" == "Linux" ]; then
     echo "Using image $image"
     docker run --rm -i \
         -w /src -v "$PWD:/src" "$image" sh -c \
-        "apt-get update \
-      && pip install cmake==3.31.6 \
+        "pip install cmake==3.31.6 \
       && cmake -DCOMPUTE_BACKEND=hip -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_HIP_FLAGS=\"--offload-compress\" -DBNB_ROCM_ARCH=\"${bnb_rocm_arch}\" . \
       && cmake --build . --parallel"
 else
