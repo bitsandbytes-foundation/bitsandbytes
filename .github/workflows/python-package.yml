@@ -34,16 +34,16 @@ jobs:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, windows-11-arm, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Setup MSVC
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
       - name: Build C++
         run: bash .github/scripts/build-cpu.sh
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: shared_library_${{ runner.os }}_${{ runner.arch }}
           path: output/*
@@ -62,7 +62,7 @@ jobs:
           ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.2", "13.2.0"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         # Windows: We install Cuda on the agent (slow)
       - uses: Jimver/cuda-toolkit@3d45d157f327c09c04b50ee6ccdea2d9d017ec76 # v0.2.35
         if: runner.os == 'Windows'
@@ -77,7 +77,7 @@ jobs:
           log-file-suffix: ${{ runner.os }}-${{ runner.arch }}-${{matrix.cuda_version}}.txt
       - name: Setup MSVC
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           toolset: "14.44"
       - name: Build C++
@@ -85,7 +85,7 @@ jobs:
         env:
           CUDA_VERSION: ${{ matrix.cuda_version }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: shared_library_cuda_${{ runner.os }}_${{ runner.arch }}_${{ matrix.cuda_version }}
           path: output/*
@@ -98,7 +98,7 @@ jobs:
         os: [ubuntu-22.04, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Build C++ (Linux)
         if: runner.os == 'Linux'
         run: bash .github/scripts/build-xpu.sh
@@ -107,7 +107,7 @@ jobs:
         run: .github/scripts/build-xpu-windows.bat
         shell: cmd
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: shared_library_xpu_${{ runner.os }}_${{ runner.arch }}
           path: output/*
@@ -124,7 +124,7 @@ jobs:
             rocm_version: "7.2.1"
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Clean up disk space
         if: runner.os == 'Linux'
         run: |
@@ -144,7 +144,7 @@ jobs:
           df -h
       - name: Setup MSVC
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1.13.0
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           toolset: "14.44"
       - name: Build C++
@@ -152,7 +152,7 @@ jobs:
         env:
           ROCM_VERSION: ${{ matrix.rocm_version }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: shared_library_rocm_${{ runner.os }}_${{ runner.arch }}_${{ matrix.rocm_version }}
           path: output/*
@@ -176,9 +176,9 @@ jobs:
         # dictated by the packaged code itself, not the Python version used for packaging.
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           merge-multiple: true
           pattern: "shared_library*_${{ runner.os }}_${{ runner.arch }}*"
@@ -189,7 +189,7 @@ jobs:
           ls -lR output/
           cp output/${{ runner.os }}/${{ runner.arch }}/* bitsandbytes/
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
           cache: pip
@@ -202,7 +202,7 @@ jobs:
           echo "PLATFORM_TAG=$PLATFORM_TAG"
           wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbytes-*.whl
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bdist_wheel_${{ runner.os }}_${{ runner.arch }}
           path: dist/bitsandbytes-*.whl
@@ -220,7 +220,7 @@ jobs:
       - build-wheels
     steps:
       - name: Download and rename artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: tmp/
           pattern: "bdist_wheel_*"
@@ -261,7 +261,7 @@ jobs:
       - name: Inspect wheels directory after renaming files
         run: ls -alFR wheels/
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           path: repo
 
@@ -341,7 +341,7 @@ jobs:
           cat body.md
 
       - name: Create new pre-release and upload artifacts
-        uses: softprops/action-gh-release@v2.2.1
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           files: wheels/*.whl
           prerelease: true
@@ -360,14 +360,14 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Download wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bdist_wheel_${{ runner.os }}_${{ runner.arch }}
           path: wheels/
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
       - run: pip install auditwheel
@@ -387,13 +387,13 @@ jobs:
       id-token: write
     steps:
       - name: Download distribution artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist/
           pattern: "bdist_wheel_*"
           merge-multiple: true
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           print-hash: true
