@@ -281,6 +281,10 @@ elseif(BUILD_HIP)
 
     list(APPEND SRC_FILES ${GPU_FILES})
 
+    # 4-bit GEMM: build the SIMT kernel + C dispatch on ROCm.
+    set_source_files_properties(csrc/gemm_4bit_simt.cu csrc/gemm_4bit.cu PROPERTIES LANGUAGE HIP)
+    list(APPEND SRC_FILES csrc/gemm_4bit_simt.cu csrc/gemm_4bit.cu)
+
     string(APPEND BNB_OUTPUT_NAME "_rocm")
 
     # get hip version

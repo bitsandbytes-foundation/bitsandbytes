@@ -11,8 +11,6 @@ from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, get_ptr
 
 from ..._ops import register_kernel
 from ...cextension import lib
-from ..default.ops import _gemm_4bit_default_impl
-from ..utils import _get_4bit_code
 
 
 def _setup_ctypes(names, argtypes, restype=None):
@@ -583,7 +581,7 @@ def _gemv_4bit_impl(
 
 
 @functools.cache
-def _gemm_4bit_use_custom(device_index, dtype, M, N, K):
+def _gemm_4bit_use_custom_cuda(device_index, dtype, M, N, K):
     """Custom kernel vs dequant+F.linear heuristic for M in [5, 1536].
 
     Per-arch notes (bf16/fp16, M >= 8, large weight):
@@ -800,140 +798,143 @@ def _gemm_4bit_use_custom(device_index, dtype, M, N, K):
     return M <= (16 if (tall_k_2xn or n_blocks < 48) else 8)
 
 
+def _gemm_4bit_use_custom_rocm(device_index, dtype, M, N, K):
+    """Fused SIMT kernel vs dequant+F.linear heuristic for ROCm. The SIMT kernel beats
+    dequant through ~M=8 on RDNA3/RDNA4; CDNA/unknown archs have no calibration yet, so
+    they use the M<=4 floor only. TODO: revisit once WMMA/MFMA kernels land."""
+    arch = _rocm_gfx_arch(device_index)
+    if arch.startswith("gfx11") or arch.startswith("gfx12"):  # RDNA3 / RDNA4
+        return M <= 8
+    return False  # CDNA / unknown: conservative (floor only)
+
+
+def _rocm_gfx_arch(device_index):
+    """gfx arch string (e.g. 'gfx1100') for a ROCm device, feature flags stripped."""
+    name = getattr(torch.cuda.get_device_properties(device_index), "gcnArchName", "") or ""
+    return name.split(":")[0]
+
+
+def _gemm_4bit_kernel_impl(
+    A, B, shapeB, absmax, blocksize, quant_type, bias=None, absmax_8bit=None, absmax_code=None, absmax_offset=None
+):
+    """Invoke the fused cgemm_4bit_* kernel (shared by the CUDA and ROCm dispatch; the
+    C dispatch in gemm_4bit.cu picks SIMT vs MMA per arch/shape). A is made contiguous
+    because the kernel reads it as row-major (stride K)."""
+    K = A.shape[-1]
+    M = A.numel() // K
+    N = shapeB[0]
+
+    if K != shapeB[1]:
+        raise RuntimeError(f"A inner dim ({K}) does not match weight ({shapeB[1]})")
+    if absmax.dtype != torch.float32:
+        raise RuntimeError(f"absmax must be float32, got {absmax.dtype}")
+    if bias is not None:
+        if bias.ndim != 1:
+            raise RuntimeError(f"bias must be 1D, got {bias.ndim}D")
+        if bias.dtype != A.dtype:
+            raise RuntimeError(f"bias dtype ({bias.dtype}) must match A dtype ({A.dtype})")
+
+    A = A.contiguous()
+    quant_type_int = 1 if quant_type == "fp4" else 2
+    out = torch.empty((*A.shape[:-1], N), dtype=A.dtype, device=A.device)
+    stream = _get_raw_stream(A.device.index)
+
+    if A.dtype == torch.bfloat16:
+        fn = lib.cgemm_4bit_bf16
+    elif A.dtype == torch.float16:
+        fn = lib.cgemm_4bit_fp16
+    elif A.dtype == torch.float32:
+        fn = lib.cgemm_4bit_fp32
+    else:
+        raise RuntimeError(f"unsupported dtype {A.dtype}")
+
+    # Offset is expected to be a float32 tensor.
+    absmax_offset_f32 = absmax_offset.to(dtype=torch.float32) if absmax_offset is not None else None
+
+    with _cuda_device_of(A):
+        fn(
+            A.data_ptr(),
+            B.data_ptr(),
+            absmax.data_ptr(),
+            absmax_8bit.data_ptr() if absmax_8bit is not None else None,
+            absmax_code.data_ptr() if absmax_code is not None else None,
+            absmax_offset_f32.data_ptr() if absmax_offset_f32 is not None else None,
+            out.data_ptr(),
+            bias.data_ptr() if bias is not None else None,
+            M,
+            N,
+            K,
+            blocksize,
+            quant_type_int,
+            stream,
+        )
+
+    return out
+
+
+def _dequant_linear_fallback(
+    A, B, shapeB, absmax, blocksize, quant_type, bias=None, absmax_8bit=None, absmax_code=None, absmax_offset=None
+):
+    """Unfused fallback shared by CUDA and ROCm: reconstruct the (optionally nested)
+    absmax, dequantize the 4-bit weight via the backend dequant impls (reusing
+    preallocated buffers), then F.linear."""
+    if absmax_8bit is not None:
+        absmax_dq = torch.empty_like(absmax_8bit, dtype=torch.float32)
+        _dequantize_blockwise_impl(absmax_8bit, absmax, absmax_code, 256, torch.float32, out=absmax_dq)
+        absmax = absmax_dq + absmax_offset
+    B_dq = torch.empty(shapeB, dtype=A.dtype, device=A.device)
+    _dequantize_4bit_impl(B, absmax, blocksize, quant_type, A.dtype, out=B_dq)
+    return torch.nn.functional.linear(A, B_dq, bias)
+
+
+# Unified CUDA/ROCm dispatch for bitsandbytes::gemm_4bit. The choice *among* custom
+# kernels (CUDA SIMT vs MMA; ROCm SIMT) is made in the C dispatch (csrc/gemm_4bit.cu).
+_GEMM_4BIT_CUSTOM_FLOOR_M = 4  # always custom at tiny M on every arch
 if torch.version.hip is None:
-
-    @register_kernel("bitsandbytes::gemm_4bit", "cuda")
-    def _(
-        A: torch.Tensor,
-        B: torch.Tensor,
-        shapeB: Sequence[int],
-        absmax: torch.Tensor,
-        blocksize: int,
-        quant_type: str,
-        bias: Optional[torch.Tensor] = None,
-        absmax_8bit: Optional[torch.Tensor] = None,
-        absmax_code: Optional[torch.Tensor] = None,
-        absmax_offset: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        K = A.shape[-1]
-        M = A.numel() // K
-        N = shapeB[0]
-
-        # M>1536: dequant+F.linear wins (dequant savings negligible at very large batch).
-        # M<=4: always custom (custom kernel wins universally at small batch).
-        # M in [5, 1536]: shape/arch-dependent; cached per (device, dtype, M, N, K).
-        if M > 1536:
-            use_custom = False
-        elif K % blocksize != 0:
-            warn(
-                f"inner dimension ({K}) is not aligned for fast kernel "
-                f"with blocksize={blocksize}, falling back to slower implementation.",
-                UserWarning,
-            )
-            use_custom = False
-        else:
-            use_custom = M <= 4 or _gemm_4bit_use_custom(A.device.index, A.dtype, M, N, K)
-
-        if not use_custom:
-            if absmax_8bit is not None:
-                absmax_dq = torch.empty_like(absmax_8bit, dtype=torch.float32)
-                _dequantize_blockwise_impl(absmax_8bit, absmax, absmax_code, 256, torch.float32, out=absmax_dq)
-                absmax = absmax_dq + absmax_offset
-            B_dq = torch.empty(shapeB, dtype=A.dtype, device=A.device)
-            _dequantize_4bit_impl(B, absmax, blocksize, quant_type, A.dtype, out=B_dq)
-            return torch.nn.functional.linear(A, B_dq, bias)
-
-        if K != shapeB[1]:
-            raise RuntimeError(f"A inner dim ({K}) does not match weight ({shapeB[1]})")
-        if absmax.dtype != torch.float32:
-            raise RuntimeError(f"absmax must be float32, got {absmax.dtype}")
-        if bias is not None:
-            if bias.ndim != 1:
-                raise RuntimeError(f"bias must be 1D, got {bias.ndim}D")
-            if bias.dtype != A.dtype:
-                raise RuntimeError(f"bias dtype ({bias.dtype}) must match A dtype ({A.dtype})")
-
-        quant_type_int = 1 if quant_type == "fp4" else 2
-
-        out = torch.empty((*A.shape[:-1], N), dtype=A.dtype, device=A.device)
-        stream = _get_raw_stream(A.device.index)
-
-        if A.dtype == torch.bfloat16:
-            fn = lib.cgemm_4bit_bf16
-        elif A.dtype == torch.float16:
-            fn = lib.cgemm_4bit_fp16
-        elif A.dtype == torch.float32:
-            fn = lib.cgemm_4bit_fp32
-        else:
-            raise RuntimeError(f"unsupported dtype {A.dtype}")
-
-        # Offset is expected to be a float32 tensor.
-        absmax_offset_f32 = absmax_offset.to(dtype=torch.float32) if absmax_offset is not None else None
-
-        with _cuda_device_of(A):
-            fn(
-                A.data_ptr(),
-                B.data_ptr(),
-                absmax.data_ptr(),
-                absmax_8bit.data_ptr() if absmax_8bit is not None else None,
-                absmax_code.data_ptr() if absmax_code is not None else None,
-                absmax_offset_f32.data_ptr() if absmax_offset_f32 is not None else None,
-                out.data_ptr(),
-                bias.data_ptr() if bias is not None else None,
-                M,
-                N,
-                K,
-                blocksize,
-                quant_type_int,
-                stream,
-            )
-
-        return out
-
+    _gemm_4bit_use_custom_fn = _gemm_4bit_use_custom_cuda
+    # NVIDIA: dequant+F.linear wins past M=1536 (dequant savings negligible at very
+    # large batch).
+    _gemm_4bit_custom_max_m = 1536
 else:
+    _gemm_4bit_use_custom_fn = _gemm_4bit_use_custom_rocm
+    # ROCm: only the SIMT kernel exists today (wins to ~M=8); 256 is an optimistic
+    # placeholder cap, revisit once WMMA (RDNA) / MFMA (CDNA) kernels land.
+    _gemm_4bit_custom_max_m = 256
 
-    @register_kernel("bitsandbytes::gemm_4bit", "cuda")
-    def _(
-        A: torch.Tensor,
-        B: torch.Tensor,
-        shapeB: Sequence[int],
-        absmax: torch.Tensor,
-        blocksize: int,
-        quant_type: str,
-        bias: Optional[torch.Tensor] = None,
-        absmax_8bit: Optional[torch.Tensor] = None,
-        absmax_code: Optional[torch.Tensor] = None,
-        absmax_offset: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        K = A.shape[-1]
-        M = A.numel() // K
-        N = shapeB[0]
 
-        if M == 1:
-            if K % blocksize == 0:
-                if absmax_8bit is not None:
-                    absmax = (
-                        torch.ops.bitsandbytes.dequantize_blockwise.default(
-                            absmax_8bit, absmax, absmax_code, 256, torch.float32
-                        )
-                        + absmax_offset
-                    )
+@register_kernel("bitsandbytes::gemm_4bit", "cuda")
+def _(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    shapeB: Sequence[int],
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    bias: Optional[torch.Tensor] = None,
+    absmax_8bit: Optional[torch.Tensor] = None,
+    absmax_code: Optional[torch.Tensor] = None,
+    absmax_offset: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    K = A.shape[-1]
+    M = A.numel() // K
+    N = shapeB[0]
 
-                code = _get_4bit_code(quant_type, A.device)
-                out = torch.empty((*A.shape[:-1], N), dtype=A.dtype, device=A.device)
-                _gemv_4bit_impl(A, B, shapeB, absmax, code, blocksize, out=out)
+    # M<=floor is always custom; above that the per-arch heuristic decides. Past
+    # custom_max_m (or for blocksize-misaligned K) use the dequant+F.linear fallback.
+    if M > _gemm_4bit_custom_max_m:
+        use_custom = False
+    elif K % blocksize != 0:
+        warn(
+            f"inner dimension ({K}) is not aligned for fast kernel "
+            f"with blocksize={blocksize}, falling back to slower implementation.",
+            UserWarning,
+        )
+        use_custom = False
+    else:
+        use_custom = M <= _GEMM_4BIT_CUSTOM_FLOOR_M or _gemm_4bit_use_custom_fn(A.device.index, A.dtype, M, N, K)
 
-                if bias is not None:
-                    out = out + bias
-                return out
-
-            warn(
-                f"inner dimension ({K}) is not aligned for fast kernel "
-                f"with blocksize={blocksize}, falling back to slower implementation.",
-                UserWarning,
-            )
-
-        return _gemm_4bit_default_impl(
+    if not use_custom:
+        return _dequant_linear_fallback(
             A,
             B,
             shapeB,
@@ -945,6 +946,10 @@ else:
             absmax_code=absmax_code,
             absmax_offset=absmax_offset,
         )
+
+    return _gemm_4bit_kernel_impl(
+        A, B, shapeB, absmax, blocksize, quant_type, bias, absmax_8bit, absmax_code, absmax_offset
+    )
 
 
 """C FUNCTIONS FOR OPTIMIZERS"""

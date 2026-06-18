@@ -22,6 +22,7 @@
 #if BNB_HIP
 
 #include <hip/hip_bfloat16.h>
+#include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_math_constants.h>
 #include <hip/hip_runtime.h>
@@ -89,12 +90,22 @@ using bnb_error_t = cudaError_t;
     } while (0)
 #endif
 
+// Full-warp mask for __shfl_*_sync. ROCm 7+ statically requires a 64-bit mask
+// type; CUDA uses the conventional 32-bit unsigned mask.
+#if BNB_HIP
+#define BNB_FULL_WARP_MASK 0xffffffffull
+#else
+#define BNB_FULL_WARP_MASK 0xffffffffu
+#endif
+
 // BFloat16 type alias
 
 #if BNB_HIP
-using bnb_bfloat16 = hip_bfloat16;
+using bnb_bfloat16 = __hip_bfloat16;
+using bnb_bfloat162 = __hip_bfloat162;
 #else
 using bnb_bfloat16 = __nv_bfloat16;
+using bnb_bfloat162 = __nv_bfloat162;
 #endif
 
 // Data type enum aliases for BLAS libraries
