@@ -133,6 +133,7 @@ jobs:
           name: ${{ steps.config.outputs.artifact_name }}
           path: output/${{ runner.os }}/${{ runner.arch }}/*
           retention-days: 7
+          if-no-files-found: error
 
   test:
     needs: build

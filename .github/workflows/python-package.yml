@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup MSVC
-        if: startsWith(matrix.os, 'windows')
+        if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
         with:
           arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
@@ -48,6 +48,7 @@ jobs:
           name: shared_library_${{ runner.os }}_${{ runner.arch }}
           path: output/*
           retention-days: 7
+          if-no-files-found: error
 
   ##
   # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)
@@ -64,7 +65,7 @@ jobs:
       - uses: actions/checkout@v4
         # Windows: We install Cuda on the agent (slow)
       - uses: Jimver/cuda-toolkit@3d45d157f327c09c04b50ee6ccdea2d9d017ec76 # v0.2.35
-        if: startsWith(matrix.os, 'windows')
+        if: runner.os == 'Windows'
         id: cuda-toolkit
         with:
           cuda: ${{ matrix.cuda_version }}
@@ -75,7 +76,7 @@ jobs:
           use-local-cache: false
           log-file-suffix: ${{ runner.os }}-${{ runner.arch }}-${{matrix.cuda_version}}.txt
       - name: Setup MSVC
-        if: startsWith(matrix.os, 'windows')
+        if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
         with:
           toolset: "14.44"
@@ -89,6 +90,7 @@ jobs:
           name: shared_library_cuda_${{ runner.os }}_${{ runner.arch }}_${{ matrix.cuda_version }}
           path: output/*
           retention-days: 7
+          if-no-files-found: error
 
   build-xpu:
     strategy:
@@ -110,6 +112,7 @@ jobs:
           name: shared_library_xpu_${{ runner.os }}_${{ runner.arch }}
           path: output/*
           retention-days: 7
+          if-no-files-found: error
 
   build-rocm:
     strategy:
@@ -123,7 +126,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Clean up disk space
-        if: startsWith(matrix.os, 'ubuntu')
+        if: runner.os == 'Linux'
         run: |
           echo "Disk space before cleanup:"
           df -h
@@ -140,7 +143,7 @@ jobs:
           echo "Disk space after cleanup:"
           df -h
       - name: Setup MSVC
-        if: startsWith(matrix.os, 'windows')
+        if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1.13.0
         with:
           toolset: "14.44"
@@ -154,6 +157,7 @@ jobs:
           name: shared_library_rocm_${{ runner.os }}_${{ runner.arch }}_${{ matrix.rocm_version }}
           path: output/*
           retention-days: 7
+          if-no-files-found: error
 
   build-wheels:
     env:
@@ -187,8 +191,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # Python for Windows ARM64 is only available from 3.12+
-          python-version: ${{ matrix.os == 'windows-11-arm' && '3.12' || '3.10' }}
+          python-version: "3.12"
           cache: pip
       - run: pip install build wheel
       - run: python -m build -w .
@@ -204,6 +207,8 @@ jobs:
           name: bdist_wheel_${{ runner.os }}_${{ runner.arch }}
           path: dist/bitsandbytes-*.whl
           retention-days: 7
+          if-no-files-found: error
+          compression-level: 0
 
   upload-pre-release-wheels:
     name: Create release and upload artifacts
