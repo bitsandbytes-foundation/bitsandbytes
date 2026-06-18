@@ -275,8 +275,10 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                 const uint8_t byte = b_bytes[sub * 4 + j];
                 if constexpr (std::is_same_v<T, float>) {
                     if constexpr (HIP_LDS_LUT_SHFL) {
+#if BNB_HIP
                         b_dq[j * 2] = quant_map_shfl[byte >> 4] * scale_f;
                         b_dq[j * 2 + 1] = quant_map_shfl[byte & 0x0f] * scale_f;
+#endif
                     } else {
                         b_dq[j * 2] = __shfl_sync(BNB_FULL_WARP_MASK, my_lut_f32_shfl, byte >> 4, 32) * scale_f;
                         b_dq[j * 2 + 1] = __shfl_sync(BNB_FULL_WARP_MASK, my_lut_f32_shfl, byte & 0x0f, 32) * scale_f;
@@ -292,8 +294,10 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                     // fp16 on HIP uses the LDS LUT; fp16/bf16 on CUDA use the shuffle.
                     uint32_t hi, lo;
                     if constexpr (HIP_LDS_LUT_SHFL) {
+#if BNB_HIP
                         hi = quant_map_shfl[byte >> 4];
                         lo = quant_map_shfl[byte & 0x0f];
+#endif
                     } else {
                         hi = __shfl_sync(BNB_FULL_WARP_MASK, my_lut_u32, byte >> 4, 32);
                         lo = __shfl_sync(BNB_FULL_WARP_MASK, my_lut_u32, byte & 0x0f, 32);
