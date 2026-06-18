@@ -33,7 +33,7 @@ if [ "${RUNNER_OS}" == "Linux" ]; then
 
     docker run -i -w /src -v "$PWD:/src" "$image" bash -c \
         "dnf -y --refresh update --security \
-        && dnf -y install cmake gcc-toolset-11 --setopt=install_weak_deps=False --setopt=tsflags=nodocs \
+        && dnf -y install cmake gcc-toolset-11-toolchain --setopt=install_weak_deps=False --setopt=tsflags=nodocs \
         && source scl_source enable gcc-toolset-11 \
         && cmake -DCOMPUTE_BACKEND=cuda -DCOMPUTE_CAPABILITY=\"${build_capability}\" . \
         && cmake --build . --config Release"
