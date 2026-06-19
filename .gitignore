@@ -10,9 +10,6 @@ __pycache__/
 *.air
 *.metallib
 
-plots
-
-*rocprof*
 # CMake generated files
 CMakeCache.txt
 CMakeScripts/
@@ -162,4 +159,3 @@ output/
 cuda-spec.md
 cuda-spec-additions.md
 agents/*_issues.json
-new_kernel_develop/
