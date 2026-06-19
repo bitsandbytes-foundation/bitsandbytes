@@ -10,14 +10,6 @@
 // Warps per block; each warp owns one N-column. CTA size = WARPS_PER_BLOCK * 32.
 static constexpr int WARPS_PER_BLOCK = 4;
 
-// fp32 takes the LDS centroid LUT only on RDNA3 (gfx11); it regresses on RDNA4
-// (gfx12), which keeps the warp shuffle.
-#if BNB_HIP && defined(__GFX11__)
-#define BNB_HIP_FP32_LDS_LUT 1
-#else
-#define BNB_HIP_FP32_LDS_LUT 0
-#endif
-
 // Element-wise multiply of a half2 vector pair.
 __device__ __forceinline__ half2 vec2_mul(half2 a, half2 b) { return __hmul2(a, b); }
 
@@ -60,8 +52,9 @@ __device__ __forceinline__ float simt_warp_reduce_sum(float v) {
 /// Supports single-level and double-quantized (nested) absmax.
 ///
 /// Dtype paths:
-///   bf16/fp16: LUT as uint16-in-uint32 for warp shuffle; T2 pair math; 1x uint4 A load per sub-iter
-///   fp32:      LUT as float for warp shuffle; scalar multiply; 2x uint4 A loads per sub-iter
+///   HIP bf16:  LDS bf16 LUT + native v_dot2_f32_bf16
+///   HIP fp16/fp32: LDS centroid LUT; pair/scalar math
+///   CUDA:      warp-shuffle LUT; pair/scalar math
 ///
 /// Grid: (ceil(N/WARPS_PER_BLOCK), ceil(M/M_BLOCK))
 ///
@@ -106,11 +99,10 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
     // path. Compile-time so the unused paths are dropped.
     constexpr bool HIP_BF16_VDOT2 = BNB_HIP && std::is_same_v<T, bnb_bfloat16>;
 
-    // Stage the fp16/fp32 centroid LUT in LDS instead of warp shuffle (ds_bpermute):
-    // fp16 on all RDNA, fp32 only on RDNA3 (BNB_HIP_FP32_LDS_LUT). bf16 uses the
-    // VDOT2 LDS LUT above.
+    // Stage the fp16/fp32 centroid LUT in LDS on HIP instead of warp shuffle
+    // (ds_bpermute). bf16 uses the VDOT2 LDS LUT above.
     [[maybe_unused]] constexpr bool HIP_LDS_LUT_SHFL =
-        BNB_HIP && !HIP_BF16_VDOT2 && (std::is_same_v<T, half> || (std::is_same_v<T, float> && BNB_HIP_FP32_LDS_LUT));
+        BNB_HIP && !HIP_BF16_VDOT2 && (std::is_same_v<T, half> || std::is_same_v<T, float>);
 
     // Each lane loads its LUT entry (lane_id < 16) for warp-shuffle dequant.
     // bf16/fp16: centroid as uint16-in-uint32 for __shfl_sync over uint32.
