@@ -1,6 +1,8 @@
+import platform
+
 import pytest
 
-from bitsandbytes.cextension import BNB_BACKEND, get_cuda_bnb_library_path
+from bitsandbytes.cextension import BNB_BACKEND, _env_var_guidance, get_cuda_bnb_library_path
 from bitsandbytes.cuda_specs import CUDASpecs
 
 
@@ -31,6 +33,14 @@ def test_get_cuda_bnb_library_path_override(monkeypatch, cuda120_spec, caplog):
     assert "BNB_CUDA_VERSION" in caplog.text  # did we get the warning?
 
 
+def test_env_var_guidance_uses_platform_specific_commands(monkeypatch):
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    assert _env_var_guidance("BNB_CUDA_VERSION", "132") == ("set BNB_CUDA_VERSION=132", "set BNB_CUDA_VERSION=")
+
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    assert _env_var_guidance("BNB_CUDA_VERSION", "132") == ("export BNB_CUDA_VERSION=132", "unset BNB_CUDA_VERSION")
+
+
 @pytest.mark.skipif(BNB_BACKEND != "CUDA", reason="this test requires a CUDA backend")
 def test_get_cuda_bnb_library_path_rejects_rocm_override(monkeypatch, cuda120_spec):
     """BNB_ROCM_VERSION alone should be rejected on CUDA with a helpful error."""
@@ -49,6 +59,16 @@ def test_get_cuda_bnb_library_path_cuda_override_takes_priority(monkeypatch, cud
     assert "BNB_CUDA_VERSION" in caplog.text
     assert "BNB_ROCM_VERSION" in caplog.text
     assert "ignored on this CUDA build" in caplog.text
+
+
+@pytest.mark.skipif(BNB_BACKEND != "CUDA", reason="this test requires a CUDA backend")
+def test_get_cuda_bnb_library_path_override_uses_windows_guidance(monkeypatch, cuda120_spec, caplog):
+    monkeypatch.delenv("BNB_ROCM_VERSION", raising=False)
+    monkeypatch.setenv("BNB_CUDA_VERSION", "110")
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    assert get_cuda_bnb_library_path(cuda120_spec).stem == "libbitsandbytes_cuda110"
+    assert "set BNB_CUDA_VERSION=" in caplog.text
+    assert "unset BNB_CUDA_VERSION" not in caplog.text
 
 
 @pytest.fixture

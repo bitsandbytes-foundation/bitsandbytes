@@ -121,6 +121,12 @@ cmake --build . --config Release
 pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
 ```
 
+> [!TIP]
+> If your locally built CUDA toolkit version does not match the CUDA version bundled with your PyTorch wheel, bitsandbytes may still try to load the PyTorch-matched binary name first.
+> On Windows, you can point bitsandbytes at your locally built DLL for the current shell with:
+> `set BNB_CUDA_VERSION=<cuda-version-without-dots>`
+> For example, a local CUDA 13.2 build uses `set BNB_CUDA_VERSION=132`.
+
 Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com/Jamezo97), [rickardp](https://github.com/rickardp), [akx](https://github.com/akx) for their amazing contributions to make bitsandbytes compatible with Windows.
 
 </hfoption>
