@@ -120,7 +120,8 @@ def _print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
     if not binary_path.exists():
         print_dedented(
             f"""
-            Library not found: {binary_path}. Maybe you need to compile it from source?
+            No compatible CUDA library found (tried: {binary_path.name}). You may need to compile from source:
+            https://huggingface.co/docs/bitsandbytes/main/en/installation#cuda-compile
             """,
         )
 
@@ -146,12 +147,9 @@ def _print_hip_diagnostics(cuda_specs: CUDASpecs) -> None:
     if not binary_path.exists():
         print_dedented(
             f"""
-            Library not found: {binary_path}.
-            Maybe you need to compile it from source? If you compiled from source, check that ROCm version
-            in PyTorch Settings matches your ROCm install. If not, you can either:
-                1. Reinstall PyTorch for your ROCm version and rebuild bitsandbytes.
-                2. Set BNB_ROCM_VERSION to match the version the library was built with.
-                   For example: export BNB_ROCM_VERSION=72
+            No compatible ROCm library found (tried: {binary_path.name}). You may need to compile from source:
+            https://huggingface.co/docs/bitsandbytes/main/en/installation#rocm-compile
+            Use BNB_ROCM_VERSION to force a specific version if needed.
             """,
         )
 
@@ -171,62 +169,25 @@ def print_diagnostics(cuda_specs: CUDASpecs) -> None:
         _print_cuda_diagnostics(cuda_specs)
 
 
-def _print_cuda_runtime_diagnostics() -> None:
-    cudart_paths = list(find_cudart_libraries())
-    if not cudart_paths:
-        print("CUDA SETUP: WARNING! CUDA runtime files not found in any environmental path.")
-    elif len(cudart_paths) > 1:
-        print_dedented(
-            f"""
-            Found duplicate CUDA runtime files (see below).
-
-            We select the PyTorch default CUDA runtime, which is {torch.version.cuda},
-            but this might mismatch with the CUDA version that is needed for bitsandbytes.
-            To override this behavior set the `BNB_CUDA_VERSION=<version string, e.g. 122>` environmental variable.
-
-            For example, if you want to use the CUDA version 122,
-                BNB_CUDA_VERSION=122 python ...
-
-            OR set the environmental variable in your .bashrc:
-                export BNB_CUDA_VERSION=122
-
-            In the case of a manual override, make sure you set LD_LIBRARY_PATH, e.g.
-            export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/cuda-11.2,
-            """,
-        )
-        for pth in cudart_paths:
-            print(f"* Found CUDA runtime at: {pth}")
-
-
-def _print_hip_runtime_diagnostics() -> None:
-    cudart_paths = list(find_cudart_libraries())
-    if not cudart_paths:
-        print("ROCm SETUP: WARNING! ROCm runtime files not found in any environmental path.")
-    elif len(cudart_paths) > 1:
-        print_dedented(
-            f"""
-            Found duplicate ROCm runtime files (see below).
-
-            We select the PyTorch default ROCm runtime, which is {torch.version.hip},
-            but this might mismatch with the ROCm version that is needed for bitsandbytes.
-            To override this behavior set the `BNB_ROCM_VERSION=<version string, e.g. 72>` environmental variable.
-
-            For example, if you want to use the ROCm version 7.2,
-                BNB_ROCM_VERSION=72 python ...
-
-            OR set the environmental variable in your .bashrc:
-                export BNB_ROCM_VERSION=72
-
-            In the case of a manual override, make sure you set LD_LIBRARY_PATH, e.g.
-            export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm-7.2.0/lib,
-            """,
-        )
-        for pth in cudart_paths:
-            print(f"* Found ROCm runtime at: {pth}")
-
-
 def print_runtime_diagnostics() -> None:
-    if HIP_ENVIRONMENT:
-        _print_hip_runtime_diagnostics()
-    else:
-        _print_cuda_runtime_diagnostics()
+    backend = "ROCm" if HIP_ENVIRONMENT else "CUDA"
+    runtime_version = torch.version.hip if HIP_ENVIRONMENT else torch.version.cuda
+    override_var = "BNB_ROCM_VERSION" if HIP_ENVIRONMENT else "BNB_CUDA_VERSION"
+    override_example = "72" if HIP_ENVIRONMENT else "122"
+
+    cudart_paths = list(find_cudart_libraries())
+    if not cudart_paths:
+        print(f"{backend} SETUP: WARNING! {backend} runtime files not found in any environmental path.")
+    elif len(cudart_paths) > 1:
+        print_dedented(
+            f"""
+            Found duplicate {backend} runtime files (see below).
+
+            bitsandbytes will use PyTorch's {backend} runtime ({runtime_version}) and auto-select
+            the closest available library version. If you need to force a specific version,
+            set {override_var}, e.g.:
+                export {override_var}={override_example}
+            """,
+        )
+        for pth in cudart_paths:
+            print(f"* Found {backend} runtime at: {pth}")
