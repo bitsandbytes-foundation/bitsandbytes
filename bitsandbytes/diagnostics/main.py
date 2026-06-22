@@ -6,12 +6,9 @@ import traceback
 import torch
 
 from bitsandbytes import __version__ as bnb_version
-from bitsandbytes.cextension import BNB_BACKEND
 from bitsandbytes.consts import PACKAGE_GITHUB_URL
 from bitsandbytes.cuda_specs import get_cuda_specs
-from bitsandbytes.diagnostics.cuda import (
-    print_diagnostics,
-)
+from bitsandbytes.diagnostics.cuda import print_diagnostics
 from bitsandbytes.diagnostics.utils import print_dedented, print_header
 
 _RELATED_PACKAGES = [
@@ -80,29 +77,48 @@ def main():
     if cuda_specs:
         print_diagnostics(cuda_specs)
 
-    # TODO: There's a lot of noise in this; needs improvement.
-    # print_cuda_runtime_diagnostics()
+    has_rocm = torch.version.hip is not None
+    has_cuda = not has_rocm and torch.version.cuda is not None and torch.cuda.is_available()
+    has_xpu = hasattr(torch, "xpu") and torch.xpu.is_available()
 
-    if not torch.cuda.is_available():
-        print(f"PyTorch says {BNB_BACKEND} is not available. Possible reasons:")
-        print(f"1. {BNB_BACKEND} driver not installed")
-        print("2. Using a CPU-only PyTorch build")
-        print("3. No GPU detected")
+    from bitsandbytes.cextension import ErrorHandlerMockBNBNativeLibrary, lib
 
+    lib_loaded = not isinstance(lib, ErrorHandlerMockBNBNativeLibrary)
+
+    if not (has_cuda or has_rocm or has_xpu):
+        print(
+            f"No CUDA, ROCm, or XPU detected; CPU library {'loaded successfully' if lib_loaded else 'failed to load'}."
+        )
+    elif has_xpu:
+        from bitsandbytes.backends.utils import triton_available
+
+        if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
+            print("XPU native library loaded successfully.")
+        elif triton_available:
+            print("XPU native library not loaded; using triton fallback.")
+        else:
+            print("XPU native library not loaded and triton not available.")
     else:
-        print(f"Checking that the library is importable and {BNB_BACKEND} is callable...")
+        if not lib_loaded:
+            print_dedented(
+                f"""
+                See above for details on why the library failed to load.
+                Please provide this info when creating an issue via {PACKAGE_GITHUB_URL}/issues/new/choose
+                WARNING: Please be sure to sanitize sensitive info from the output before posting it.
+                """,
+            )
+            sys.exit(1)
 
+        print("Checking that the library is importable and callable...")
         try:
             sanity_check()
             print("SUCCESS!")
             return
         except RuntimeError as e:
             if "not available in CPU-only" in str(e):
-                print(
-                    f"WARNING: {__package__} is currently running as CPU-only!\n"
-                    "Therefore, 8-bit optimizers and GPU quantization are unavailable.\n\n"
-                    f"If you think that this is so erroneously,\nplease report an issue!",
-                )
+                print("WARNING: bitsandbytes is running as CPU-only!")
+                print("8-bit optimizers and GPU quantization are unavailable.")
+                print("If you think this is an error, please report an issue.")
             else:
                 raise e
         except Exception:

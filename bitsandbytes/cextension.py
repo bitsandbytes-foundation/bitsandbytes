@@ -21,63 +21,63 @@ logger = logging.getLogger(__name__)
 
 def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
     """
-    Get the disk path to the CUDA BNB native library specified by the
-    given CUDA specs, taking into account the `BNB_CUDA_VERSION` override environment variable.
+    Get the path to the best matching CUDA/ROCm BNB native library for the given specs.
 
-    The library is not guaranteed to exist at the returned path.
+    When no override is set, selects from packaged libraries using the following priority:
+    1. Exact version match.
+    2. Highest packaged version <= runtime version, same major (e.g. runtime 12.9, ship 12.8).
+    3. Lowest packaged version > runtime version, same major (e.g. runtime 12.0, ship 12.1).
+    No cross-major fallback: if no same-major library exists, returns the exact non-existent
+    path so the caller raises a clear "not found" error.
+    A warning is logged when falling back. Override env vars bypass selection entirely
+    and load the named version with no fallback. The returned path is not guaranteed to
+    exist when no packaged libs are found, or when an override names an absent version.
     """
+    is_hip = bool(torch.version.hip)
+    prefix = "rocm" if is_hip else "cuda"
+    override_var = "BNB_ROCM_VERSION" if is_hip else "BNB_CUDA_VERSION"
 
-    prefix = "rocm" if torch.version.hip else "cuda"
-    library_name = f"libbitsandbytes_{prefix}{cuda_specs.cuda_version_string}{DYNAMIC_LIBRARY_SUFFIX}"
+    override_value = os.environ.get(override_var)
 
-    cuda_override_value = os.environ.get("BNB_CUDA_VERSION")
-    rocm_override_value = os.environ.get("BNB_ROCM_VERSION")
+    if override_value is not None:
+        if not override_value.isdigit():
+            raise RuntimeError(f"{override_var}={override_value!r}: value must be digits only (e.g. '124' for 12.4).")
+        library_name = f"libbitsandbytes_{prefix}{override_value}{DYNAMIC_LIBRARY_SUFFIX}"
+        logger.warning(
+            f"WARNING: {override_var}={override_value} environment variable detected; loading {library_name}.\n"
+            f"This overrides automatic {'ROCm' if is_hip else 'CUDA'} version selection.\n"
+            f"If this was unintended clear the variable and retry: unset {override_var}\n",
+        )
+        return PACKAGE_DIR / library_name
 
-    if torch.version.hip:
-        if cuda_override_value:
-            if not rocm_override_value:
-                raise RuntimeError(
-                    f"BNB_CUDA_VERSION={cuda_override_value} detected but this is not a CUDA build!\n"
-                    "Use BNB_ROCM_VERSION instead: export BNB_ROCM_VERSION=<version>\n"
-                    "Clear the variable and retry: unset BNB_CUDA_VERSION\n"
-                )
-            logger.warning(
-                f"WARNING: BNB_CUDA_VERSION={cuda_override_value} is set but ignored on this ROCm build. "
-                "Clear the variable: unset BNB_CUDA_VERSION",
-            )
-        if rocm_override_value:
-            library_name = re.sub(r"rocm\d+", f"rocm{rocm_override_value}", library_name, count=1)
-            logger.warning(
-                f"WARNING: BNB_ROCM_VERSION={rocm_override_value} environment variable detected; loading {library_name}.\n"
-                "This can be used to load a bitsandbytes version built with a ROCm version that is different from the PyTorch ROCm version.\n"
-                "If this was unintended clear the variable and retry: unset BNB_ROCM_VERSION\n",
-            )
-    elif torch.version.cuda:
-        if rocm_override_value:
-            if not cuda_override_value:
-                raise RuntimeError(
-                    f"BNB_ROCM_VERSION={rocm_override_value} detected but this is not a ROCm build!\n"
-                    "Use BNB_CUDA_VERSION instead: export BNB_CUDA_VERSION=<version>\n"
-                    "Clear the variable and retry: unset BNB_ROCM_VERSION\n"
-                )
-            logger.warning(
-                f"WARNING: BNB_ROCM_VERSION={rocm_override_value} is set but ignored on this CUDA build. "
-                "Clear the variable: unset BNB_ROCM_VERSION",
-            )
-        if cuda_override_value:
-            library_name = re.sub(r"cuda\d+", f"cuda{cuda_override_value}", library_name, count=1)
-            logger.warning(
-                f"WARNING: BNB_CUDA_VERSION={cuda_override_value} environment variable detected; loading {library_name}.\n"
-                "This can be used to load a bitsandbytes version built with a CUDA version that is different from the PyTorch CUDA version.\n"
-                "If this was unintended clear the variable and retry: unset BNB_CUDA_VERSION\n",
-            )
+    available = _find_cuda_libs(prefix, is_hip)
+    runtime_version = cuda_specs.cuda_version_tuple
+
+    if not available:
+        return PACKAGE_DIR / f"libbitsandbytes_{prefix}{cuda_specs.cuda_version_string}{DYNAMIC_LIBRARY_SUFFIX}"
+
+    if runtime_version in available:
+        return available[runtime_version]
+
+    lower = [v for v in available if v[0] == runtime_version[0] and v < runtime_version]
+    if lower:
+        selected = max(lower)
     else:
-        if rocm_override_value or cuda_override_value:
-            raise RuntimeError(
-                "BNB_ROCM_VERSION / BNB_CUDA_VERSION overrides are not supported on this backend.",
-            )
+        higher_same = [v for v in available if v[0] == runtime_version[0] and v > runtime_version]
+        if higher_same:
+            selected = min(higher_same)
+        else:
+            # No same-major library available. Return the non-existent exact path so
+            # get_native_library() raises a clear "not found" error.
+            return PACKAGE_DIR / f"libbitsandbytes_{prefix}{cuda_specs.cuda_version_string}{DYNAMIC_LIBRARY_SUFFIX}"
 
-    return PACKAGE_DIR / library_name
+    logger.warning(
+        f"No prebuilt binary for {'ROCm' if is_hip else 'CUDA'} "
+        f"{runtime_version[0]}.{runtime_version[1]}, loading "
+        f"{'ROCm' if is_hip else 'CUDA'} {selected[0]}.{selected[1]} instead. "
+        f"Set {override_var} to override."
+    )
+    return available[selected]
 
 
 class BNBNativeLibrary:
@@ -124,26 +124,48 @@ class XpuBNBNativeLibrary(BNBNativeLibrary):
             lib.cget_managed_ptr.restype = ct.c_void_p
 
 
-def get_available_cuda_binary_versions() -> list[str]:
-    """Get formatted CUDA versions from existing library files using cuda_specs logic"""
-    lib_pattern = f"libbitsandbytes_{BNB_BACKEND.lower()}*{DYNAMIC_LIBRARY_SUFFIX}"
-    versions = []
-    for lib in Path(__file__).parent.glob(lib_pattern):
-        pattern = rf"{BNB_BACKEND.lower()}(\d+)"
-        match = re.search(pattern, lib.name)
+def _split_cuda_version(compact: str, is_hip: bool) -> tuple[int, int]:
+    """Split a compact CUDA/ROCm version string from a library filename into (major, minor).
+
+    CUDA: major is always 2 digits (11, 12, 13...), e.g. '118' -> (11, 8), '132' -> (13, 2).
+    ROCm: major is always 1 digit for now (6, 7...), e.g. '72' -> (7, 2), '713' -> (7, 13).
+    Note: revisit if ROCm major reaches 10.
+    """
+    if is_hip:
+        return int(compact[:1]), int(compact[1:])
+    return int(compact[:2]), int(compact[2:])
+
+
+def _find_cuda_libs(prefix: str, is_hip: bool) -> dict[tuple[int, int], Path]:
+    """Return a {(major, minor): Path} mapping for all packaged CUDA/ROCm library files."""
+    result = {}
+    for lib in PACKAGE_DIR.glob(f"libbitsandbytes_{prefix}*{DYNAMIC_LIBRARY_SUFFIX}"):
+        match = re.search(rf"{prefix}(\d+)", lib.name)
         if match:
-            ver_code = int(match.group(1))
-            major = ver_code // 10
-            minor = ver_code % 10
-            versions.append(f"{major}.{minor}")
-    return sorted(versions)
+            try:
+                result[_split_cuda_version(match.group(1), is_hip)] = lib
+            except (ValueError, IndexError):
+                continue
+    return result
+
+
+def get_available_cuda_binary_versions() -> list[str]:
+    """Get formatted CUDA/ROCm versions from existing library files."""
+    is_hip = bool(torch.version.hip)
+    prefix = "rocm" if is_hip else "cuda"
+    return sorted(f"{major}.{minor}" for major, minor in _find_cuda_libs(prefix, is_hip))
 
 
 def parse_cuda_version(version_str: str) -> str:
-    """Convert raw version string (e.g. '118' from env var) to formatted version (e.g. '11.8')"""
+    """Convert a raw version code string (e.g. '118', '713') to a dotted version (e.g. '11.8', '7.13')."""
     if version_str.isdigit():
-        return f"{version_str[:-1]}.{version_str[-1]}"
-    return version_str  # fallback as safety net
+        is_hip = bool(torch.version.hip)
+        try:
+            major, minor = _split_cuda_version(version_str, is_hip)
+            return f"{major}.{minor}"
+        except (ValueError, IndexError):
+            pass
+    return version_str
 
 
 class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
@@ -169,18 +191,11 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
 
     def __init__(self, error_msg: str):
         self.error_msg = error_msg
-        self.user_cuda_version = get_cuda_version_tuple()
         self.available_versions = get_available_cuda_binary_versions()
-        self.override_value = (
-            os.environ.get("BNB_ROCM_VERSION") if HIP_ENVIRONMENT else os.environ.get("BNB_CUDA_VERSION")
-        )
-        self.requested_version = (
-            parse_cuda_version(self.override_value)
-            if self.override_value
-            else f"{self.user_cuda_version[0]}.{self.user_cuda_version[1]}"
-            if self.user_cuda_version
-            else "unknown"
-        )
+        override_value = os.environ.get("BNB_ROCM_VERSION") if HIP_ENVIRONMENT else os.environ.get("BNB_CUDA_VERSION")
+        user_version = get_cuda_version_tuple()
+        user_version_str = f"{user_version[0]}.{user_version[1]}" if user_version else "unknown"
+        self.requested_version = parse_cuda_version(override_value) if override_value else user_version_str
 
         # Pre-generate the error message based on error type
         if "cannot open shared object file" in error_msg:
@@ -188,9 +203,7 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
         else:  # lib loading errors
             self.formatted_error = self._format_lib_error_message(
                 available_versions=self.available_versions,
-                user_cuda_version=f"{self.user_cuda_version[0]}.{self.user_cuda_version[1]}"
-                if self.user_cuda_version
-                else "unknown",
+                user_cuda_version=user_version_str,
                 original_error=f"Original error: {self.error_msg}\n" if self.error_msg else "",
                 requested_version=self.requested_version,
             )
@@ -241,8 +254,8 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
 
         note = (
             (
-                f"To make bitsandbytes work, the compiled library version MUST exactly match the linked {BNB_BACKEND} version.\n"
-                f"If your {BNB_BACKEND} version doesn't have a pre-compiled binary, you MUST compile from source.\n\n"
+                f"bitsandbytes tried to find a compatible {BNB_BACKEND} binary but none could be loaded.\n"
+                f"If your {BNB_BACKEND} version isn't among the available pre-compiled versions above, you must compile from source.\n\n"
             )
             if no_cuda_lib_found
             else ""
@@ -294,8 +307,8 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
             f"1. You have installed {BNB_BACKEND} {cuda_major_version}.x toolkit on your system\n"
             f"2. The {BNB_BACKEND} runtime libraries are in your LD_LIBRARY_PATH\n\n"
             f"You can add them with (and persist the change by adding the line to your .bashrc):\n"
-            f"   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/{BNB_BACKEND.lower()}-{cuda_major_version}.x/\
-                    {'lib64' if not HIP_ENVIRONMENT else 'lib'}\n\n"
+            f"   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/{BNB_BACKEND.lower()}-{cuda_major_version}.x/"
+            f"{'lib64' if not HIP_ENVIRONMENT else 'lib'}\n\n"
             f"Original error: {self.error_msg}\n\n"
             f"🔍 Run this command for detailed diagnostics:\n"
             f"python -m bitsandbytes\n\n"
@@ -329,7 +342,7 @@ def get_native_library() -> BNBNativeLibrary:
         cuda_binary_path = get_cuda_bnb_library_path(cuda_specs)
 
         if not cuda_binary_path.exists():
-            raise RuntimeError(f"Configured {BNB_BACKEND} binary not found at {cuda_binary_path}")
+            raise RuntimeError(f"No compatible {BNB_BACKEND} binary found at {cuda_binary_path}")
 
         binary_path = cuda_binary_path
 
