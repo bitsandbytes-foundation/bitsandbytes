@@ -26,6 +26,36 @@ __device__ __forceinline__ bnb_bfloat162 vec2_mul(bnb_bfloat162 a, bnb_bfloat162
 #endif
 }
 
+#if BNB_HIP
+using f16x2_dot_t = __2f16;
+
+__device__ __forceinline__ float fp16_dot2_ockl(f16x2_dot_t a, f16x2_dot_t b, float c) {
+    return __ockl_fdot2(a, b, c, false);
+}
+
+__device__ __forceinline__ uint32_t f16x2_bits(f16x2_dot_t v) {
+    return *reinterpret_cast<const uint32_t*>(&v);
+}
+
+__device__ __forceinline__ float fp16_dot2_asm(f16x2_dot_t a, f16x2_dot_t b, float c) {
+    const uint32_t a_bits = f16x2_bits(a);
+    const uint32_t b_bits = f16x2_bits(b);
+    float out;
+    asm volatile("v_dot2_f32_f16 %0, %1, %2, %3"
+                 : "=v"(out)
+                 : "v"(a_bits), "v"(b_bits), "v"(c));
+    return out;
+}
+
+__device__ __forceinline__ float fp16_dot2(f16x2_dot_t a, f16x2_dot_t b, float c) {
+#if defined(BNB_HIP_USE_FP16_DOT2_ASM)
+    return fp16_dot2_asm(a, b, c);
+#else
+    return fp16_dot2_ockl(a, b, c);
+#endif
+}
+#endif
+
 // Sum a per-lane float across the 32-lane warp; result valid in lane 0.
 // HIP: DPP row-shift reduction + xor-16 exchange (cheaper than shfl on RDNA).
 // CUDA/others: standard __shfl_down_sync tree.
@@ -98,6 +128,11 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
     // LUT; all other dtype/platform combinations keep the warp-shuffle + pair-mul
     // path. Compile-time so the unused paths are dropped.
     constexpr bool HIP_BF16_VDOT2 = BNB_HIP && std::is_same_v<T, bnb_bfloat16>;
+#if !defined(BNB_HIP_DISABLE_FP16_DOT2)
+    constexpr bool HIP_FP16_DOT2 = BNB_HIP && std::is_same_v<T, half>;
+#else
+    constexpr bool HIP_FP16_DOT2 = false;
+#endif
 
     // Stage the fp16/fp32 centroid LUT in LDS on HIP instead of warp shuffle
     // (ds_bpermute). bf16 uses the VDOT2 LDS LUT above.
@@ -329,6 +364,17 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                         for (int k = 0; k < 4; k++)
                             partial = __builtin_amdgcn_fdot2_f32_bf16(a_pairs_d[k], b_chunk_d[k], partial, false);
                         acc[m] += partial * scale_f;
+#endif
+#if BNB_HIP
+                    } else if constexpr (HIP_FP16_DOT2) {
+                        const uint4 a_packed4 = *reinterpret_cast<const uint4*>(&A[m_global * K + a_k]);
+                        const f16x2_dot_t* a_pairs_d = reinterpret_cast<const f16x2_dot_t*>(&a_packed4);
+                        const f16x2_dot_t* b_pairs_d = reinterpret_cast<const f16x2_dot_t*>(b_chunk);
+                        float partial = 0.0f;
+#pragma unroll
+                        for (int k = 0; k < 4; k++)
+                            partial = fp16_dot2(a_pairs_d[k], b_pairs_d[k], partial);
+                        acc[m] += partial;
 #endif
                     } else {
                         // 8 T elements as uint4 (cached; A rows reused across N-tiles).
