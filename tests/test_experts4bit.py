@@ -154,3 +154,141 @@ def test_experts4bit_blocksize_validation():
 
 def test_experts4bit_is_exported():
     assert bnb.nn.Experts4bit is Experts4bit
+
+
+# --- Backward / autograd ---------------------------------------------------------------
+# Experts4bit is a *frozen* 4-bit base: the packed weights are requires_grad=False, so they
+# never receive gradients, but the per-expert dequant + linear + index_add_ forward is fully
+# differentiable w.r.t. the input activations. That makes it usable as the frozen base of a
+# QLoRA-style setup (gradients flow to adapters/earlier layers, not to the quantized weights).
+# These tests lock that contract in.
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
+def test_experts4bit_backward_flows_to_input(device, dtype):
+    gate_up, down = _random_expert_weights(dtype, device)
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=dtype)
+
+    hidden_states, top_k_index, top_k_weights = _random_routing(device)
+    hidden_states = hidden_states.to(dtype).detach().requires_grad_(True)
+
+    out = module(hidden_states, top_k_index, top_k_weights)
+    out.float().sum().backward()
+
+    # Gradient reaches the input activations, is finite, and is nonzero (every token is routed
+    # to TOP_K experts here, so every row contributes).
+    assert hidden_states.grad is not None
+    assert torch.isfinite(hidden_states.grad).all()
+    assert hidden_states.grad.float().abs().sum() > 0
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+def test_experts4bit_base_weights_stay_frozen(device):
+    gate_up, down = _random_expert_weights(torch.float32, device)
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+
+    # Packed weights are frozen by construction ...
+    assert module.gate_up_proj.requires_grad is False
+    assert module.down_proj.requires_grad is False
+
+    hidden_states, top_k_index, top_k_weights = _random_routing(device)
+    hidden_states = hidden_states.requires_grad_(True)
+    module(hidden_states, top_k_index, top_k_weights).sum().backward()
+
+    # ... and a backward pass leaves no gradient on them (so an optimizer can never nudge the
+    # quantized base, and the absmax buffers are not trainable either).
+    assert module.gate_up_proj.grad is None
+    assert module.down_proj.grad is None
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+def test_experts4bit_backward_matches_reference(device):
+    # float32 throughout: the module's autograd path must match a plain full-precision forward
+    # built from the *same* dequantized weights, isolating gradient correctness from quant error.
+    gate_up, down = _random_expert_weights(torch.float32, device)
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+
+    gate_up_deq = torch.stack(
+        [
+            module._dequantize_expert(
+                module.gate_up_proj, module.gate_up_absmax, module._gate_up_shape, e, torch.float32
+            )
+            for e in range(NUM_EXPERTS)
+        ]
+    )
+    down_deq = torch.stack(
+        [
+            module._dequantize_expert(module.down_proj, module.down_absmax, module._down_shape, e, torch.float32)
+            for e in range(NUM_EXPERTS)
+        ]
+    )
+
+    hidden_states, top_k_index, top_k_weights = _random_routing(device)
+    hs_mod = hidden_states.detach().clone().requires_grad_(True)
+    hs_ref = hidden_states.detach().clone().requires_grad_(True)
+
+    out_mod = module(hs_mod, top_k_index, top_k_weights)
+    out_ref = _reference_forward(gate_up_deq, down_deq, hs_ref, top_k_index, top_k_weights)
+
+    out_mod.sum().backward()
+    out_ref.sum().backward()
+
+    torch.testing.assert_close(out_mod, out_ref, rtol=1e-4, atol=1e-4)
+    torch.testing.assert_close(hs_mod.grad, hs_ref.grad, rtol=1e-4, atol=1e-4)
+
+
+def _load_experts_lora():
+    """Load the ExpertsLoRA reference wrapper from examples/ (kept out of the bnb API)."""
+    import importlib.util
+    import os
+
+    path = os.path.join(os.path.dirname(__file__), "..", "examples", "experts4bit_qlora_demo.py")
+    spec = importlib.util.spec_from_file_location("experts4bit_qlora_demo", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.ExpertsLoRA
+
+
+def test_experts4bit_lora_training_reduces_loss():
+    # End-to-end QLoRA-style step: a frozen 4-bit Experts4bit base + trainable per-expert LoRA.
+    # Proves the primitive supports training today — only the adapters move, the base stays put.
+    torch.manual_seed(0)
+    experts_lora = _load_experts_lora()
+
+    gate_up, down = _random_expert_weights(torch.float32, "cpu")
+    base = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+    model = experts_lora(base, r=4, alpha=8)
+
+    # Only LoRA adapters are trainable; the 4-bit base is frozen.
+    trainable_names = [name for name, p in model.named_parameters() if p.requires_grad]
+    assert trainable_names and all("lora" in name for name in trainable_names)
+
+    gate_up_before = base.gate_up_proj.clone()
+    down_before = base.down_proj.clone()
+
+    hidden_states, top_k_index, top_k_weights = _random_routing("cpu")
+    target = torch.randn_like(hidden_states)
+
+    # Standard LoRA init (B=0) => the adapted forward equals the frozen base forward at step 0.
+    torch.testing.assert_close(
+        model(hidden_states, top_k_index, top_k_weights),
+        base(hidden_states, top_k_index, top_k_weights),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+    optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad], lr=1e-2)
+    losses = []
+    for _ in range(30):
+        optimizer.zero_grad()
+        loss = torch.nn.functional.mse_loss(model(hidden_states, top_k_index, top_k_weights), target)
+        loss.backward()
+        assert base.gate_up_proj.grad is None and base.down_proj.grad is None
+        optimizer.step()
+        losses.append(loss.item())
+
+    assert losses[-1] < losses[0]  # training reduces loss
+    # The frozen 4-bit base is bit-identical before and after training.
+    assert torch.equal(base.gate_up_proj, gate_up_before)
+    assert torch.equal(base.down_proj, down_before)
