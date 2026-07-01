@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <type_traits>
 
-
 // GPU properties queried once per device and cached in gemm_4bit.cu.
 // Passed through dispatch into MMA launchers to avoid repeated cudaGetDevice calls.
 struct GpuProps {
@@ -53,7 +52,6 @@ static __device__ __constant__ float FP4_LUT_F32[16] = {
     -0.16666667f,     // 0b1110
     -0.25f,           // 0b1111
 };
-
 
 // Indicates whether `T` is a 16-bit float type supported in our kernels (currently `bnb_bfloat16` or `half`).
 template <typename T> constexpr bool is_16bit_float_v = std::is_same_v<T, bnb_bfloat16> || std::is_same_v<T, half>;

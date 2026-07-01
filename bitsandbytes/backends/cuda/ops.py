@@ -800,6 +800,7 @@ def _gemm_4bit_use_custom_cuda(device_index, dtype, M, N, K):
         return M <= (12 if K >= N * 3 else 10)
     return M <= (16 if (tall_k_2xn or n_blocks < 48) else 8)
 
+
 @functools.cache
 def _gemm_4bit_use_custom_rocm(device_index, dtype, M, N, K):
     """

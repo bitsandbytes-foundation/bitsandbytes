@@ -21,8 +21,8 @@
 
 #if BNB_HIP
 
-#include <hip/hip_bfloat16.h>
 #include <hip/hip_bf16.h>
+#include <hip/hip_bfloat16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_math_constants.h>
 #include <hip/hip_runtime.h>
