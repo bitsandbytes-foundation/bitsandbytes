@@ -21,7 +21,7 @@
 // Compatibility between HIP/CUDA APIs
 #if BUILD_HIP
 #define cudaStream_t hipStream_t
-#define __nv_bfloat16 hip_bfloat16
+#define __nv_bfloat16 __hip_bfloat16
 #define cublasLtHandle_t hipblasLtHandle_t
 #define cudaMallocManaged hipMallocManaged
 #define cudaMemAttachHost hipMemAttachHost
