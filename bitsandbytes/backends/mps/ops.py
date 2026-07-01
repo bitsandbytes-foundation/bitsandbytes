@@ -49,7 +49,6 @@ def _get_kernel():
     return _kernel
 
 
-
 @_try_torch_compile(dynamic=True)
 def _quantize_blockwise_compute(
     A_flat: torch.Tensor, code: torch.Tensor, blocksize: int
@@ -260,9 +259,7 @@ def _(
     # Dequantize the absmax values first.
     if absmax_8bit is not None:
         absmax = (
-            torch.ops.bitsandbytes.dequantize_blockwise.default(
-                absmax_8bit, absmax, absmax_code, 256, torch.float32
-            )
+            torch.ops.bitsandbytes.dequantize_blockwise.default(absmax_8bit, absmax, absmax_code, 256, torch.float32)
             + absmax_offset
         )
 
