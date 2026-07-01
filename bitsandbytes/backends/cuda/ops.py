@@ -593,6 +593,9 @@ def _gemm_4bit_use_custom_cuda(device_index, dtype, M, N, K):
       sm100 (B200/B300, HBM3e):       exits early at top of function.
       sm120 (RTX 5000, GDDR7):        dedicated block; medium-N tiers differ from sm89.
     """
+    if M <= _GEMM_4BIT_CUSTOM_FLOOR_M:
+        return True
+
     num_sms, major, minor = _gpu_dispatch_props(device_index)
     n_blocks = (N + 63) // 64
 
@@ -797,15 +800,26 @@ def _gemm_4bit_use_custom_cuda(device_index, dtype, M, N, K):
         return M <= (12 if K >= N * 3 else 10)
     return M <= (16 if (tall_k_2xn or n_blocks < 48) else 8)
 
-
+@functools.cache
 def _gemm_4bit_use_custom_rocm(device_index, dtype, M, N, K):
-    """Fused SIMT kernel vs dequant+F.linear heuristic for ROCm. The SIMT kernel beats
-    dequant through ~M=8 on RDNA3/RDNA4; CDNA/unknown archs have no calibration yet, so
-    they use the M<=4 floor only. TODO: revisit once WMMA/MFMA kernels land."""
+    """
+    Fused SIMT kernel vs dequant+F.linear heuristic for ROCm.
+
+    RDNA3/RDNA4 calibration keeps the SIMT kernel through ~M=8.
+    CDNA/gfx9 is calibrated on MI308X (gfx942): bf16/fp16 win through M<=4
+    after the SIMT math-path tuning, while fp32 only has a broad win through M<=2.
+
+    TODO: revisit once WMMA/MFMA kernels land.
+    """
+    if M <= _GEMM_4BIT_CUSTOM_FLOOR_M and dtype != torch.float32:
+        return True
+
     arch = _rocm_gfx_arch(device_index)
     if arch.startswith("gfx11") or arch.startswith("gfx12"):  # RDNA3 / RDNA4
         return M <= 8
-    return False  # CDNA / unknown: conservative (floor only)
+    if arch.startswith("gfx9"):  # CDNA / MI-series
+        return M <= (2 if dtype == torch.float32 else 4)
+    return M <= 4  # unknown ROCm arch: conservative tiny-batch floor
 
 
 def _rocm_gfx_arch(device_index):
@@ -889,7 +903,7 @@ def _dequant_linear_fallback(
 
 # Unified CUDA/ROCm dispatch for bitsandbytes::gemm_4bit. The choice *among* custom
 # kernels (CUDA SIMT vs MMA; ROCm SIMT) is made in the C dispatch (csrc/gemm_4bit.cu).
-_GEMM_4BIT_CUSTOM_FLOOR_M = 4  # always custom at tiny M on every arch
+_GEMM_4BIT_CUSTOM_FLOOR_M = 4
 if torch.version.hip is None:
     _gemm_4bit_use_custom_fn = _gemm_4bit_use_custom_cuda
     # NVIDIA: dequant+F.linear wins past M=1536 (dequant savings negligible at very
@@ -897,8 +911,8 @@ if torch.version.hip is None:
     _gemm_4bit_custom_max_m = 1536
 else:
     _gemm_4bit_use_custom_fn = _gemm_4bit_use_custom_rocm
-    # ROCm: only the SIMT kernel exists today (wins to ~M=8); 256 is an optimistic
-    # placeholder cap, revisit once WMMA (RDNA) / MFMA (CDNA) kernels land.
+    # ROCm: the custom path is SIMT-only today; the per-arch heuristic above owns
+    # RDNA/CDNA thresholds. Keep a hard upper cap while WMMA/MFMA paths are absent.
     _gemm_4bit_custom_max_m = 256
 
 
@@ -919,8 +933,9 @@ def _(
     M = A.numel() // K
     N = shapeB[0]
 
-    # M<=floor is always custom; above that the per-arch heuristic decides. Past
-    # custom_max_m (or for blocksize-misaligned K) use the dequant+F.linear fallback.
+    # The backend-specific heuristic owns tiny-M floors and per-arch thresholds.
+    # Past custom_max_m (or for blocksize-misaligned K), use the dequant+F.linear
+    # fallback.
     if M > _gemm_4bit_custom_max_m:
         use_custom = False
     elif K % blocksize != 0:
@@ -931,7 +946,7 @@ def _(
         )
         use_custom = False
     else:
-        use_custom = M <= _GEMM_4BIT_CUSTOM_FLOOR_M or _gemm_4bit_use_custom_fn(A.device.index, A.dtype, M, N, K)
+        use_custom = _gemm_4bit_use_custom_fn(A.device.index, A.dtype, M, N, K)
 
     if not use_custom:
         return _dequant_linear_fallback(

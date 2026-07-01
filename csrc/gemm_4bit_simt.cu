@@ -7,6 +7,47 @@
 #include "gemm_4bit_common.cuh"
 #include "gemm_4bit_simt.cuh"
 
+// Use fmaf for the fp32 accumulate path (single rounding) instead of acc + a * b.
+#if defined(__GFX9__)
+#define BNB_SIMT_F32_FMAF 1
+#else
+#define BNB_SIMT_F32_FMAF 0
+#endif
+
+// Accumulate fp16/bf16 pairs in fp32 via fused multiply-add instead of vector
+// pair-multiply + reduce. Combined with the fp32 fmaf path this is the gfx9 win.
+#if defined(__GFX9__)
+#define BNB_SIMT_16BIT_FLOAT_FMA 1
+#else
+#define BNB_SIMT_16BIT_FLOAT_FMA 0
+#endif
+
+#if defined(__GFX9__)
+#define BNB_SIMT_BF16_UNSCALED_CENTROID 1
+#else
+#define BNB_SIMT_BF16_UNSCALED_CENTROID 0
+#endif
+
+#if defined(__GFX9__)
+#define BNB_SIMT_FP16_UNSCALED_CENTROID 1
+#else
+#define BNB_SIMT_FP16_UNSCALED_CENTROID 0
+#endif
+
+#if defined(__GFX9__)
+#define BNB_SIMT_FP16_PACKED_ACCUM 1
+#else
+#define BNB_SIMT_FP16_PACKED_ACCUM 0
+#endif
+
+#if defined(__GFX11__) || defined(__GFX12__)
+#define BNB_HIP_BF16_VDOT2 1
+#define BNB_HIP_FP16_DOT2 1
+#else
+#define BNB_HIP_BF16_VDOT2 0
+#define BNB_HIP_FP16_DOT2 0
+#endif
+
 // Warps per block; each warp owns one N-column. CTA size = WARPS_PER_BLOCK * 32.
 static constexpr int WARPS_PER_BLOCK = 4;
 
@@ -29,32 +70,18 @@ __device__ __forceinline__ bnb_bfloat162 vec2_mul(bnb_bfloat162 a, bnb_bfloat162
 #if BNB_HIP
 using f16x2_dot_t = __2f16;
 
-__device__ __forceinline__ float fp16_dot2_ockl(f16x2_dot_t a, f16x2_dot_t b, float c) {
+__device__ __forceinline__ float fp16_dot2(f16x2_dot_t a, f16x2_dot_t b, float c) {
     return __ockl_fdot2(a, b, c, false);
 }
+#endif
 
-__device__ __forceinline__ uint32_t f16x2_bits(f16x2_dot_t v) {
-    return *reinterpret_cast<const uint32_t*>(&v);
-}
-
-__device__ __forceinline__ float fp16_dot2_asm(f16x2_dot_t a, f16x2_dot_t b, float c) {
-    const uint32_t a_bits = f16x2_bits(a);
-    const uint32_t b_bits = f16x2_bits(b);
-    float out;
-    asm volatile("v_dot2_f32_f16 %0, %1, %2, %3"
-                 : "=v"(out)
-                 : "v"(a_bits), "v"(b_bits), "v"(c));
-    return out;
-}
-
-__device__ __forceinline__ float fp16_dot2(f16x2_dot_t a, f16x2_dot_t b, float c) {
-#if defined(BNB_HIP_USE_FP16_DOT2_ASM)
-    return fp16_dot2_asm(a, b, c);
+__device__ __forceinline__ float simt_fma_f32(float acc, float a, float b) {
+#if BNB_SIMT_F32_FMAF
+    return fmaf(a, b, acc);
 #else
-    return fp16_dot2_ockl(a, b, c);
+    return acc + a * b;
 #endif
 }
-#endif
 
 // Sum a per-lane float across the 32-lane warp; result valid in lane 0.
 // HIP: DPP row-shift reduction + xor-16 exchange (cheaper than shfl on RDNA).
@@ -82,14 +109,14 @@ __device__ __forceinline__ float simt_warp_reduce_sum(float v) {
 /// Supports single-level and double-quantized (nested) absmax.
 ///
 /// Dtype paths:
-///   HIP bf16:  LDS bf16 LUT + native v_dot2_f32_bf16
+///   HIP bf16:  LDS bf16 LUT + native v_dot2_f32_bf16 (when enabled)
 ///   HIP fp16/fp32: LDS centroid LUT; pair/scalar math
 ///   CUDA:      warp-shuffle LUT; pair/scalar math
 ///
 /// Grid: (ceil(N/WARPS_PER_BLOCK), ceil(M/M_BLOCK))
 ///
-/// @tparam T       Input/output dtype (`bnb_bfloat16`, `half`, or `float`)
-/// @tparam M_BLOCK M rows per block
+/// @tparam T           Input/output dtype (`bnb_bfloat16`, `half`, or `float`)
+/// @tparam M_BLOCK     M rows per block
 template <typename T, int M_BLOCK = 1>
 __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
     // clang-format off
@@ -125,14 +152,14 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
     const int base_m = blockIdx.y * M_BLOCK;
 
     // HIP bf16 uses the native v_dot2_f32_bf16 dot product with an LDS centroid
-    // LUT; all other dtype/platform combinations keep the warp-shuffle + pair-mul
-    // path. Compile-time so the unused paths are dropped.
-    constexpr bool HIP_BF16_VDOT2 = BNB_HIP && std::is_same_v<T, bnb_bfloat16>;
-#if !defined(BNB_HIP_DISABLE_FP16_DOT2)
-    constexpr bool HIP_FP16_DOT2 = BNB_HIP && std::is_same_v<T, half>;
-#else
-    constexpr bool HIP_FP16_DOT2 = false;
-#endif
+    // LUT when BNB_HIP_BF16_VDOT2 is set; all other dtype/platform
+    // combinations keep the warp-shuffle + pair-mul path. Compile-time so the
+    // unused paths are dropped.
+    constexpr bool HIP_BF16_VDOT2 = BNB_HIP && BNB_HIP_BF16_VDOT2 && std::is_same_v<T, bnb_bfloat16>;
+    constexpr bool HIP_FP16_DOT2 = BNB_HIP && BNB_HIP_FP16_DOT2 && std::is_same_v<T, half>;
+    constexpr bool BF16_UNSCALED_CENTROID =
+        BNB_HIP && BNB_SIMT_BF16_UNSCALED_CENTROID && !HIP_BF16_VDOT2 && std::is_same_v<T, bnb_bfloat16>;
+    constexpr bool FP16_UNSCALED_CENTROID = BNB_HIP && BNB_SIMT_FP16_UNSCALED_CENTROID && std::is_same_v<T, half>;
 
     // Stage the fp16/fp32 centroid LUT in LDS on HIP instead of warp shuffle
     // (ds_bpermute). bf16 uses the VDOT2 LDS LUT above.
@@ -280,11 +307,13 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
 
         // Decode B and accumulate.
         // HIP bf16:   bf16 LDS-LUT centroids, native v_dot2_f32_bf16, scale once per sub.
-        // bf16/fp16:  uint16-in-uint32 LUT, hmul2 vector math, 1x uint4 A load per sub-iter.
+        // bf16/fp16:  uint16-in-uint32 LUT, fp32 FMA accumulate, 1x uint4 A load per sub-iter.
         // fp32:       float LUT, scalar multiply, 2x uint4 A loads per sub-iter.
         [[maybe_unused]] T2 scale_x2{};
-        if constexpr (!std::is_same_v<T, float> && !HIP_BF16_VDOT2)
-            scale_x2 = broadcast_vec2<T>(scale_f);
+        if constexpr (!std::is_same_v<T, float>) {
+            if constexpr (!HIP_BF16_VDOT2 && !BF16_UNSCALED_CENTROID && !FP16_UNSCALED_CENTROID)
+                scale_x2 = broadcast_vec2<T>(scale_f);
+        }
 
 #pragma unroll
         for (int sub = 0; sub < 4; sub++) {
@@ -292,7 +321,7 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
             // hi nibble (>>4) = lower K index, lo nibble (&0xf) = higher K index.
             [[maybe_unused]] T2 b_chunk[4];
             [[maybe_unused]] float b_dq[8];
-#if BNB_HIP
+#if BNB_HIP && BNB_HIP_BF16_VDOT2
             // VDOT2 centroid pairs (no scale baked in); scale applied once below.
             using bf16x2_t = __bf16 __attribute__((ext_vector_type(2)));
             [[maybe_unused]] bf16x2_t b_chunk_d[4];
@@ -310,8 +339,8 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                         b_dq[j * 2] = __shfl_sync(BNB_FULL_WARP_MASK, my_lut_f32_shfl, byte >> 4, 32) * scale_f;
                         b_dq[j * 2 + 1] = __shfl_sync(BNB_FULL_WARP_MASK, my_lut_f32_shfl, byte & 0x0f, 32) * scale_f;
                     }
+#if BNB_HIP && BNB_HIP_BF16_VDOT2
                 } else if constexpr (HIP_BF16_VDOT2) {
-#if BNB_HIP
                     const uint16_t hi16 = quant_map_bf16[byte >> 4];
                     const uint16_t lo16 = quant_map_bf16[byte & 0x0f];
                     b_chunk_d[j] =
@@ -329,7 +358,11 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                         hi = __shfl_sync(BNB_FULL_WARP_MASK, my_lut_u32, byte >> 4, 32);
                         lo = __shfl_sync(BNB_FULL_WARP_MASK, my_lut_u32, byte & 0x0f, 32);
                     }
-                    b_chunk[j] = vec2_mul(vec2_from_u16bits<T>(hi, lo), scale_x2);
+                    if constexpr (BF16_UNSCALED_CENTROID || FP16_UNSCALED_CENTROID) {
+                        b_chunk[j] = vec2_from_u16bits<T>(hi, lo);
+                    } else {
+                        b_chunk[j] = vec2_mul(vec2_from_u16bits<T>(hi, lo), scale_x2);
+                    }
                 }
             }
 
@@ -349,11 +382,11 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                         const float* fb = reinterpret_cast<const float*>(&a4b);
 #pragma unroll
                         for (int k = 0; k < 4; k++) {
-                            acc[m] += fa[k] * b_dq[k];
-                            acc[m] += fb[k] * b_dq[k + 4];
+                            acc[m] = simt_fma_f32(acc[m], fa[k], b_dq[k]);
+                            acc[m] = simt_fma_f32(acc[m], fb[k], b_dq[k + 4]);
                         }
                     } else if constexpr (HIP_BF16_VDOT2) {
-#if BNB_HIP
+#if BNB_HIP && BNB_HIP_BF16_VDOT2
                         // Native v_dot2_f32_bf16 over 8 K elements (4 pairs),
                         // accumulating in fp32; multiply by the scale once. This
                         // avoids the bf16-multiply round-to-nearest-even emulation on RDNA.
@@ -365,8 +398,8 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                             partial = __builtin_amdgcn_fdot2_f32_bf16(a_pairs_d[k], b_chunk_d[k], partial, false);
                         acc[m] += partial * scale_f;
 #endif
-#if BNB_HIP
                     } else if constexpr (HIP_FP16_DOT2) {
+#if BNB_HIP && BNB_HIP_FP16_DOT2
                         const uint4 a_packed4 = *reinterpret_cast<const uint4*>(&A[m_global * K + a_k]);
                         const f16x2_dot_t* a_pairs_d = reinterpret_cast<const f16x2_dot_t*>(&a_packed4);
                         const f16x2_dot_t* b_pairs_d = reinterpret_cast<const f16x2_dot_t*>(b_chunk);
@@ -393,10 +426,44 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                         const uint4 a_packed4 = *reinterpret_cast<const uint4*>(&A[m_global * K + a_k]);
 #endif
                         const T2* a_pairs = reinterpret_cast<const T2*>(&a_packed4);
+#if BNB_SIMT_16BIT_FLOAT_FMA
+                        if constexpr (std::is_same_v<T, half> && BNB_SIMT_FP16_PACKED_ACCUM) {
+                            half2 partial_h2 = __float2half2_rn(0.0f);
 #pragma unroll
-                        for (int k = 0; k < 4; k++) {
-                            const float2 p = vec2_to_float2(vec2_mul(a_pairs[k], b_chunk[k]));
-                            acc[m] += p.x + p.y;
+                            for (int k = 0; k < 4; k++)
+                                partial_h2 = __hfma2(a_pairs[k], b_chunk[k], partial_h2);
+                            const float2 partial = __half22float2(partial_h2);
+                            const float sum = partial.x + partial.y;
+                            if constexpr (FP16_UNSCALED_CENTROID) {
+                                acc[m] = simt_fma_f32(acc[m], sum, scale_f);
+                            } else {
+                                acc[m] += sum;
+                            }
+                        } else
+#endif
+                        {
+#pragma unroll
+                            for (int k = 0; k < 4; k++) {
+#if BNB_SIMT_16BIT_FLOAT_FMA
+                                // Accumulate each pair in fp32 with fused multiply-add.
+                                if constexpr (BF16_UNSCALED_CENTROID || FP16_UNSCALED_CENTROID) {
+                                    const float2 af = vec2_to_float2(a_pairs[k]);
+                                    const float2 bf = vec2_to_float2(b_chunk[k]);
+                                    float partial = 0.0f;
+                                    partial = simt_fma_f32(partial, af.x, bf.x);
+                                    partial = simt_fma_f32(partial, af.y, bf.y);
+                                    acc[m] = simt_fma_f32(acc[m], partial, scale_f);
+                                } else {
+                                    const float2 af = vec2_to_float2(a_pairs[k]);
+                                    const float2 bf = vec2_to_float2(b_chunk[k]);
+                                    acc[m] = simt_fma_f32(acc[m], af.x, bf.x);
+                                    acc[m] = simt_fma_f32(acc[m], af.y, bf.y);
+                                }
+#else
+                                const float2 p = vec2_to_float2(vec2_mul(a_pairs[k], b_chunk[k]));
+                                acc[m] += p.x + p.y;
+#endif
+                            }
                         }
                     }
                 }
