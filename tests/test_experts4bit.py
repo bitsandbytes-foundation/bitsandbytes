@@ -292,3 +292,58 @@ def test_experts4bit_lora_training_reduces_loss():
     # The frozen 4-bit base is bit-identical before and after training.
     assert torch.equal(base.gate_up_proj, gate_up_before)
     assert torch.equal(base.down_proj, down_before)
+
+
+# --- #1849 regression + shape coverage ------------------------------------------------------------
+
+
+def test_experts4bit_1849_regression_fused_experts_get_quantized():
+    """Regression for #1849. transformers v5 stores MoE experts as a single fused 3D ``nn.Parameter``
+    (``[num_experts, out, in]``, e.g. ``Qwen3MoeExperts``), which the default 4-bit walker skips because
+    there is no ``nn.Linear`` to replace — so the experts stay full-precision and dominate memory.
+    ``Experts4bit`` is the fix: it actually 4-bit-quantizes the fused stack. Assert (a) the fused module
+    exposes no ``nn.Linear`` for the walker to catch, and (b) ``from_float`` yields ``uint8``-packed 4-bit
+    weights materially smaller than the fp16 originals."""
+    num_experts, hidden, inter = 4, 128, 256
+
+    class FusedExperts(torch.nn.Module):  # mirrors OlmoeExperts / Qwen3MoeExperts from #1849
+        def __init__(self):
+            super().__init__()
+            self.gate_up_proj = torch.nn.Parameter(torch.randn(num_experts, 2 * inter, hidden) * 0.1)
+            self.down_proj = torch.nn.Parameter(torch.randn(num_experts, hidden, inter) * 0.1)
+
+    fused = FusedExperts()
+    # (a) the walker's target type is absent -> a Linear4bit conversion would be a silent no-op here.
+    assert not any(isinstance(m, torch.nn.Linear) for m in fused.modules())
+    fp16_bytes = (fused.gate_up_proj.numel() + fused.down_proj.numel()) * 2
+
+    # (b) Experts4bit quantizes the fused stack: uint8-packed 4-bit weights + small fp32 absmax.
+    q = Experts4bit.from_float(
+        fused.gate_up_proj.data.half(), fused.down_proj.data.half(), compute_dtype=torch.float16
+    )
+    assert q.gate_up_proj.dtype == torch.uint8 and q.down_proj.dtype == torch.uint8
+    quantized_bytes = (
+        q.gate_up_proj.numel() + q.down_proj.numel()  # uint8 packed
+        + (q.gate_up_absmax.numel() + q.down_absmax.numel()) * 4  # fp32 absmax
+    )
+    assert quantized_bytes < fp16_bytes / 3  # ~4x on the weights, minus small absmax overhead
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize(
+    "num_experts,hidden,inter",
+    [(2, 64, 64), (8, 128, 256), (4, 192, 320)],
+    ids=["e2_h64_i64", "e8_h128_i256", "e4_h192_i320"],
+)
+def test_experts4bit_shapes(device, num_experts, hidden, inter):
+    """Forward is correct across a spread of MoE dims (all multiples of the blocksize)."""
+    gate_up = torch.randn(num_experts, 2 * inter, hidden, dtype=torch.float32, device=device) * 0.1
+    down = torch.randn(num_experts, hidden, inter, dtype=torch.float32, device=device) * 0.1
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+
+    n_tok = 10
+    hidden_states = torch.randn(n_tok, hidden, device=device)
+    top_k_index = torch.randint(0, num_experts, (n_tok, TOP_K), device=device)
+    top_k_weights = torch.softmax(torch.randn(n_tok, TOP_K, device=device), dim=-1)
+    out = module(hidden_states, top_k_index, top_k_weights)
+    assert out.shape == (n_tok, hidden) and torch.isfinite(out).all()
