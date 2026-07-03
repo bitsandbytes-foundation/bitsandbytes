@@ -48,76 +48,36 @@ jobs:
     outputs:
       test_runner: ${{ steps.config.outputs.test_runner }}
       artifact_name: ${{ steps.config.outputs.artifact_name }}
-      build_os: ${{ steps.config.outputs.build_os }}
-      arch: ${{ steps.config.outputs.arch }}
     steps:
       - name: Configure test runner and paths
         id: config
         shell: bash
         run: |
-          # Map platform to OS identifiers, architecture, and test runner
+          # Map platform to test runner
           case "${{ inputs.platform }}" in
             linux-x64)
-              BUILD_OS="ubuntu-22.04"
-              ARCH="x64"
               if [[ "${{ inputs.backend }}" == "cuda" ]]; then
                 case "${{ inputs.gpu_type }}" in
-                  T4)
-                    TEST_RUNNER="bandb-aws-g4dn-4xlarge-plus-use1-public-80"
-                    ;;
-                  A10)
-                    TEST_RUNNER="bandb-aws-g5-4xlarge-plus-use1-public-80"
-                    ;;
-                  L40S)
-                    TEST_RUNNER="bandb-aws-g6e-4xlarge-plus-use1-public-80"
-                    ;;
-                  *)
-                    echo "::error::Must specify gpu_type (T4, A10, L40S) for linux-x64 cuda backend"
-                    exit 1
-                    ;;
+                  T4)    TEST_RUNNER="bandb-aws-g4dn-4xlarge-plus-use1-public-80" ;;
+                  A10)   TEST_RUNNER="bandb-aws-g5-4xlarge-plus-use1-public-80" ;;
+                  L40S)  TEST_RUNNER="bandb-aws-g6e-4xlarge-plus-use1-public-80" ;;
+                  *)     echo "::error::Must specify gpu_type (T4, A10, L40S) for linux-x64 cuda backend"; exit 1 ;;
                 esac
               else
                 case "${{ inputs.cpu_type }}" in
-                  icelake)
-                    TEST_RUNNER="banb-aws-general-8-plus-use1-public-80"
-                    ;;
-                  cascadelake)
-                    TEST_RUNNER="bandb-aws-g4dn-4xlarge-plus-use1-public-80"
-                    ;;
-                  "")
-                    TEST_RUNNER="ubuntu-22.04"
-                    ;;
-                  *)
-                    echo "::error::Invalid cpu_type: ${{ inputs.cpu_type }}"
-                    exit 1
-                    ;;
+                  icelake)     TEST_RUNNER="banb-aws-general-8-plus-use1-public-80" ;;
+                  cascadelake) TEST_RUNNER="bandb-aws-g4dn-4xlarge-plus-use1-public-80" ;;
+                  "")          TEST_RUNNER="ubuntu-22.04" ;;
+                  *)           echo "::error::Invalid cpu_type: ${{ inputs.cpu_type }}"; exit 1 ;;
                 esac
               fi
               ;;
-            linux-aarch64)
-              BUILD_OS="ubuntu-22.04-arm"
-              ARCH="aarch64"
-              TEST_RUNNER="ubuntu-22.04-arm"
-              ;;
-            macos)
-              BUILD_OS="macos-15"
-              ARCH="arm64"
-              TEST_RUNNER="macos-15"
-              ;;
+            linux-aarch64) TEST_RUNNER="ubuntu-22.04-arm" ;;
+            macos)         TEST_RUNNER="macos-15" ;;
             windows)
-              BUILD_OS="windows-2025"
-              ARCH="x64"
-              if [[ "${{ inputs.backend }}" == "cuda" ]]; then
-                TEST_RUNNER="CUDA-Windows-x64"
-              else
-                TEST_RUNNER="windows-2025"
-              fi
+              [[ "${{ inputs.backend }}" == "cuda" ]] && TEST_RUNNER="CUDA-Windows-x64" || TEST_RUNNER="windows-2025"
               ;;
-            windows-arm64)
-              BUILD_OS="windows-11-arm"
-              ARCH="arm64"
-              TEST_RUNNER="windows-11-arm"
-              ;;
+            windows-arm64) TEST_RUNNER="windows-11-arm" ;;
             *)
               echo "::error::Unsupported platform: ${{ inputs.platform }}"
               exit 1
@@ -125,26 +85,16 @@ jobs:
           esac
 
           # Create unique artifact name per configuration
-          ARTIFACT="lib_${{ inputs.backend }}_${BUILD_OS}_${ARCH}"
-          if [[ "${{ inputs.backend }}" == "cuda" ]]; then
-            ARTIFACT="${ARTIFACT}_${{ inputs.cuda_version }}_${{ inputs.gpu_type }}"
-          else
-            ARTIFACT="${ARTIFACT}_${{ inputs.cpu_type }}"
-          fi
+          ARTIFACT="lib_${{ inputs.backend }}_${RUNNER_OS}_${RUNNER_ARCH}"
+          [[ "${{ inputs.backend }}" == "cuda" ]] && ARTIFACT="${ARTIFACT}_${{ inputs.cuda_version }}_${{ inputs.gpu_type }}"
+          [[ "${{ inputs.backend }}" == "cpu"  ]] && ARTIFACT="${ARTIFACT}_${{ inputs.cpu_type }}"
           ARTIFACT="${ARTIFACT}_torch${{ inputs.torch_version }}_${{ github.run_id }}_${{ github.run_attempt }}"
 
           echo "test_runner=${TEST_RUNNER}" >> $GITHUB_OUTPUT
           echo "artifact_name=${ARTIFACT}" >> $GITHUB_OUTPUT
-          echo "build_os=${BUILD_OS}" >> $GITHUB_OUTPUT
-          echo "arch=${ARCH}" >> $GITHUB_OUTPUT
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Set build environment variables
-        shell: bash
-        run: |
-          echo "build_os=${{ steps.config.outputs.build_os }}" >> $GITHUB_ENV
-          echo "build_arch=${{ steps.config.outputs.arch }}" >> $GITHUB_ENV
 
       # Windows + CUDA: Install CUDA Toolkit
       - name: Install CUDA Toolkit
@@ -159,9 +109,10 @@ jobs:
       # Windows: Setup MSVC (needed for both CPU and CUDA builds)
       - name: Setup MSVC
         if: startsWith(inputs.platform, 'windows')
-        uses: ilammy/msvc-dev-cmd@v1.13.0
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: ${{ inputs.platform == 'windows-arm64' && 'arm64' || 'x64' }}
+          toolset: ${{ (inputs.platform == 'windows' && inputs.backend == 'cuda') && '14.44' || '' }}
 
       # Build CPU backend
       - name: Build C++
@@ -173,15 +124,16 @@ jobs:
         if: inputs.backend == 'cuda'
         run: bash .github/scripts/build-cuda.sh
         env:
-          cuda_version: ${{ inputs.cuda_version }}
-          cuda_targets: "75;80;89"
+          CUDA_VERSION: ${{ inputs.cuda_version }}
+          CUDA_TARGETS: "75;80;89"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ steps.config.outputs.artifact_name }}
-          path: output/${{ steps.config.outputs.build_os }}/${{ steps.config.outputs.arch }}/*
+          path: output/${{ runner.os }}/${{ runner.arch }}/*
           retention-days: 7
+          if-no-files-found: error
 
   test:
     needs: build
@@ -194,17 +146,17 @@ jobs:
         if: inputs.backend == 'cuda'
         run: nvidia-smi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Download build artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ needs.build.outputs.artifact_name }}
           path: bitsandbytes/
           merge-multiple: true
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           # Python for Windows ARM64 is only available from 3.12+
           python-version: ${{ inputs.platform == 'windows-arm64' && '3.12' || '3.10' }}
@@ -212,7 +164,7 @@ jobs:
       # Windows: Setup MSVC for torch.compile
       - name: Setup MSVC
         if: startsWith(inputs.platform, 'windows')
-        uses: ilammy/msvc-dev-cmd@v1.13.0
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: ${{ inputs.platform == 'windows-arm64' && 'arm64' || 'x64' }}
 

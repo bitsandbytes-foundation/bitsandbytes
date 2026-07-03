@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from functools import cache, wraps
-from math import sqrt
+from math import prod, sqrt
 from typing import Optional
 
 import torch
@@ -196,7 +196,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
     return q.reshape(A.shape), absmax
 
 
-@_try_torch_compile(dynamic=True)
+@_try_torch_compile(dynamic=False)
 def _dequantize_blockwise_compute(
     A_flat: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype
 ):
@@ -259,7 +259,7 @@ def _(
     return packed, absmax
 
 
-@_try_torch_compile(dynamic=True)
+@_try_torch_compile(dynamic=False)
 def _dequantize_4bit_compute(
     A_flat: torch.Tensor,
     absmax: torch.Tensor,
@@ -268,9 +268,7 @@ def _dequantize_4bit_compute(
     shape: Sequence[int],
     dtype: torch.dtype,
 ):
-    n = 1
-    for s in shape:
-        n *= s
+    n = prod(shape)
     out_dq = torch.empty(A_flat.size(0) * 2, dtype=torch.int32, device=A_flat.device)
     out_dq[1::2] = A_flat & 0xF
     out_dq[::2] = A_flat >> 4

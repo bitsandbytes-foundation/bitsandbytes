@@ -31,36 +31,24 @@ jobs:
   build-cpu:
     strategy:
       matrix:
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-          - os: windows-2025
-            arch: x86_64
-          - os: windows-11-arm
-            arch: arm64
-          - os: macos-15
-            arch: arm64
+        os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, windows-11-arm, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Setup MSVC
-        if: startsWith(matrix.os, 'windows')
-        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
-          arch: ${{ matrix.arch == 'arm64' && 'arm64' || 'x64' }}
+          arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
       - name: Build C++
         run: bash .github/scripts/build-cpu.sh
-        env:
-          build_os: ${{ matrix.os }}
-          build_arch: ${{ matrix.arch }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shared_library_${{ matrix.os }}_${{ matrix.arch }}
+          name: shared_library_${{ runner.os }}_${{ runner.arch }}
           path: output/*
           retention-days: 7
+          if-no-files-found: error
 
   ##
   # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)
@@ -70,21 +58,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-          - os: windows-2025
-            arch: x86_64
         cuda_version:
-          ["11.8.0", "12.0.1", "12.1.1", "12.2.2", "12.3.2", "12.4.1", "12.5.1", "12.6.3", "12.8.1", "12.9.1", "13.0.2", "13.2.0"]
+          ["11.8.0", "12.1.1", "12.4.1", "12.6.3", "12.8.1", "13.0.2", "13.2.0"]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         # Windows: We install Cuda on the agent (slow)
       - uses: Jimver/cuda-toolkit@3d45d157f327c09c04b50ee6ccdea2d9d017ec76 # v0.2.35
-        if: startsWith(matrix.os, 'windows')
+        if: runner.os == 'Windows'
         id: cuda-toolkit
         with:
           cuda: ${{ matrix.cuda_version }}
@@ -93,63 +74,59 @@ jobs:
           sub-packages: ${{ format('["nvcc"{0},"cudart","cublas","thrust","cublas_dev"]', startsWith(matrix.cuda_version, '13.') && ',"crt","nvvm","nvptxcompiler"' || '') }}
           use-github-cache: false
           use-local-cache: false
-          log-file-suffix: ${{matrix.os}}-${{matrix.cuda_version}}.txt
+          log-file-suffix: ${{ runner.os }}-${{ runner.arch }}-${{matrix.cuda_version}}.txt
       - name: Setup MSVC
-        if: startsWith(matrix.os, 'windows')
-        uses: ilammy/msvc-dev-cmd@v1.13.0 # to use cl
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          toolset: "14.44"
       - name: Build C++
         run: bash .github/scripts/build-cuda.sh
         env:
-          build_os: ${{ matrix.os }}
-          build_arch: ${{ matrix.arch }}
-          cuda_version: ${{ matrix.cuda_version }}
+          CUDA_VERSION: ${{ matrix.cuda_version }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shared_library_cuda_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.cuda_version }}
+          name: shared_library_cuda_${{ runner.os }}_${{ runner.arch }}_${{ matrix.cuda_version }}
           path: output/*
           retention-days: 7
+          if-no-files-found: error
 
   build-xpu:
     strategy:
       matrix:
-        os: [ubuntu-22.04, windows-2025]
+        os: [ubuntu-22.04, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Build C++ (Linux)
         if: runner.os == 'Linux'
         run: bash .github/scripts/build-xpu.sh
-        env:
-          build_os: ${{ matrix.os }}
       - name: Build C++ (Windows)
         if: runner.os == 'Windows'
         run: .github/scripts/build-xpu-windows.bat
         shell: cmd
-        env:
-          build_os: ${{ matrix.os }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shared_library_xpu_${{ matrix.os }}_x86_64
+          name: shared_library_xpu_${{ runner.os }}_${{ runner.arch }}
           path: output/*
           retention-days: 7
+          if-no-files-found: error
 
   build-rocm:
     strategy:
       matrix:
         os: [ubuntu-22.04]
-        arch: [x86_64]
         rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1.1", "7.2.3"]
         include:
           - os: windows-2025
-            arch: x86_64
             rocm_version: "7.2.1"
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Clean up disk space
-        if: startsWith(matrix.os, 'ubuntu')
+        if: runner.os == 'Linux'
         run: |
           echo "Disk space before cleanup:"
           df -h
@@ -166,20 +143,21 @@ jobs:
           echo "Disk space after cleanup:"
           df -h
       - name: Setup MSVC
-        if: startsWith(matrix.os, 'windows')
-        uses: ilammy/msvc-dev-cmd@v1.13.0
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          toolset: "14.44"
       - name: Build C++
         run: bash .github/scripts/build-rocm.sh
         env:
-          build_os: ${{ matrix.os }}
-          build_arch: ${{ matrix.arch }}
-          rocm_version: ${{ matrix.rocm_version }}
+          ROCM_VERSION: ${{ matrix.rocm_version }}
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shared_library_rocm_${{ matrix.os }}_${{ matrix.arch }}_${{ matrix.rocm_version }}
+          name: shared_library_rocm_${{ runner.os }}_${{ runner.arch }}_${{ matrix.rocm_version }}
           path: output/*
           retention-days: 7
+          if-no-files-found: error
 
   build-wheels:
     env:
@@ -193,59 +171,44 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025, windows-11-arm, macos-15]
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-            python-version: "3.10"
-          - os: ubuntu-22.04-arm
-            arch: aarch64
-            python-version: "3.10"
-          - os: windows-2025
-            arch: x86_64
-            python-version: "3.10"
-          - os: windows-11-arm
-            arch: arm64
-            # Python for Windows ARM64 is only available from 3.12+
-            python-version: "3.12"
-          - os: macos-15
-            arch: arm64
-            python-version: "3.10"
         # The specific Python version is irrelevant in this context as we are only packaging non-C extension
         # code. This ensures compatibility across Python versions, as compatibility is
         # dictated by the packaged code itself, not the Python version used for packaging.
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           merge-multiple: true
-          pattern: "shared_library*_${{ matrix.os }}_${{ matrix.arch }}*"
+          pattern: "shared_library*_${{ runner.os }}_${{ runner.arch }}*"
           path: output/
       - name: Copy correct platform shared library
         shell: bash
         run: |
           ls -lR output/
-          cp output/${{ matrix.os }}/${{ matrix.arch }}/* bitsandbytes/
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+          cp output/${{ runner.os }}/${{ runner.arch }}/* bitsandbytes/
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
           cache: pip
       - run: pip install build wheel
-      - run: python -m build .
+      - run: python -m build -w .
       - name: Determine and Set Platform Tag, then Tag Wheel
         shell: bash
         run: |
-          PLATFORM_TAG=$(python .github/scripts/set_platform_tag.py "${{ matrix.arch }}")
+          PLATFORM_TAG=$(python .github/scripts/set_platform_tag.py "${{ runner.arch }}")
           echo "PLATFORM_TAG=$PLATFORM_TAG"
           wheel tags --remove --abi-tag=none --python-tag=py3 --platform-tag=$PLATFORM_TAG dist/bitsandbytes-*.whl
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
+          name: bdist_wheel_${{ runner.os }}_${{ runner.arch }}
           path: dist/bitsandbytes-*.whl
           retention-days: 7
+          if-no-files-found: error
+          compression-level: 0
 
   upload-pre-release-wheels:
     name: Create release and upload artifacts
@@ -257,7 +220,7 @@ jobs:
       - build-wheels
     steps:
       - name: Download and rename artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: tmp/
           pattern: "bdist_wheel_*"
@@ -298,7 +261,7 @@ jobs:
       - name: Inspect wheels directory after renaming files
         run: ls -alFR wheels/
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           path: repo
 
@@ -378,7 +341,7 @@ jobs:
           cat body.md
 
       - name: Create new pre-release and upload artifacts
-        uses: softprops/action-gh-release@v2.2.1
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           files: wheels/*.whl
           prerelease: true
@@ -393,23 +356,18 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-22.04-arm]
-        include:
-          - os: ubuntu-22.04
-            arch: x86_64
-          - os: ubuntu-22.04-arm
-            arch: aarch64
     runs-on: ${{ matrix.os }}
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Download wheel
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: bdist_wheel_${{ matrix.os }}_${{ matrix.arch }}
+          name: bdist_wheel_${{ runner.os }}_${{ runner.arch }}
           path: wheels/
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.12"
       - run: pip install auditwheel
@@ -429,13 +387,13 @@ jobs:
       id-token: write
     steps:
       - name: Download distribution artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist/
           pattern: "bdist_wheel_*"
           merge-multiple: true
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           print-hash: true
