@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 from collections.abc import Callable
+import functools
 from typing import Optional
 
 import torch
@@ -11,6 +12,34 @@ import torch.nn.functional as F_nn
 
 import bitsandbytes.functional as F
 from bitsandbytes.functional import QuantState
+
+
+class _FrozenLinearRecomputeBackward(torch.autograd.Function):
+    """``F.linear`` against a frozen dequantized weight, re-dequantizing it in backward.
+
+    The weight produced by ``dequant_fn`` (a closure over the packed buffers) is an
+    intermediate, not a Parameter, so a plain ``F.linear`` would stash it as a saved
+    activation for the whole forward-to-backward window — one full-precision expert
+    weight per projection per layer. Because the base is frozen, backward needs no
+    gradient for the weight and only computes ``grad_output @ weight``; the weight can
+    therefore be dropped after the forward matmul and re-dequantized on demand, keeping
+    training memory independent of the number of experts held between forward and
+    backward. Numerically identical to dequantize-then-``linear`` by construction — the
+    forward *is* dequantize-then-linear; recomputation only changes what is saved, never
+    what is computed.
+    """
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor, dequant_fn: Callable[[], torch.Tensor]) -> torch.Tensor:
+        ctx.dequant_fn = dequant_fn
+        return F_nn.linear(x, dequant_fn())
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        grad_x = None
+        if ctx.needs_input_grad[0]:
+            grad_x = grad_output @ ctx.dequant_fn()
+        return grad_x, None
 
 
 class Experts4bit(nn.Module):
@@ -33,8 +62,10 @@ class Experts4bit(nn.Module):
     mechanism with no custom save/load hooks.
 
     The forward pass dequantizes a single expert at a time (a per-expert loop), mirroring
-    the reference fused-experts forward. Grouped-GEMM is intentionally left for future
-    work.
+    the reference fused-experts forward. In training, the dequantized weight is not kept
+    as a saved activation: it is re-dequantized on demand in backward (see
+    :class:`_FrozenLinearRecomputeBackward`), so activation memory stays independent of
+    the number of experts. Grouped-GEMM is intentionally left for future work.
 
     <Tip warning={true}>This feature is experimental and may change in future releases.</Tip>
 
@@ -217,6 +248,16 @@ class Experts4bit(nn.Module):
         # transpose back-compat shim — keyed on A.shape[0] == 1 — from firing).
         return F.dequantize_4bit(packed[expert_idx].reshape(-1, 1), quant_state=quant_state)
 
+    def _project(self, packed, absmax, shape, expert_idx, x, compute_dtype):
+        """One expert projection: dequantize + ``linear``, re-dequantizing in backward.
+
+        The recompute closure is just :meth:`_dequantize_expert`; no gradient is ever
+        produced for the frozen packed storage.
+        """
+        dequant_fn = functools.partial(self._dequantize_expert, packed, absmax, shape, expert_idx, compute_dtype)
+        return _FrozenLinearRecomputeBackward.apply(x, dequant_fn)
+
+
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -238,20 +279,18 @@ class Experts4bit(nn.Module):
             top_k_pos, token_idx = torch.where(expert_mask[expert_idx])
             current_state = hidden_states[token_idx]
 
-            gate_up_w = self._dequantize_expert(
-                self.gate_up_proj, self.gate_up_absmax, self._gate_up_shape, expert_idx, compute_dtype
+            proj = self._project(
+                self.gate_up_proj, self.gate_up_absmax, self._gate_up_shape, expert_idx, current_state, compute_dtype
             )
-            proj = F_nn.linear(current_state, gate_up_w)
             if self.has_gate:
                 gate, up = proj.chunk(2, dim=-1)
                 current_hidden = self.act_fn(gate) * up
             else:
                 current_hidden = self.act_fn(proj)
 
-            down_w = self._dequantize_expert(
-                self.down_proj, self.down_absmax, self._down_shape, expert_idx, compute_dtype
+            current_hidden = self._project(
+                self.down_proj, self.down_absmax, self._down_shape, expert_idx, current_hidden, compute_dtype
             )
-            current_hidden = F_nn.linear(current_hidden, down_w)
             current_hidden = current_hidden * top_k_weights[token_idx, top_k_pos, None]
             final_hidden_states.index_add_(0, token_idx, current_hidden.to(final_hidden_states.dtype))
 
