@@ -823,6 +823,7 @@ def _gemm_4bit_use_custom_rocm(device_index, dtype, M, N, K):
     return M <= 4  # unknown ROCm arch: conservative tiny-batch floor
 
 
+@functools.cache
 def _rocm_gfx_arch(device_index):
     """gfx arch string (e.g. 'gfx1100') for a ROCm device, feature flags stripped."""
     name = getattr(torch.cuda.get_device_properties(device_index), "gcnArchName", "") or ""
@@ -907,7 +908,7 @@ def _dequant_linear_fallback(
 _GEMM_4BIT_CUSTOM_FLOOR_M = 4
 if torch.version.hip is None:
     _gemm_4bit_use_custom_fn = _gemm_4bit_use_custom_cuda
-    # NVIDIA: dequant+F.linear wins past M=1536 (dequant savings negligible at very
+    # CUDA: dequant+F.linear wins past M=1536 (dequant savings negligible at very
     # large batch).
     _gemm_4bit_custom_max_m = 1536
 else:

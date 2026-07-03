@@ -56,15 +56,19 @@ static __device__ __constant__ float FP4_LUT_F32[16] = {
 // Indicates whether `T` is a 16-bit float type supported in our kernels (currently `bnb_bfloat16` or `half`).
 template <typename T> constexpr bool is_16bit_float_v = std::is_same_v<T, bnb_bfloat16> || std::is_same_v<T, half>;
 
+#if BNB_HIP
+__device__ __forceinline__ bnb_bfloat162 __floats2bfloat162_rn(float a, float b) {
+    return __float22bfloat162_rn(float2{a, b});
+}
+
+__device__ __forceinline__ bnb_bfloat162 __float2bfloat162_rn(float x) { return __float22bfloat162_rn(float2{x, x}); }
+#endif
+
 // Convert two floats to a T vector-pair (half2 or bnb_bfloat162), with rounding.
 template <typename T> __device__ __forceinline__ auto make_vec2(float a, float b) {
     static_assert(is_16bit_float_v<T>, "make_vec2: T must be bnb_bfloat16 or half");
     if constexpr (std::is_same_v<T, bnb_bfloat16>) {
-#if BNB_HIP
-        return bnb_bfloat162{__float2bfloat16(a), __float2bfloat16(b)};
-#else
         return __floats2bfloat162_rn(a, b);
-#endif
     } else {
         return __floats2half2_rn(a, b);
     }
@@ -74,11 +78,7 @@ template <typename T> __device__ __forceinline__ auto make_vec2(float a, float b
 template <typename T> __device__ __forceinline__ auto broadcast_vec2(float x) {
     static_assert(is_16bit_float_v<T>, "broadcast_vec2: T must be bnb_bfloat16 or half");
     if constexpr (std::is_same_v<T, bnb_bfloat16>) {
-#if BNB_HIP
-        return bnb_bfloat162{__float2bfloat16(x), __float2bfloat16(x)};
-#else
         return __float2bfloat162_rn(x);
-#endif
     } else {
         return __float2half2_rn(x);
     }

@@ -1,5 +1,5 @@
 // SIMT 4-bit GEMM kernel. Compiles for all CUDA architectures (sm60+) and for
-// ROCm/HIP (RDNA wave32 and CDNA wave64) via the compat shims in gemm_4bit_common.cuh.
+// ROCm/HIP (RDNA wave32 and CDNA wave64).
 
 #include <cstdint>
 #include <type_traits>
@@ -7,39 +7,27 @@
 #include "gemm_4bit_common.cuh"
 #include "gemm_4bit_simt.cuh"
 
-// Use fmaf for the fp32 accumulate path (single rounding) instead of acc + a * b.
 #if defined(__GFX9__)
+// gfx9/CDNA tuning:
+// - use fmaf for fp32 accumulation
+// - accumulate fp16/bf16 pairs in fp32 via fused multiply-add
+// - keep 16-bit centroids unscaled and fold scale into the fp32 accumulator
+// - use packed fp16 accumulation
 #define BNB_SIMT_F32_FMAF 1
-#else
-#define BNB_SIMT_F32_FMAF 0
-#endif
-
-// Accumulate fp16/bf16 pairs in fp32 via fused multiply-add instead of vector
-// pair-multiply + reduce. Combined with the fp32 fmaf path this is the gfx9 win.
-#if defined(__GFX9__)
 #define BNB_SIMT_16BIT_FLOAT_FMA 1
-#else
-#define BNB_SIMT_16BIT_FLOAT_FMA 0
-#endif
-
-#if defined(__GFX9__)
 #define BNB_SIMT_BF16_UNSCALED_CENTROID 1
-#else
-#define BNB_SIMT_BF16_UNSCALED_CENTROID 0
-#endif
-
-#if defined(__GFX9__)
 #define BNB_SIMT_FP16_UNSCALED_CENTROID 1
-#else
-#define BNB_SIMT_FP16_UNSCALED_CENTROID 0
-#endif
-
-#if defined(__GFX9__)
 #define BNB_SIMT_FP16_PACKED_ACCUM 1
 #else
+#define BNB_SIMT_F32_FMAF 0
+#define BNB_SIMT_16BIT_FLOAT_FMA 0
+#define BNB_SIMT_BF16_UNSCALED_CENTROID 0
+#define BNB_SIMT_FP16_UNSCALED_CENTROID 0
 #define BNB_SIMT_FP16_PACKED_ACCUM 0
 #endif
 
+// RDNA3/RDNA4 tuning:
+// - use native packed bf16/fp16 dot2 instructions with fp32 accumulation
 #if defined(__GFX11__) || defined(__GFX12__)
 #define BNB_HIP_BF16_VDOT2 1
 #define BNB_HIP_FP16_DOT2 1

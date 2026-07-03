@@ -98,7 +98,7 @@ using bnb_error_t = cudaError_t;
     } while (0)
 #endif
 
-// Full-warp mask for __shfl_*_sync. ROCm 7+ statically requires a 64-bit mask
+// Full-warp mask for __shfl_*_sync. HIP's sync builtins require a 64-bit mask
 // type; CUDA uses the conventional 32-bit unsigned mask.
 #if BNB_HIP
 #define BNB_FULL_WARP_MASK 0xffffffffull
@@ -114,6 +114,7 @@ using bnb_bfloat16 = __hip_bfloat16;
 using bnb_bfloat162 = __hip_bfloat162;
 #else
 using bnb_bfloat16 = hip_bfloat16;
+
 struct bnb_bfloat162 {
     bnb_bfloat16 x;
     bnb_bfloat16 y;

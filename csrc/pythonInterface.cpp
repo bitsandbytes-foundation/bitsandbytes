@@ -47,12 +47,10 @@ void gemm_4bit_inference_naive_fp16(
 }
 
 void gemm_4bit_inference_naive_bf16(
-    int m, int n, int k, bnb_bfloat16* A, unsigned char* B, float* absmax, float* datatype, bnb_bfloat16* out,
-    int lda, int ldb, int ldc, int blocksize, cudaStream_t stream
+    int m, int n, int k, bnb_bfloat16* A, unsigned char* B, float* absmax, float* datatype, bnb_bfloat16* out, int lda,
+    int ldb, int ldc, int blocksize, cudaStream_t stream
 ) {
-    gemm_4bit_inference_naive<bnb_bfloat16, 16>(
-        m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, stream
-    );
+    gemm_4bit_inference_naive<bnb_bfloat16, 16>(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, stream);
 }
 
 void gemm_4bit_inference_naive_fp32(
@@ -604,8 +602,8 @@ void cgemm_4bit_inference_naive_fp16(
 }
 
 void cgemm_4bit_inference_naive_bf16(
-    int m, int n, int k, bnb_bfloat16* A, unsigned char* B, float* absmax, float* datatype, bnb_bfloat16* out,
-    int lda, int ldb, int ldc, int blocksize, cudaStream_t stream
+    int m, int n, int k, bnb_bfloat16* A, unsigned char* B, float* absmax, float* datatype, bnb_bfloat16* out, int lda,
+    int ldb, int ldc, int blocksize, cudaStream_t stream
 ) {
     gemm_4bit_inference_naive_bf16(m, n, k, A, B, absmax, datatype, out, lda, ldb, ldc, blocksize, stream);
 }
