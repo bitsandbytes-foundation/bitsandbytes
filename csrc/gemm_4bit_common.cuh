@@ -59,27 +59,29 @@ template <typename T> constexpr bool is_16bit_float_v = std::is_same_v<T, bnb_bf
 // Convert two floats to a T vector-pair (half2 or bnb_bfloat162), with rounding.
 template <typename T> __device__ __forceinline__ auto make_vec2(float a, float b) {
     static_assert(is_16bit_float_v<T>, "make_vec2: T must be bnb_bfloat16 or half");
-    if constexpr (std::is_same_v<T, bnb_bfloat16>)
+    if constexpr (std::is_same_v<T, bnb_bfloat16>) {
 #if BNB_HIP
         return bnb_bfloat162{__float2bfloat16(a), __float2bfloat16(b)};
 #else
         return __floats2bfloat162_rn(a, b);
 #endif
-    else
+    } else {
         return __floats2half2_rn(a, b);
+    }
 }
 
 // Single float broadcast into both lanes of a T vector-pair.
 template <typename T> __device__ __forceinline__ auto broadcast_vec2(float x) {
     static_assert(is_16bit_float_v<T>, "broadcast_vec2: T must be bnb_bfloat16 or half");
-    if constexpr (std::is_same_v<T, bnb_bfloat16>)
+    if constexpr (std::is_same_v<T, bnb_bfloat16>) {
 #if BNB_HIP
         return bnb_bfloat162{__float2bfloat16(x), __float2bfloat16(x)};
 #else
         return __float2bfloat162_rn(x);
 #endif
-    else
+    } else {
         return __float2half2_rn(x);
+    }
 }
 
 // T vector-pair -> float2.

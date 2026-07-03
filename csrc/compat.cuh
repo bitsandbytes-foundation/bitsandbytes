@@ -21,8 +21,16 @@
 
 #if BNB_HIP
 
-#include <hip/hip_bf16.h>
+#include <hip/hip_version.h>
+// HIP 6.x provides CUDA-compatible *_sync warp builtins behind this opt-in
+// macro. HIP 7+ enables them by default and offers HIP_DISABLE_* instead.
+#if defined(HIP_VERSION_MAJOR) && HIP_VERSION_MAJOR < 7
+#define HIP_ENABLE_WARP_SYNC_BUILTINS
+#endif
 #include <hip/hip_bfloat16.h>
+#if defined(__HIPCC__) || (defined(HIP_VERSION_MAJOR) && HIP_VERSION_MAJOR >= 7)
+#include <hip/hip_bf16.h>
+#endif
 #include <hip/hip_fp16.h>
 #include <hip/hip_math_constants.h>
 #include <hip/hip_runtime.h>
@@ -101,8 +109,16 @@ using bnb_error_t = cudaError_t;
 // BFloat16 type alias
 
 #if BNB_HIP
+#if defined(__HIPCC__) || (defined(HIP_VERSION_MAJOR) && HIP_VERSION_MAJOR >= 7)
 using bnb_bfloat16 = __hip_bfloat16;
 using bnb_bfloat162 = __hip_bfloat162;
+#else
+using bnb_bfloat16 = hip_bfloat16;
+struct bnb_bfloat162 {
+    bnb_bfloat16 x;
+    bnb_bfloat16 y;
+};
+#endif
 #else
 using bnb_bfloat16 = __nv_bfloat16;
 using bnb_bfloat162 = __nv_bfloat162;

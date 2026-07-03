@@ -67,14 +67,6 @@ __device__ __forceinline__ bnb_bfloat162 vec2_mul(bnb_bfloat162 a, bnb_bfloat162
 #endif
 }
 
-#if BNB_HIP
-using f16x2_dot_t = __2f16;
-
-__device__ __forceinline__ float fp16_dot2(f16x2_dot_t a, f16x2_dot_t b, float c) {
-    return __ockl_fdot2(a, b, c, false);
-}
-#endif
-
 __device__ __forceinline__ float simt_fma_f32(float acc, float a, float b) {
 #if BNB_SIMT_F32_FMAF
     return fmaf(a, b, acc);
@@ -401,12 +393,12 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                     } else if constexpr (HIP_FP16_DOT2) {
 #if BNB_HIP && BNB_HIP_FP16_DOT2
                         const uint4 a_packed4 = *reinterpret_cast<const uint4*>(&A[m_global * K + a_k]);
-                        const f16x2_dot_t* a_pairs_d = reinterpret_cast<const f16x2_dot_t*>(&a_packed4);
-                        const f16x2_dot_t* b_pairs_d = reinterpret_cast<const f16x2_dot_t*>(b_chunk);
+                        const __2f16* a_pairs_d = reinterpret_cast<const __2f16*>(&a_packed4);
+                        const __2f16* b_pairs_d = reinterpret_cast<const __2f16*>(b_chunk);
                         float partial = 0.0f;
 #pragma unroll
                         for (int k = 0; k < 4; k++)
-                            partial = fp16_dot2(a_pairs_d[k], b_pairs_d[k], partial);
+                            partial = __ockl_fdot2(a_pairs_d[k], b_pairs_d[k], partial, false);
                         acc[m] += partial;
 #endif
                     } else {
