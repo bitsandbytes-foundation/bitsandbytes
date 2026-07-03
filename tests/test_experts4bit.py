@@ -347,3 +347,90 @@ def test_experts4bit_shapes(device, num_experts, hidden, inter):
     top_k_weights = torch.softmax(torch.randn(n_tok, TOP_K, device=device), dim=-1)
     out = module(hidden_states, top_k_index, top_k_weights)
     assert out.shape == (n_tok, hidden) and torch.isfinite(out).all()
+
+
+# --- recompute-in-backward projection path ----------------------------------------------
+# _project routes every expert projection through _FrozenLinearRecomputeBackward: the forward IS
+# dequantize + F.linear (bit-exact by construction, every device and grad mode), and the backward
+# re-dequantizes the frozen weight on demand instead of keeping it as a saved activation. These
+# tests pin both halves of that contract — numerics (grad mode changes nothing; matches a plain
+# dequantize+linear reference bit-for-bit) and memory (no [out, in] weight is ever saved).
+
+
+def _dequantized_expert_stacks(module):
+    gate_up_deq = torch.stack(
+        [
+            module._dequantize_expert(
+                module.gate_up_proj, module.gate_up_absmax, module._gate_up_shape, e, torch.float32
+            )
+            for e in range(NUM_EXPERTS)
+        ]
+    )
+    down_deq = torch.stack(
+        [
+            module._dequantize_expert(module.down_proj, module.down_absmax, module._down_shape, e, torch.float32)
+            for e in range(NUM_EXPERTS)
+        ]
+    )
+    return gate_up_deq, down_deq
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+def test_experts4bit_forward_is_bit_exact_dequantize_linear(device):
+    """Forward equals a plain dequantize+linear reference bit-for-bit, in and out of grad mode."""
+    gate_up, down = _random_expert_weights(torch.float32, device)
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+    hidden_states, top_k_index, top_k_weights = _random_routing(device)
+
+    gate_up_deq, down_deq = _dequantized_expert_stacks(module)
+    ref = _reference_forward(gate_up_deq, down_deq, hidden_states, top_k_index, top_k_weights)
+
+    out_grad_mode = module(hidden_states, top_k_index, top_k_weights)
+    with torch.no_grad():
+        out_no_grad = module(hidden_states, top_k_index, top_k_weights)
+
+    torch.testing.assert_close(out_grad_mode, ref, rtol=0, atol=0)
+    torch.testing.assert_close(out_no_grad, ref, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+def test_experts4bit_backward_saves_no_dequantized_weight(device):
+    """The dequantized expert weights are dropped after each forward matmul (re-dequantized in
+    backward), so nothing weight-shaped reaches autograd's saved-tensor storage — while a plain
+    dequantize+linear control does save them. Gradients still match the control exactly."""
+    gate_up, down = _random_expert_weights(torch.float32, device)
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+    hidden_states, top_k_index, top_k_weights = _random_routing(device)
+    # F.linear's backward may save the weight either as-is or pre-transposed (device/impl
+    # dependent), so match both orientations.
+    weight_shapes = set()
+    for shape in (module._gate_up_shape, module._down_shape):
+        weight_shapes.add(tuple(shape))
+        weight_shapes.add(tuple(reversed(shape)))
+
+    def run_recording_saved_shapes(fn, x):
+        saved = []
+
+        def pack(t):
+            saved.append(tuple(t.shape))
+            return t
+
+        with torch.autograd.graph.saved_tensors_hooks(pack, lambda t: t):
+            out = fn(x)
+        return out, saved
+
+    x_mod = hidden_states.detach().clone().requires_grad_(True)
+    out_mod, saved_mod = run_recording_saved_shapes(lambda x: module(x, top_k_index, top_k_weights), x_mod)
+    assert not (set(saved_mod) & weight_shapes)
+
+    gate_up_deq, down_deq = _dequantized_expert_stacks(module)
+    x_ref = hidden_states.detach().clone().requires_grad_(True)
+    out_ref, saved_ref = run_recording_saved_shapes(
+        lambda x: _reference_forward(gate_up_deq, down_deq, x, top_k_index, top_k_weights), x_ref
+    )
+    assert set(saved_ref) & weight_shapes
+
+    out_mod.sum().backward()
+    out_ref.sum().backward()
+    torch.testing.assert_close(out_mod, out_ref, rtol=0, atol=0)
+    torch.testing.assert_close(x_mod.grad, x_ref.grad, rtol=0, atol=0)
