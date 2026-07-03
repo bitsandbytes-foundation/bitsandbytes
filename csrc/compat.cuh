@@ -109,17 +109,14 @@ using bnb_error_t = cudaError_t;
 // BFloat16 type alias
 
 #if BNB_HIP
-#if defined(__HIPCC__)
+#if !defined(__HIPCC__)
+// Host TUs can't parse hip_bf16.h, but only pass bnb_bfloat16 as a pointer: forward-declaring the tag keeps mangling
+// identical to the device side.
+struct __hip_bfloat16;
+struct __hip_bfloat162;
+#endif
 using bnb_bfloat16 = __hip_bfloat16;
 using bnb_bfloat162 = __hip_bfloat162;
-#else
-using bnb_bfloat16 = hip_bfloat16;
-
-struct bnb_bfloat162 {
-    bnb_bfloat16 x;
-    bnb_bfloat16 y;
-};
-#endif
 #else
 using bnb_bfloat16 = __nv_bfloat16;
 using bnb_bfloat162 = __nv_bfloat162;
