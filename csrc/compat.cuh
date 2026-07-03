@@ -28,7 +28,7 @@
 #define HIP_ENABLE_WARP_SYNC_BUILTINS
 #endif
 #include <hip/hip_bfloat16.h>
-#if defined(__HIPCC__) || (defined(HIP_VERSION_MAJOR) && HIP_VERSION_MAJOR >= 7)
+#if defined(__HIPCC__)
 #include <hip/hip_bf16.h>
 #endif
 #include <hip/hip_fp16.h>
@@ -109,7 +109,7 @@ using bnb_error_t = cudaError_t;
 // BFloat16 type alias
 
 #if BNB_HIP
-#if defined(__HIPCC__) || (defined(HIP_VERSION_MAJOR) && HIP_VERSION_MAJOR >= 7)
+#if defined(__HIPCC__)
 using bnb_bfloat16 = __hip_bfloat16;
 using bnb_bfloat162 = __hip_bfloat162;
 #else
