@@ -8,6 +8,7 @@ from .modules import (
     Embedding8bit,
     EmbeddingFP4,
     EmbeddingNF4,
+    Experts4bit,
     Int8Params,
     Linear4bit,
     Linear8bitLt,

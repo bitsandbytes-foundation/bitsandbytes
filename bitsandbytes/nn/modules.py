@@ -1194,6 +1194,288 @@ class Linear8bitLt(nn.Linear):
         return out
 
 
+class Experts4bit(nn.Module):
+    """
+    Stores fused Mixture-of-Experts weights in 4-bit (NF4/FP4) precision.
+
+    transformers v5 stores MoE expert weights as a single 3D ``nn.Parameter``
+    (e.g. ``[num_experts, intermediate, hidden]`` for ``down_proj`` or
+    ``[num_experts, 2 * intermediate, hidden]`` for ``gate_up_proj``).
+    ``Linear4bit`` cannot wrap these because it expects 2D ``nn.Linear`` weights.
+    ``Experts4bit`` quantizes each expert independently, storing packed 4-bit
+    weights as a plain ``nn.Parameter`` and per-expert ``absmax`` as a buffer.
+    During the forward pass, only the experts selected by ``top_k_index`` are
+    dequantized one at a time, keeping the runtime working set small.
+
+    Example:
+
+    .. code-block:: python
+
+        import torch
+        from bitsandbytes.nn import Experts4bit
+
+        gate_up_proj = torch.randn(8, 4096, 2048, dtype=torch.bfloat16)
+        down_proj = torch.randn(8, 2048, 4096, dtype=torch.bfloat16)
+
+        experts = Experts4bit.from_float(gate_up_proj, down_proj, quant_type="nf4")
+
+        hidden = torch.randn(2, 2048, dtype=torch.bfloat16)
+        top_k_idx = torch.tensor([[0, 3], [1, 5]])
+        top_k_w = torch.tensor([[0.7, 0.3], [0.6, 0.4]])
+        out = experts(hidden, top_k_idx, top_k_w)
+    """
+
+    def __init__(
+        self,
+        num_experts: int,
+        hidden_dim: int,
+        intermediate_dim: int,
+        quant_type: str = "nf4",
+        blocksize: int = 64,
+        has_activation: bool = True,
+        device: Optional[device] = None,
+    ):
+        """
+        Args:
+            num_experts: Number of experts in the MoE layer.
+            hidden_dim: Input / output feature dimension of each expert.
+            intermediate_dim: Intermediate (hidden) dimension of each expert's MLP.
+            quant_type: Quantization data type — ``"nf4"`` or ``"fp4"``.
+            blocksize: Block size for quantization (must be a power of two).
+            has_activation: Whether the expert uses a gated activation
+                (e.g. SiLU / SwiGLU). If ``True``, ``gate_up_proj`` stores
+                ``2 * intermediate_dim`` columns.
+            device: Device to initialise the module on.
+        """
+        super().__init__()
+        self.num_experts = num_experts
+        self.hidden_dim = hidden_dim
+        self.intermediate_dim = intermediate_dim
+        self.quant_type = quant_type
+        self.blocksize = blocksize
+        self.has_activation = has_activation
+
+        # Validate that both dimensions are divisible by blocksize so per-expert
+        # quantization tiles exactly without straddling expert boundaries.
+        if hidden_dim % blocksize != 0:
+            raise ValueError(
+                f"hidden_dim ({hidden_dim}) must be divisible by blocksize ({blocksize})"
+            )
+        if intermediate_dim % blocksize != 0:
+            raise ValueError(
+                f"intermediate_dim ({intermediate_dim}) must be divisible by blocksize ({blocksize})"
+            )
+
+        gate_up_out = 2 * intermediate_dim if has_activation else intermediate_dim
+        gate_up_blocks = hidden_dim // blocksize
+        down_blocks = intermediate_dim // blocksize
+
+        # Packed 4-bit weights: each expert's weight is quantised independently
+        # and packed into uint8.  The total elements per expert after packing is
+        # (out_features * in_features) // 2  (two 4-bit values per uint8).
+        gate_up_packed_size = (gate_up_out * hidden_dim) // 2
+        down_packed_size = (hidden_dim * intermediate_dim) // 2
+
+        self.gate_up_packed = nn.Parameter(
+            torch.empty(num_experts, gate_up_packed_size, dtype=torch.uint8, device=device),
+            requires_grad=False,
+        )
+        self.down_packed = nn.Parameter(
+            torch.empty(num_experts, down_packed_size, dtype=torch.uint8, device=device),
+            requires_grad=False,
+        )
+
+        # Per-expert absmax buffers (float32 — matches QuantState from quantize_4bit)
+        # gate_up: quantized along hidden_dim (in_features) → gate_up_out × gate_up_blocks
+        # down:    quantized along intermediate_dim (in_features) → hidden_dim × down_blocks
+        self.gate_up_absmax = nn.Parameter(
+            torch.empty(num_experts, gate_up_out * gate_up_blocks, dtype=torch.float32, device=device),
+            requires_grad=False,
+        )
+        self.down_absmax = nn.Parameter(
+            torch.empty(num_experts, hidden_dim * down_blocks, dtype=torch.float32, device=device),
+            requires_grad=False,
+        )
+        # Codebook tensor (shared across all experts, determined by quant_type)
+        code = bnb.functional.get_4bit_type(quant_type, device=device)
+        self.register_buffer("code", code, persistent=False)
+
+    @classmethod
+    def from_float(
+        cls,
+        gate_up_proj: torch.Tensor,
+        down_proj: torch.Tensor,
+        quant_type: str = "nf4",
+        blocksize: int = 64,
+        has_activation: bool = True,
+    ) -> "Experts4bit":
+        """
+        Create an ``Experts4bit`` module by quantizing pre-existing fp16/bf16
+        fused-expert weight tensors.
+
+        Args:
+            gate_up_proj: Fused gate & up projection weights, shape
+                ``[num_experts, 2 * intermediate_dim, hidden_dim]``
+                (if ``has_activation=True``) or
+                ``[num_experts, intermediate_dim, hidden_dim]``.
+            down_proj: Down projection weights, shape
+                ``[num_experts, hidden_dim, intermediate_dim]``.
+            quant_type: Quantization dtype — ``"nf4"`` or ``"fp4"``.
+            blocksize: Block size for quantization.
+            has_activation: Whether the expert uses a gated activation.
+
+        Returns:
+            Initialised ``Experts4bit`` module with quantized weights.
+        """
+        num_experts, gate_up_out, hidden_dim = gate_up_proj.shape
+        _, _, intermediate_dim = down_proj.shape
+
+        module = cls(
+            num_experts=num_experts,
+            hidden_dim=hidden_dim,
+            intermediate_dim=intermediate_dim,
+            quant_type=quant_type,
+            blocksize=blocksize,
+            has_activation=has_activation,
+            device=gate_up_proj.device,
+        )
+
+        # Quantise each expert independently
+        for expert_idx in range(num_experts):
+            w_gu = gate_up_proj[expert_idx].contiguous()
+            w_gate_up_packed, qs_gu = bnb.functional.quantize_4bit(
+                w_gu,
+                blocksize=blocksize,
+                compress_statistics=False,
+                quant_type=quant_type,
+                quant_storage=torch.uint8,
+            )
+            module.gate_up_packed.data[expert_idx] = w_gate_up_packed.view(-1)
+            module.gate_up_absmax.data[expert_idx] = qs_gu.absmax.view(-1)
+
+            w_d = down_proj[expert_idx].contiguous()
+            w_down_packed, qs_d = bnb.functional.quantize_4bit(
+                w_d,
+                blocksize=blocksize,
+                compress_statistics=False,
+                quant_type=quant_type,
+                quant_storage=torch.uint8,
+            )
+            module.down_packed.data[expert_idx] = w_down_packed.view(-1)
+            module.down_absmax.data[expert_idx] = qs_d.absmax.view(-1)
+
+        return module
+
+    def _dequantize_expert(
+        self,
+        packed: torch.Tensor,
+        absmax: torch.Tensor,
+        out_features: int,
+        in_features: int,
+    ) -> torch.Tensor:
+        """Dequantize a single expert's weights.
+
+        Args:
+            packed: Flattened packed 4-bit weights, shape ``[packed_size]``.
+            absmax: Flattened per-block absmax, shape ``[num_blocks_total]``.
+            out_features: Number of output features (rows).
+            in_features: Number of input features (columns).
+
+        Returns:
+            Dequantized weight tensor, shape ``[out_features, in_features]``.
+        """
+        packed_2d = packed.view(out_features, -1)
+        qs = bnb.functional.QuantState(
+            absmax=absmax,
+            shape=torch.Size([out_features, in_features]),
+            dtype=torch.float16,
+            blocksize=self.blocksize,
+            code=self.code,
+            quant_type=self.quant_type,
+        )
+        dequantized = bnb.functional.dequantize_4bit(packed_2d, qs, quant_type=self.quant_type)
+        return dequantized
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        top_k_index: torch.Tensor,
+        top_k_weights: torch.Tensor,
+    ) -> torch.Tensor:
+        """Forward pass for fused MoE with per-expert dequantization.
+
+        Each expert's weights are dequantised on-the-fly, used, and freed so
+        the full-precision expert stack is never materialised at once.
+
+        Args:
+            hidden_states: Input tensor, shape ``[batch_size, seq_len, hidden_dim]``.
+            top_k_index: Indices of top-k experts per token,
+                shape ``[batch_size, seq_len, top_k]``.
+            top_k_weights: Weights for each selected expert,
+                shape ``[batch_size, seq_len, top_k]``.
+
+        Returns:
+            Output tensor, shape ``[batch_size, seq_len, hidden_dim]``.
+        """
+        batch_size, seq_len, hidden_dim = hidden_states.shape
+        top_k = top_k_index.shape[-1]
+
+        flat_hidden = hidden_states.view(-1, hidden_dim)  # [B*S, D]
+        flat_idx = top_k_index.view(-1, top_k)  # [B*S, K]
+        flat_w = top_k_weights.view(-1, top_k)  # [B*S, K]
+
+        output = torch.zeros_like(flat_hidden)
+
+        gate_up_out = 2 * self.intermediate_dim if self.has_activation else self.intermediate_dim
+
+        for expert_idx in range(self.num_experts):
+            mask = flat_idx == expert_idx  # [B*S, K]
+            expert_token_indices = mask.any(dim=1).nonzero(as_tuple=True)[0]  # tokens routing to this expert
+            if expert_token_indices.numel() == 0:
+                continue
+
+            expert_x = flat_hidden[expert_token_indices]  # [N, D]
+
+            w_gu = self._dequantize_expert(
+                self.gate_up_packed[expert_idx],
+                self.gate_up_absmax[expert_idx],
+                gate_up_out,
+                hidden_dim,
+            )  # [gate_up_out, hidden_dim]
+
+            w_down = self._dequantize_expert(
+                self.down_packed[expert_idx],
+                self.down_absmax[expert_idx],
+                hidden_dim,
+                self.intermediate_dim,
+            )  # [hidden_dim, intermediate_dim]
+
+            if self.has_activation:
+                w_gate, w_up = w_gu.chunk(2, dim=0)  # each [intermediate_dim, hidden_dim]
+                intermediate = F.silu(expert_x @ w_gate.T) * (expert_x @ w_up.T)
+            else:
+                intermediate = expert_x @ w_gu.T  # [N, intermediate_dim]
+
+            expert_out = intermediate @ w_down.T  # [N, hidden_dim]
+
+            for token_pos, token_idx in enumerate(expert_token_indices):
+                for k in range(top_k):
+                    if mask[token_idx, k]:
+                        output[token_idx] += flat_w[token_idx, k] * expert_out[token_pos]
+
+        return output.view(batch_size, seq_len, hidden_dim)
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        # Default nn.Module state_dict serialization handles our
+        # nn.Parameter packed weights and absmax buffers automatically.
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        )
+
+
 class OutlierAwareLinear(nn.Linear):
     def __init__(self, input_features, output_features, bias=True, device=None):
         super().__init__(input_features, output_features, bias, device)
