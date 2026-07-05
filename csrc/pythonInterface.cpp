@@ -557,7 +557,14 @@ void cdequant_mm_int32_fp16(
 void cint8_vector_quant(
     half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, cudaStream_t stream
 ) {
-    int8VectorQuant(A, out, rowStats, threshold, rows, cols, stream);
+    int8VectorQuant<half>(A, out, rowStats, threshold, rows, cols, stream);
+}
+
+void cint8_vector_quant_bf16(
+    __nv_bfloat16* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols,
+    cudaStream_t stream
+) {
+    int8VectorQuant<__nv_bfloat16>(A, out, rowStats, threshold, rows, cols, stream);
 }
 
 void* cget_managed_ptr(size_t bytes) {

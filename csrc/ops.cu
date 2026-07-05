@@ -421,13 +421,14 @@ void dequant_mm_int32_fp16(
     BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 }
 
+template <typename T>
 void int8VectorQuant(
-    half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream
+    T* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream
 ) {
     if (threshold == 0.0) {
-        kInt8VectorQuant<half, 1024, 0><<<rows, 1024, 0, stream>>>(A, out, rowStats, threshold, rows, cols);
+        kInt8VectorQuant<T, 1024, 0><<<rows, 1024, 0, stream>>>(A, out, rowStats, threshold, rows, cols);
     } else {
-        kInt8VectorQuant<half, 1024, 1><<<rows, 1024, 0, stream>>>(A, out, rowStats, threshold, rows, cols);
+        kInt8VectorQuant<T, 1024, 1><<<rows, 1024, 0, stream>>>(A, out, rowStats, threshold, rows, cols);
     }
     BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 }
@@ -479,6 +480,14 @@ template void gemm_4bit_inference_naive<bnb_bfloat16, 16>(
 template void gemm_4bit_inference_naive<float, 32>(
     int m, int n, int k, float* A, unsigned char* B, float* absmax, float* datatype, float* out, int lda, int ldb,
     int ldc, int blocksize, bnb_stream_t stream
+);
+
+template void int8VectorQuant<half>(
+    half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream
+);
+template void int8VectorQuant<bnb_bfloat16>(
+    bnb_bfloat16* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols,
+    bnb_stream_t stream
 );
 
 template int igemmlt<32, 0>(

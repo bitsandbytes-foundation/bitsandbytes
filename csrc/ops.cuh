@@ -136,8 +136,9 @@ void cutlass_igemm(
 void dequant_mm_int32_fp16(
     int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, bnb_stream_t stream
 );
+template <typename T>
 void int8VectorQuant(
-    half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream
+    T* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream
 );
 
 template <typename T, int BITS>
