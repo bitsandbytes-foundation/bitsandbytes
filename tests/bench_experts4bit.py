@@ -18,7 +18,7 @@ torch.manual_seed(42)
 
 DEVICE = "cuda"
 
-# ── Test configurations ──────────────────────────────────────────────────────
+#Test configurations
 # Model sizes (hidden_dim, intermediate_dim) modelled after common MoE layers
 CONFIGS = [
     ("small",   128,  256),
@@ -234,9 +234,9 @@ print("=" * 100)
 print("  Memory: 4-bit uses ~28% of fp16 (72% reduction — close to 75% theoretical max)")
 print("  Accuracy: NF4 MAE ~0.07-0.10, FP4 MAE ~0.09-0.13 on random weights")
 print("  Throughput: Per-expert on-the-fly dequant enables large MoE layers")
-print("    that would otherwise be impossible in fp16 on consumer GPUs")
+print("  that would otherwise be impossible in fp16 on consumer GPUs")
 print("  Integration: Exported via bitsandbytes.nn.Experts4bit")
-print("    - from_float() for easy construction from existing fp16 weights")
-print("    - Standard state_dict serialization")
-print("    - Compatible with existing Linear4bit infrastructure")
+print("  - from_float() for easy construction from existing fp16 weights")
+print("  - Standard state_dict serialization")
+print("  - Compatible with existing Linear4bit infrastructure")
 print("=" * 100)
