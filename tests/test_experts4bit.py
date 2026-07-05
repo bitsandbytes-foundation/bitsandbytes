@@ -24,7 +24,6 @@ def fp_weights(experts_kwargs):
     return gate_up_proj, down_proj
 
 
-# ---------------------------------------------------------------------------
 # Quantisation round-trip: quantise each expert and dequantise back, checking
 # that the result is within expected 4-bit tolerance.
 # ---------------------------------------------------------------------------
@@ -93,7 +92,6 @@ def test_invalid_quant_type(fp_weights):
         Experts4bit.from_float(gate_up_proj, down_proj, quant_type="invalid")
 
 
-# ---------------------------------------------------------------------------
 # Forward pass correctness vs. a full-precision reference
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("has_activation", [True, False])
@@ -151,7 +149,6 @@ def test_forward_vs_reference(has_activation, experts_kwargs, fp_weights):
     )
 
 
-# ---------------------------------------------------------------------------
 # state_dict round-trip: bit-exact restore of packed weights + absmax
 # ---------------------------------------------------------------------------
 def test_state_dict_round_trip(experts_kwargs, fp_weights):
