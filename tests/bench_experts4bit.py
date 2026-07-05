@@ -125,15 +125,13 @@ def bench_forward(module, batch_size, seq_len, num_experts):
     return tokens / median_s, median_s
 
 
-# ═════════════════════════════════════════════════════════════════════════════
 #  MAIN
-# ═════════════════════════════════════════════════════════════════════════════
 print("=" * 100)
 print("  Experts4bit — Benchmark Report")
 print("  RTX 3090 | PyTorch {} | CUDA {}".format(torch.__version__, torch.version.cuda))
 print("=" * 100)
 
-# ── 1. Memory savings ───────────────────────────────────────────────────────
+#1. Memory savings 
 print()
 print("─" * 100)
 print("  SECTION 1: Memory Footprint")
@@ -150,7 +148,7 @@ for size_name, h, i in CONFIGS:
         fp4_saving = (1 - fp4_mem / fp16_mem) * 100
         print(f"  {size_name:<10} {n:<8} {fmt_mem_bytes(fp16_mem):<14} {fmt_mem_bytes(nf4_mem):<14} {fmt_mem_bytes(fp4_mem):<14} {nf4_saving:<13.1f}% {fp4_saving:<13.1f}%")
 
-# ── 2. Quantisation error ───────────────────────────────────────────────────
+#2. Quantisation error 
 print()
 print("─" * 100)
 print("  SECTION 2: Quantisation Error (NF4 / FP4 vs FP16 baseline)")
@@ -178,7 +176,7 @@ for quant_type in ("nf4", "fp4"):
 
             print(f"  {size_name:<10} {n:<8} {mae_gu:<12.5f} {rmse_gu:<13.5f} {max_gu:<12.5f} {mae_d:<12.5f} {rmse_d:<13.5f} {max_d:<12.5f}")
 
-# ── 3. Throughput ──────────────────────────────────────────────────────────
+#3. Throughput
 print()
 print("─" * 100)
 print("  SECTION 3: Forward-pass Throughput (tokens/sec)")
@@ -208,7 +206,7 @@ for size_name, h, i in CONFIGS:
             else:
                 print()
 
-# ── 4. Scaling with num_experts ────────────────────────────────────────────
+#4. Scaling with num_experts
 print()
 print("─" * 100)
 print("  SECTION 4: Scaling with num_experts (medium config)")
@@ -228,16 +226,16 @@ for n in [2, 4, 8, 16, 32, 64]:
 
     print(f"  {n:<8} {fmt_mem_bytes(nf4_mem):<14} {fmt_mem_bytes(fp16_mem):<14} {nf4_mem/fp16_mem:.3f}     {tps:<13.0f}")
 
-# ── Summary ─────────────────────────────────────────────────────────────────
+#Summary
 print()
 print("=" * 100)
 print("  SUMMARY")
 print("=" * 100)
-print("  ✅ Memory: 4-bit uses ~28% of fp16 (72% reduction — close to 75% theoretical max)")
-print("  ✅ Accuracy: NF4 MAE ~0.07-0.10, FP4 MAE ~0.09-0.13 on random weights")
-print("  ✅ Throughput: Per-expert on-the-fly dequant enables large MoE layers")
+print("  Memory: 4-bit uses ~28% of fp16 (72% reduction — close to 75% theoretical max)")
+print("  Accuracy: NF4 MAE ~0.07-0.10, FP4 MAE ~0.09-0.13 on random weights")
+print("  Throughput: Per-expert on-the-fly dequant enables large MoE layers")
 print("    that would otherwise be impossible in fp16 on consumer GPUs")
-print("  ✅ Integration: Exported via bitsandbytes.nn.Experts4bit")
+print("  Integration: Exported via bitsandbytes.nn.Experts4bit")
 print("    - from_float() for easy construction from existing fp16 weights")
 print("    - Standard state_dict serialization")
 print("    - Compatible with existing Linear4bit infrastructure")
