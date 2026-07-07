@@ -7,7 +7,7 @@ import torch
 from torch import nn
 
 import bitsandbytes as bnb
-from tests.helpers import get_available_devices, id_formatter, is_supported_on_hpu
+from tests.helpers import describe_dtype, get_available_devices, id_formatter, is_supported_on_hpu
 
 
 @contextlib.contextmanager
@@ -61,15 +61,15 @@ def assert_all_approx_close(a, b, atol=1e-8, rtol=1e-5, count=10):
 
 
 @pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
 @pytest.mark.parametrize("threshold", [0.0, 3.0], ids=id_formatter("threshold"))
-def test_linear8bitlt_inference(device, threshold):
-    l1 = bnb.nn.Linear8bitLt(32, 64, threshold=threshold, has_fp16_weights=False).to(device).half()
+def test_linear8bitlt_inference(device, dtype, threshold):
+    l1 = bnb.nn.Linear8bitLt(32, 64, threshold=threshold, has_fp16_weights=False).to(device).to(dtype)
     assert l1.weight.device.type == device
     assert l1.weight.dtype == torch.int8
-
     l1.eval()
     for i in range(100):
-        b1 = torch.randn(16, 8, 32, device=device).half()
+        b1 = torch.randn(16, 8, 32, device=device, dtype=dtype)
         o1 = l1(b1)
         if i == 1:
             assert l1.state.CB is not None
