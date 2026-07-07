@@ -124,10 +124,6 @@ class MatMul8bitLt(torch.autograd.Function):
 
         input_shape = A.shape
 
-        # Cast A to fp16
-        if A.dtype != torch.float16 and not _is_compiling():
-            logger.warning("MatMul8bitLt: inputs will be cast from %s to float16 during quantization", A.dtype)
-
         if len(A.shape) == 3:
             A = A.reshape(-1, A.shape[-1])
 

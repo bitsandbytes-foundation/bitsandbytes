@@ -486,8 +486,7 @@ template void int8VectorQuant<half>(
     half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream
 );
 template void int8VectorQuant<bnb_bfloat16>(
-    bnb_bfloat16* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols,
-    bnb_stream_t stream
+    bnb_bfloat16* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream
 );
 
 template int igemmlt<32, 0>(

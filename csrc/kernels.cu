@@ -1323,9 +1323,13 @@ __launch_bounds__(256, 3) __global__ void kOptimizerStatic8bit1StateBlockwise(
 template <typename T, int THREADS, int SPARSE_DECOMP>
 __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     void kInt8VectorQuant(T* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols) {
-
+    // One block per row.
+    // Threads load column values in a striped arrangement.
+    // e.g. t0 reads row[0], row[0+nthreads], ..
+    // and  t1 reads row[1], row[1+nthreads], ..
+    // Each thread will determine its local absmax.
+    // We then do a blockwise reduction to determine the row's absmax.
     using BlockReduceT = bnb_cub::BlockReduce<float, THREADS>;
-
     __shared__ typename BlockReduceT::TempStorage temp_storage;
     __shared__ float smem_row_absmax;
 
@@ -1336,7 +1340,8 @@ __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     float row_local_absmax = -FLT_MIN;
     for (int i = threadIdx.x; i < cols; i += THREADS) {
         const float absval = fabsf((float)__ldcs(&(row_data[i])));
-
+        // For sparse decomposition, values outside of the threshold are not to be
+        // included when calculating the row's absmax.
         if constexpr (SPARSE_DECOMP) {
             row_local_absmax = fmaxf(row_local_absmax, absval < threshold ? absval : row_local_absmax);
         } else {
@@ -1355,8 +1360,9 @@ __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     const float scale = __fdividef(127.0f, smem_row_absmax);
     for (int i = threadIdx.x; i < cols; i += THREADS) {
         float val = (float)row_data[i];
-
         if constexpr (SPARSE_DECOMP) {
+            // For sparse decomposition, we do not want to quantize the outliers.
+            // Instead they're zeroed out.
             out[row_id * cols + i] = fabsf(val) < threshold ? __float2int_rn(val * scale) : 0;
         } else {
             out[row_id * cols + i] = __float2int_rn(val * scale);
