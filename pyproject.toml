@@ -172,3 +172,4 @@ ignore_missing_imports = true
 cmake.build-type = "Release"
 cmake.build-args = ["--config", "Release"]
 wheel.cmake = false
+editable.mode = "inplace"
