@@ -21,7 +21,16 @@
 
 #if BNB_HIP
 
+#include <hip/hip_version.h>
+// HIP 6.x provides CUDA-compatible *_sync warp builtins behind this opt-in
+// macro. HIP 7+ enables them by default and offers HIP_DISABLE_* instead.
+#if defined(HIP_VERSION_MAJOR) && HIP_VERSION_MAJOR < 7
+#define HIP_ENABLE_WARP_SYNC_BUILTINS
+#endif
 #include <hip/hip_bfloat16.h>
+#if defined(__HIPCC__)
+#include <hip/hip_bf16.h>
+#endif
 #include <hip/hip_fp16.h>
 #include <hip/hip_math_constants.h>
 #include <hip/hip_runtime.h>
@@ -89,12 +98,28 @@ using bnb_error_t = cudaError_t;
     } while (0)
 #endif
 
+// Full-warp mask for __shfl_*_sync. HIP's sync builtins require a 64-bit mask
+// type; CUDA uses the conventional 32-bit unsigned mask.
+#if BNB_HIP
+#define BNB_FULL_WARP_MASK 0xffffffffull
+#else
+#define BNB_FULL_WARP_MASK 0xffffffffu
+#endif
+
 // BFloat16 type alias
 
 #if BNB_HIP
-using bnb_bfloat16 = hip_bfloat16;
+#if !defined(__HIPCC__)
+// Host TUs can't parse hip_bf16.h, but only pass bnb_bfloat16 as a pointer: forward-declaring the tag keeps mangling
+// identical to the device side.
+struct __hip_bfloat16;
+struct __hip_bfloat162;
+#endif
+using bnb_bfloat16 = __hip_bfloat16;
+using bnb_bfloat162 = __hip_bfloat162;
 #else
 using bnb_bfloat16 = __nv_bfloat16;
+using bnb_bfloat162 = __nv_bfloat162;
 #endif
 
 // Data type enum aliases for BLAS libraries

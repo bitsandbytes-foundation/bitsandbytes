@@ -3,12 +3,13 @@
 // Computes out[M, N] = A[M, K] @ B[N, K]^T. All pointers are device memory.
 
 #include <cstdint>
-#include <cuda_bf16.h>
-#include <cuda_fp16.h>
-#include <cuda_runtime.h>
 #include <type_traits>
 
+#include "compat.cuh"
 #include "gemm_4bit_simt.cuh"
+#if defined(BNB_HAS_GEMM4BIT_SM75) || defined(BNB_HAS_GEMM4BIT_SM80)
+// Included only when an MMA-capable arch (sm75/sm80+) is in the build.
+#include "gemm_4bit_common.cuh" // GpuProps, used only by the MMA dispatch below
 #include "gemm_4bit_sm75.cuh"
 #include "gemm_4bit_sm80.cuh"
 
@@ -33,13 +34,14 @@ GpuProps get_gpu_props() {
 
     return props;
 }
+#endif
 
 /// @brief Fused 4-bit dequantize + GEMM. Computes out[M,N] = A[M,K] @ B[N,K]^T + bias.
 ///
 /// Dispatches to SIMT (sm60+) or MMA (sm75 fp16, sm80+ bf16/fp16) based on GPU arch and shape.
 /// fp32 always uses SIMT. Supports single-level and double-quantized (nested) absmax.
 ///
-/// @tparam T Input/output dtype (`__nv_bfloat16`, `half`, or `float`)
+/// @tparam T Input/output dtype (`bnb_bfloat16`, `half`, or `float`)
 template <typename T>
 static void gemm_4bit(
     // clang-format off
@@ -54,7 +56,7 @@ static void gemm_4bit(
     int M, int N, int K,          // problem shape
     int blocksize,                // elements per quantization block
     int quant_type,               // 1 = FP4, 2 = NF4
-    cudaStream_t stream           // CUDA stream
+    bnb_stream_t stream           // CUDA/HIP stream
     // clang-format on
 ) {
     constexpr bool is_fp32 = std::is_same_v<T, float>;
@@ -133,11 +135,11 @@ static void gemm_4bit(
 extern "C" {
 
 void cgemm_4bit_bf16(
-    const __nv_bfloat16* A, const uint8_t* B, const float* absmax, const uint8_t* absmax_8bit, const float* absmax_code,
-    const float* absmax_offset, __nv_bfloat16* out, const __nv_bfloat16* bias, int M, int N, int K, int blocksize,
-    int quant_type, cudaStream_t stream
+    const bnb_bfloat16* A, const uint8_t* B, const float* absmax, const uint8_t* absmax_8bit, const float* absmax_code,
+    const float* absmax_offset, bnb_bfloat16* out, const bnb_bfloat16* bias, int M, int N, int K, int blocksize,
+    int quant_type, bnb_stream_t stream
 ) {
-    gemm_4bit<__nv_bfloat16>(
+    gemm_4bit<bnb_bfloat16>(
         A, B, absmax, absmax_8bit, absmax_code, absmax_offset, out, bias, M, N, K, blocksize, quant_type, stream
     );
 }
@@ -145,7 +147,7 @@ void cgemm_4bit_bf16(
 void cgemm_4bit_fp16(
     const half* A, const uint8_t* B, const float* absmax, const uint8_t* absmax_8bit, const float* absmax_code,
     const float* absmax_offset, half* out, const half* bias, int M, int N, int K, int blocksize, int quant_type,
-    cudaStream_t stream
+    bnb_stream_t stream
 ) {
     gemm_4bit<half>(
         A, B, absmax, absmax_8bit, absmax_code, absmax_offset, out, bias, M, N, K, blocksize, quant_type, stream
@@ -155,7 +157,7 @@ void cgemm_4bit_fp16(
 void cgemm_4bit_fp32(
     const float* A, const uint8_t* B, const float* absmax, const uint8_t* absmax_8bit, const float* absmax_code,
     const float* absmax_offset, float* out, const float* bias, int M, int N, int K, int blocksize, int quant_type,
-    cudaStream_t stream
+    bnb_stream_t stream
 ) {
     gemm_4bit<float>(
         A, B, absmax, absmax_8bit, absmax_code, absmax_offset, out, bias, M, N, K, blocksize, quant_type, stream
