@@ -450,7 +450,11 @@ def _optimizer_update_32bit(
 
     p_vals = p.float()
     g_vals = (gnorm_scale * g).float()
-    if optimizer_id in [0, 1, 2, 4] and weight_decay > 0.0:
+    # Coupled (L2) weight decay: fold wd into the gradient. This is correct for
+    # MOMENTUM/RMSPROP/ADAGRAD, but NOT for LION (id 4), which uses *decoupled*
+    # (AdamW-style) weight decay applied to the param directly (see the LION branch
+    # below and Chen et al. 2023). LION is intentionally excluded here.
+    if optimizer_id in [0, 1, 2] and weight_decay > 0.0:
         g_vals = g_vals + p_vals * weight_decay
 
     update_scale = 1.0
@@ -515,6 +519,15 @@ def _optimizer_update_32bit(
         state1.copy_(s1_vals)
 
     elif optimizer_id == 4:  # LION
+        # Lion uses decoupled weight decay: shrink the param directly (p *= 1 - lr*wd)
+        # rather than folding wd into the gradient. Matches the cpu backend, the CUDA
+        # 8-bit blockwise kernel, and the Lion paper (Chen et al. 2023).
+        # NOTE: the CUDA 32-bit kernel (csrc/kernels.cu::kOptimizer32bit1State) and the
+        # Triton 1-state kernel (backends/triton/kernels_optim.py) still apply *coupled*
+        # decay to Lion — the same bug this fixes — and need a separate upstream fix.
+        if weight_decay > 0.0:
+            p_vals = p_vals * (1.0 - lr * weight_decay)
+
         momentum_update = state1 * beta1 + (1.0 - beta1) * g_vals
         update_val = update_scale * lr * torch.sign(momentum_update)
         p_vals = p_vals - update_val
