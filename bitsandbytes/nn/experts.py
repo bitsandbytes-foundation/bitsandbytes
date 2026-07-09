@@ -212,6 +212,27 @@ class Experts4bit(nn.Module):
         module.down_absmax = down_absmax
         return module
 
+    def _apply(self, fn, recurse=True):
+        """Shield the quantization state from floating-point dtype casts.
+
+        ``nn.Module`` dtype casts (``.to(dtype)``, ``.half()``, ``.bfloat16()``, …) convert
+        every floating-point tensor. The packed ``uint8`` weights are naturally untouched,
+        but the fp32 ``absmax``/``code`` state would be silently cast, degrading every
+        subsequent dequantization. Instead, a float dtype cast retargets ``compute_dtype``
+        while the quantization state stays fp32; device movement is unaffected.
+        """
+        requested_dtype = fn(torch.empty(0, dtype=torch.float32)).dtype
+        preserved = {name: getattr(self, name) for name in ("gate_up_absmax", "down_absmax", "code")}
+        module = super()._apply(fn, recurse)
+        if requested_dtype != torch.float32 and requested_dtype.is_floating_point:
+            module.compute_dtype = requested_dtype
+            for name, old in preserved.items():
+                new = getattr(module, name)
+                if new is not None and new.dtype != old.dtype:
+                    # Re-derive from the pre-cast tensor — a cast round-trip would be lossy.
+                    setattr(module, name, old.to(new.device))
+        return module
+
     def _quantize_stack(self, weights: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Quantize a ``[num_experts, out, in]`` stack to packed bytes + per-expert absmax."""
         packed = []
