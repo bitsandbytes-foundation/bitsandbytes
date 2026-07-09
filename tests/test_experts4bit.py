@@ -575,3 +575,146 @@ def test_experts4bit_cuda_dequant_fidelity():
     ref = _reference_forward(gate_up, down, hidden_states, top_k_index, top_k_weights)
     rel_err = ((out - ref).norm() / ref.norm()).item()
     assert rel_err <= 0.2, f"4-bit forward rel err {rel_err:.3f} above ceiling"
+
+
+# ---------------------------------------------------------------------------
+# Composition: torch.compile, gradient checkpointing, autocast, meta-device
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_experts4bit_torch_compile_parity_and_breaks():
+    """torch.compile falls back cleanly on the routing and never changes the math.
+
+    The forward's expert routing is data-dependent (`nonzero` on the expert mask), so
+    Dynamo graph-breaks there and `_FrozenLinearRecomputeBackward` runs eagerly inside
+    the compiled wrapper (observed: 5 breaks / 6 graphs on torch 2.6, all attributed to
+    `aten.nonzero`). That split is acceptable and pinned; what must never happen is a
+    silently different number — forward and input-grad are asserted bitwise-equal to
+    eager.
+    """
+    torch._dynamo.reset()
+    gate_up, down = _random_expert_weights(torch.float32, "cuda")
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+    hidden_states, top_k_index, top_k_weights = _random_routing("cuda")
+
+    x_eager = hidden_states.clone().requires_grad_(True)
+    out_eager = module(x_eager, top_k_index, top_k_weights)
+    out_eager.sum().backward()
+
+    explanation = torch._dynamo.explain(module)(hidden_states, top_k_index, top_k_weights)
+    assert explanation.graph_break_count >= 1  # clean break on the routing, not a silent trace
+
+    torch._dynamo.reset()
+    x_compiled = hidden_states.clone().requires_grad_(True)
+    compiled = torch.compile(module)
+    out_compiled = compiled(x_compiled, top_k_index, top_k_weights)
+    out_compiled.sum().backward()
+
+    torch.testing.assert_close(out_compiled, out_eager, rtol=0, atol=0)
+    torch.testing.assert_close(x_compiled.grad, x_eager.grad, rtol=0, atol=0)
+    torch._dynamo.reset()
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+def test_experts4bit_gradient_checkpoint_recompute_count(device):
+    """Checkpointing composes with recompute-in-backward: 3x dequants, not 4x, bit-exact.
+
+    Per fwd+bwd, the module alone dequantizes 2*D times (D in forward, D re-dequantized in
+    backward). Under `torch.utils.checkpoint` the count is 3*D — the no-grad forward, the
+    checkpoint replay, and the backward re-dequant — i.e. recompute-inside-recompute adds
+    +50%, it does not multiply. Numerics are bitwise-identical either way.
+    """
+    from torch.utils.checkpoint import checkpoint
+
+    gate_up, down = _random_expert_weights(torch.float32, device)
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+    hidden_states, top_k_index, top_k_weights = _random_routing(device)
+
+    counter = {"n": 0}
+    inner = module._dequantize_expert
+
+    def counting(*args, **kwargs):
+        counter["n"] += 1
+        return inner(*args, **kwargs)
+
+    module._dequantize_expert = counting
+
+    with torch.no_grad():
+        module(hidden_states, top_k_index, top_k_weights)
+    dequants_per_forward = counter["n"]
+    assert dequants_per_forward > 0
+
+    counter["n"] = 0
+    x_plain = hidden_states.clone().requires_grad_(True)
+    out_plain = module(x_plain, top_k_index, top_k_weights)
+    out_plain.sum().backward()
+    assert counter["n"] == 2 * dequants_per_forward
+
+    counter["n"] = 0
+    x_ckpt = hidden_states.clone().requires_grad_(True)
+    out_ckpt = checkpoint(module, x_ckpt, top_k_index, top_k_weights, use_reentrant=False)
+    out_ckpt.sum().backward()
+    assert counter["n"] == 3 * dequants_per_forward
+
+    torch.testing.assert_close(out_ckpt, out_plain, rtol=0, atol=0)
+    torch.testing.assert_close(x_ckpt.grad, x_plain.grad, rtol=0, atol=0)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_experts4bit_autocast_semantics():
+    """Under `torch.autocast` the quantization path is untouched and dtypes don't drift.
+
+    The dequantize step is not an autocast op, so weights still materialize in
+    compute_dtype and the packed/absmax/code state is bit-identical after an autocast
+    forward; only the linears run in the autocast dtype. The output dtype follows
+    compute_dtype (fp32 here), and values match the non-autocast forward at bf16
+    precision (measured max-abs diff ~0.011 at this scale on an RTX A2000).
+    """
+    gate_up, down = _random_expert_weights(torch.float32, "cuda")
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+    hidden_states, top_k_index, top_k_weights = _random_routing("cuda")
+
+    deq_before = module._dequantize_expert(
+        module.gate_up_proj, module.gate_up_absmax, module._gate_up_shape, 0, torch.float32
+    )
+    out_ref = module(hidden_states, top_k_index, top_k_weights)
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        out_amp = module(hidden_states, top_k_index, top_k_weights)
+    deq_after = module._dequantize_expert(
+        module.gate_up_proj, module.gate_up_absmax, module._gate_up_shape, 0, torch.float32
+    )
+
+    assert out_amp.dtype == out_ref.dtype == torch.float32
+    assert module.gate_up_absmax.dtype == torch.float32 and module.code.dtype == torch.float32
+    torch.testing.assert_close(deq_after, deq_before, rtol=0, atol=0)
+    torch.testing.assert_close(out_amp, out_ref, rtol=0.05, atol=0.03)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+def test_experts4bit_meta_device_assign_materialization(device):
+    """The `init_empty_weights`-style loading path works with no custom hooks.
+
+    Construct under `torch.device("meta")` (what HF `from_pretrained(device_map=...)`
+    does around module init), then materialize with `load_state_dict(..., assign=True)`.
+    Packed weights and absmax buffers land as real tensors, the frozen flag survives,
+    no meta tensors remain (`code` is rebuilt at init and never serialized), and the
+    forward is bit-identical to the source module.
+    """
+    gate_up, down = _random_expert_weights(torch.float16, device)
+    src = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float16)
+
+    with torch.device("meta"):
+        empty = Experts4bit(NUM_EXPERTS, HIDDEN_DIM, INTERMEDIATE_DIM, compute_dtype=torch.float16)
+    assert empty.gate_up_proj.is_meta  # ctor really did defer allocation
+
+    empty.load_state_dict(src.state_dict(), assign=True)
+
+    leftovers = [n for n, t in list(empty.named_parameters()) + list(empty.named_buffers()) if t.is_meta]
+    assert leftovers == []
+    assert not empty.gate_up_proj.requires_grad
+
+    hidden_states, top_k_index, top_k_weights = _random_routing(device)
+    out_src = src(hidden_states, top_k_index, top_k_weights)
+    out_loaded = empty(hidden_states, top_k_index, top_k_weights)
+    torch.testing.assert_close(out_loaded, out_src, rtol=0, atol=0)
