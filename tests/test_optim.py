@@ -243,6 +243,55 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name, device):
             assert bnb_optimizer.state[p2]["unorm_vec"] > 0.0
 
 
+@pytest.mark.parametrize("gtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+@pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [32, 1024], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("device", get_available_devices(), ids=id_formatter("device"))
+def test_lion32bit_weight_decay(dim1, dim2, gtype, device):
+    """Lion must use *decoupled* weight decay (p *= 1 - lr*wd), matching the Lion paper
+    and the lion_pytorch reference.
+
+    Regression test for a coupled-vs-decoupled weight-decay bug: the shared 32-bit
+    optimizer path (used by the `default` backend, i.e. MPS and any device without a
+    dedicated kernel) folded weight decay into the gradient (coupled L2) for Lion, which
+    corrupts the sign update. The existing test_optimizer32bit never caught it because it
+    constructs optimizers with the default weight_decay=0, where the two forms coincide.
+    """
+    weight_decay = 0.1
+
+    p1 = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.1
+    p2 = p1.clone()
+    p1 = p1.float()
+
+    torch_optimizer = Lion([p1], weight_decay=weight_decay)
+    bnb_optimizer = bnb.optim.Lion([p2], weight_decay=weight_decay)
+
+    if gtype == torch.float32:
+        atol, rtol = 1e-6, 1e-5
+    elif gtype == torch.bfloat16:
+        atol, rtol = 1e-3, 1e-2
+    else:
+        atol, rtol = 1e-4, 1e-3
+
+    for i in range(k):
+        g = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.01
+        p1.grad = g.clone().float()
+        p2.grad = g.clone()
+
+        bnb_optimizer.step()
+        torch_optimizer.step()
+
+        # Lion's sign update is noisy at boundaries, so allow a few mismatches (matches
+        # the tolerance policy in test_optimizer32bit). Under the coupled-decay bug this
+        # diverges far beyond the error budget; under the correct decoupled decay it holds.
+        assert_most_approx_close(p1, p2.float(), atol=atol, rtol=rtol, max_error_count=15)
+
+        if gtype != torch.float32:
+            # keep 16-bit params from drifting apart across steps (see test_optimizer32bit)
+            p1.data = p1.data.to(p2.dtype).float()
+            p2.copy_(p1.data)
+
+
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=describe_dtype)
