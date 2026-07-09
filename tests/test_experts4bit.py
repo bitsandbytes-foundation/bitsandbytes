@@ -435,3 +435,143 @@ def test_experts4bit_backward_saves_no_dequantized_weight(device):
     out_ref.sum().backward()
     torch.testing.assert_close(out_mod, out_ref, rtol=0, atol=0)
     torch.testing.assert_close(x_mod.grad, x_ref.grad, rtol=0, atol=0)
+
+
+# ---------------------------------------------------------------------------
+# Device movement, dtype casts, and serialization round-trips
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_experts4bit_to_device_moves_quant_state():
+    """Movement must carry the whole quantization state and must not change the math.
+
+    The packed weights are plain Parameters and absmax/code are module buffers (no
+    Params4bit machinery), so `.to()` has to move all of them together, and a
+    cpu->cuda->cpu round trip has to be bit-exact: the dequant inputs are integer
+    bytes plus fp32 scales, so movement alone can never perturb a forward.
+    """
+    gate_up, down = _random_expert_weights(torch.float32, "cpu")
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+    hidden_states, top_k_index, top_k_weights = _random_routing("cpu")
+
+    ref = module(hidden_states, top_k_index, top_k_weights)  # never-moved control
+    packed_before = module.gate_up_proj.detach().clone()
+    absmax_before = module.gate_up_absmax.clone()
+
+    module.to("cuda")
+    for t in (module.gate_up_proj, module.down_proj, module.gate_up_absmax, module.down_absmax, module.code):
+        assert t.device.type == "cuda"
+    out_cuda = module(hidden_states.cuda(), top_k_index.cuda(), top_k_weights.cuda())
+    assert out_cuda.device.type == "cuda"
+
+    module.to("cpu")
+    torch.testing.assert_close(module.gate_up_proj, packed_before, rtol=0, atol=0)
+    torch.testing.assert_close(module.gate_up_absmax, absmax_before, rtol=0, atol=0)
+    out_roundtrip = module(hidden_states, top_k_index, top_k_weights)
+    torch.testing.assert_close(out_roundtrip, ref, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("cast", ["to", "half", "bfloat16"])
+def test_experts4bit_dtype_cast_retargets_compute_only(device, cast):
+    """A float dtype cast retargets compute_dtype; the quantization state stays fp32.
+
+    Without the `_apply` shield, `.to(dtype)` / `.half()` would silently cast the fp32
+    absmax/code buffers (the packed uint8 weights are naturally immune), changing every
+    subsequent dequantization. The sharp invariant: dequantized weights are bit-identical
+    before and after the cast.
+    """
+    gate_up, down = _random_expert_weights(torch.float32, device)
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+    deq_before = module._dequantize_expert(
+        module.gate_up_proj, module.gate_up_absmax, module._gate_up_shape, 0, torch.float32
+    )
+
+    target = {"to": torch.float16, "half": torch.float16, "bfloat16": torch.bfloat16}[cast]
+    module = module.to(target) if cast == "to" else getattr(module, cast)()
+
+    assert module.compute_dtype == target
+    assert module.gate_up_proj.dtype == torch.uint8
+    assert module.gate_up_absmax.dtype == torch.float32
+    assert module.down_absmax.dtype == torch.float32
+    assert module.code.dtype == torch.float32
+
+    deq_after = module._dequantize_expert(
+        module.gate_up_proj, module.gate_up_absmax, module._gate_up_shape, 0, torch.float32
+    )
+    torch.testing.assert_close(deq_after, deq_before, rtol=0, atol=0)
+
+    hidden_states, top_k_index, top_k_weights = _random_routing(device)
+    out = module(hidden_states, top_k_index, top_k_weights)
+    assert out.dtype == target
+    assert torch.isfinite(out).all()
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+def test_experts4bit_load_state_dict_non_strict(device):
+    """strict=False into a ctor-built module restores everything (no silently-skipped keys)."""
+    gate_up, down = _random_expert_weights(torch.float16, device)
+    src = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float16)
+    dst = Experts4bit(NUM_EXPERTS, HIDDEN_DIM, INTERMEDIATE_DIM, compute_dtype=torch.float16, device=device)
+
+    result = dst.load_state_dict(src.state_dict(), strict=False)
+    assert result.missing_keys == [] and result.unexpected_keys == []
+
+    hidden_states, top_k_index, top_k_weights = _random_routing(device)
+    out_src = src(hidden_states, top_k_index, top_k_weights)
+    out_dst = dst(hidden_states, top_k_index, top_k_weights)
+    torch.testing.assert_close(out_dst, out_src, rtol=0, atol=0)
+
+
+def test_experts4bit_safetensors_roundtrip(tmp_path):
+    """`safetensors.torch.save_model` / `load_model` round-trips to a bit-exact forward.
+
+    Works out of the box because the module is plain Parameters + persistent buffers:
+    no `_extra_state`, no shared storage, and the non-persistent `code` codebook is
+    reconstructed at init rather than serialized.
+    """
+    st = pytest.importorskip("safetensors.torch")
+    gate_up, down = _random_expert_weights(torch.float32, "cpu")
+    src = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+
+    path = str(tmp_path / "experts4bit.safetensors")
+    st.save_model(src, path)
+
+    dst = Experts4bit(NUM_EXPERTS, HIDDEN_DIM, INTERMEDIATE_DIM, compute_dtype=torch.float32)
+    missing, unexpected = st.load_model(dst, path)
+    assert not missing and not unexpected
+
+    hidden_states, top_k_index, top_k_weights = _random_routing("cpu")
+    out_src = src(hidden_states, top_k_index, top_k_weights)
+    out_dst = dst(hidden_states, top_k_index, top_k_weights)
+    torch.testing.assert_close(out_dst, out_src, rtol=0, atol=0)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA")
+def test_experts4bit_cuda_dequant_fidelity():
+    """Pin absolute nf4 fidelity on CUDA, not just internal self-consistency.
+
+    For the 0.1-scaled normal weights used across this file, per-expert nf4 dequant
+    mean-abs error measures ~0.0073 on an RTX A2000; 0.008 gives headroom without
+    letting a broken scale path (e.g. cast absmax) sneak through. The forward bound
+    is the downstream-pinned per-expert dequant ceiling (rel err < 0.2).
+    """
+    torch.manual_seed(0)
+    gate_up, down = _random_expert_weights(torch.float32, "cuda")
+    module = Experts4bit.from_float(gate_up, down, compute_dtype=torch.float32)
+
+    errs = []
+    for e in range(NUM_EXPERTS):
+        deq = module._dequantize_expert(
+            module.gate_up_proj, module.gate_up_absmax, module._gate_up_shape, e, torch.float32
+        )
+        errs.append((deq - gate_up[e]).abs().mean().item())
+    mean_abs_err = sum(errs) / len(errs)
+    assert mean_abs_err <= 0.008, f"nf4 dequant mean-abs error {mean_abs_err:.4f} above ceiling"
+
+    hidden_states, top_k_index, top_k_weights = _random_routing("cuda")
+    out = module(hidden_states, top_k_index, top_k_weights)
+    ref = _reference_forward(gate_up, down, hidden_states, top_k_index, top_k_weights)
+    rel_err = ((out - ref).norm() / ref.norm()).item()
+    assert rel_err <= 0.2, f"4-bit forward rel err {rel_err:.3f} above ceiling"
