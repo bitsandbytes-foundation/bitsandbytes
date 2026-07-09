@@ -118,7 +118,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04]
-        rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1.1", "7.2.3"]
+        rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1.1", "7.2.4"]
         include:
           - os: windows-2025
             rocm_version: "7.2.1"
