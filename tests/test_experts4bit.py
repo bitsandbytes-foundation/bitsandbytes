@@ -323,7 +323,8 @@ def test_experts4bit_1849_regression_fused_experts_get_quantized():
     )
     assert q.gate_up_proj.dtype == torch.uint8 and q.down_proj.dtype == torch.uint8
     quantized_bytes = (
-        q.gate_up_proj.numel() + q.down_proj.numel()  # uint8 packed
+        q.gate_up_proj.numel()
+        + q.down_proj.numel()  # uint8 packed
         + (q.gate_up_absmax.numel() + q.down_absmax.numel()) * 4  # fp32 absmax
     )
     assert quantized_bytes < fp16_bytes / 3  # ~4x on the weights, minus small absmax overhead

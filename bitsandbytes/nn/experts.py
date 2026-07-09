@@ -257,7 +257,6 @@ class Experts4bit(nn.Module):
         dequant_fn = functools.partial(self._dequantize_expert, packed, absmax, shape, expert_idx, compute_dtype)
         return _FrozenLinearRecomputeBackward.apply(x, dequant_fn)
 
-
     def forward(
         self,
         hidden_states: torch.Tensor,
