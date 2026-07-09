@@ -382,9 +382,6 @@ class TestNonContiguousInputs:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("blocksize", [64, 128, 256])
     def test_quantize_blockwise_non_contiguous(self, device, dtype, blocksize):
-        if device == "cpu":
-            pytest.skip("Non-contiguous fix targets CUDA backend only")
-
         code = bitsandbytes.functional.create_dynamic_map().to(device)
 
         # Create non-contiguous tensor via slicing
@@ -404,9 +401,6 @@ class TestNonContiguousInputs:
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("blocksize", [64, 128, 256])
     def test_dequantize_blockwise_non_contiguous(self, device, dtype, blocksize):
-        if device == "cpu":
-            pytest.skip("Non-contiguous fix targets CUDA backend only")
-
         code = bitsandbytes.functional.create_dynamic_map().to(device, dtype=torch.float32)
 
         # Quantize a contiguous tensor, then create non-contiguous uint8 via transpose
