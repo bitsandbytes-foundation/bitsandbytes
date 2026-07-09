@@ -522,9 +522,6 @@ def _optimizer_update_32bit(
         # Lion uses decoupled weight decay: shrink the param directly (p *= 1 - lr*wd)
         # rather than folding wd into the gradient. Matches the cpu backend, the CUDA
         # 8-bit blockwise kernel, and the Lion paper (Chen et al. 2023).
-        # NOTE: the Triton 1-state kernel (backends/triton/kernels_optim.py) still
-        # applies *coupled* decay to Lion — the same bug this fixes — and needs a
-        # separate fix. The CUDA 32-bit kernel is fixed alongside this change.
         if weight_decay > 0.0:
             p_vals = p_vals * (1.0 - lr * weight_decay)
 
