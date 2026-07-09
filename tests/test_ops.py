@@ -435,8 +435,8 @@ class TestNonContiguousInputs:
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [64, 128, 256])
     def test_quantize_4bit_non_contiguous(self, device, dtype, quant_type, blocksize):
-        if device != "cuda":
-            pytest.skip("Non-contiguous fix targets CUDA backend only")
+        if device not in ("cuda", "mps"):
+            pytest.skip("Non-contiguous input handling not implemented for this backend")
 
         # Reproduce issue #1342: non-contiguous tensor from slicing
         A_full = torch.randn(3, 4, 6, 256, dtype=dtype, device=device)
@@ -458,8 +458,8 @@ class TestNonContiguousInputs:
     @pytest.mark.parametrize("blocksize", [64, 128, 256])
     def test_quantize_4bit_roundtrip_non_contiguous(self, device, dtype, quant_type, blocksize):
         """End-to-end test: quantize non-contiguous, dequantize, compare with contiguous path."""
-        if device != "cuda":
-            pytest.skip("Non-contiguous fix targets CUDA backend only")
+        if device not in ("cuda", "mps"):
+            pytest.skip("Non-contiguous input handling not implemented for this backend")
 
         A_full = torch.randn(3, 4, 6, 256, dtype=dtype, device=device)
         A_noncontig = A_full[:, ::2, :, :]
