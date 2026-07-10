@@ -133,9 +133,12 @@ int igemmlt(
 void cutlass_igemm(
     bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda, int ldb, int ldc
 );
+
+template <typename T>
 void dequant_mm_int32_fp16(
-    int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, bnb_stream_t stream
+    int* A, float* rowStats, float* colStats, T* out, T* bias, int numRows, int numCols, bnb_stream_t stream
 );
+
 template <typename T>
 void int8VectorQuant(
     T* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream

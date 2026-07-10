@@ -410,7 +410,7 @@ class TestLLMInt8Functional:
             A = A.view(-1, A.shape[-1])
             CA, statsA, _ = F.int8_vectorwise_quant(A)
             CB, statsB, _ = F.int8_vectorwise_quant(B)
-            output = F.int8_mm_dequant(F.int8_linear_matmul(CA, CB), statsA, statsB)
+            output = F.int8_mm_dequant(F.int8_linear_matmul(CA, CB), statsA, statsB, dtype=dtype)
             torch.testing.assert_close(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
 
     @pytest.mark.parametrize("device", get_available_devices())

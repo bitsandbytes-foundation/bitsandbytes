@@ -49,8 +49,9 @@ _setup_ctypes(
 )
 
 # int8 mm dequant: (A, row_stats, col_stats, out, bias, numRows, numCols, stream)
+# int8 mm dequant: (A, row_stats, col_stats, out, bias, numRows, numCols, stream)
 _setup_ctypes(
-    ["cdequant_mm_int32_fp16"],
+    ["cdequant_mm_int32_fp16", "cdequant_mm_int32_bf16"],
     [ct.c_void_p] * 5 + [ct.c_int32, ct.c_int32, ct.c_void_p],
 )
 
@@ -186,14 +187,18 @@ def _(
 
     # Note: cuda kernel only currently supports fp16 output.
     # We'll later cast to desired dtype if needed.
-    out = torch.empty_like(A, dtype=torch.float16)
+    out_dtype = dtype or torch.float16
+    if out_dtype not in (torch.float16, torch.bfloat16):
+        raise ValueError(f"dtype must be float16 or bfloat16, got {out_dtype}")
 
-    # Note: fused bias in the kernel is only supported for fp16
-    # TODO(matthewdouglas): Consider supporting bf16 fused bias
-    bias_ptr = bias.data_ptr() if bias is not None and bias.dtype == torch.float16 else None
+    out = torch.empty_like(A, dtype=out_dtype)
+
+    # Fuse bias in the kernel when it already matches the output dtype; otherwise add it afterward.
+    bias_ptr = bias.data_ptr() if bias is not None and bias.dtype == out_dtype else None
+    fn = lib.cdequant_mm_int32_bf16 if out_dtype == torch.bfloat16 else lib.cdequant_mm_int32_fp16
 
     with _cuda_device_of(A):
-        lib.cdequant_mm_int32_fp16(
+        fn(
             A.data_ptr(),
             row_stats.data_ptr(),
             col_stats.data_ptr(),
@@ -205,10 +210,10 @@ def _(
         )
 
     # Add bias separately if not fused in kernel
-    if bias is not None and bias.dtype != torch.float16:
+    if bias is not None and bias.dtype != out_dtype:
         out.add_(bias)
 
-    return out.to(dtype or torch.float16)
+    return out
 
 
 @register_kernel("bitsandbytes::int8_vectorwise_quant", "cuda")

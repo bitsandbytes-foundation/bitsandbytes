@@ -551,7 +551,14 @@ int cigemmlt_8_rowscale(
 void cdequant_mm_int32_fp16(
     int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, cudaStream_t stream
 ) {
-    dequant_mm_int32_fp16(A, rowStats, colStats, out, bias, numRows, numCols, stream);
+    dequant_mm_int32_fp16<half>(A, rowStats, colStats, out, bias, numRows, numCols, stream);
+}
+
+void cdequant_mm_int32_bf16(
+    int* A, float* rowStats, float* colStats, __nv_bfloat16* out, __nv_bfloat16* bias, int numRows, int numCols,
+    cudaStream_t stream
+) {
+    dequant_mm_int32_fp16<__nv_bfloat16>(A, rowStats, colStats, out, bias, numRows, numCols, stream);
 }
 
 void cint8_vector_quant(

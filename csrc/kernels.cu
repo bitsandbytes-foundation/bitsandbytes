@@ -1384,10 +1384,10 @@ template __global__ void kInt8VectorQuant<bnb_bfloat16, 1024, 1>(
 );
 #define MM_DEQUANT_CONST 6.200012e-05f // 1.0f/(127.0f*127.0f)
 
-template <int ITEMS_PER_THREAD, int THREADS>
+template <typename T, int ITEMS_PER_THREAD, int THREADS>
 __global__ void kdequant_mm_int32_fp16(
-    int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats, half* out,
-    half* __restrict__ const bias, const int numRows, const int numCols, const int n
+    int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats, T* out,
+    T* __restrict__ const bias, const int numRows, const int numCols, const int n
 ) {
     const int n_out = numRows * numCols;
 
@@ -1395,7 +1395,7 @@ __global__ void kdequant_mm_int32_fp16(
     int thread_offset = threadIdx.x * ITEMS_PER_THREAD;
 
     int local_values[ITEMS_PER_THREAD];
-    half local_output[ITEMS_PER_THREAD];
+    T local_output[ITEMS_PER_THREAD];
 
     float local_rowStats[ITEMS_PER_THREAD];
     float local_colStats[ITEMS_PER_THREAD];
@@ -1414,7 +1414,7 @@ __global__ void kdequant_mm_int32_fp16(
 
         local_colStats[j] = col_idx >= numCols ? 0.0f : __ldg(&colStats[col_idx]);
         local_rowStats[j] = row_idx >= numRows ? 0.0f : __ldg(&rowStats[row_idx]);
-        local_biasValue[j] = ((bias == nullptr) || col_idx >= numCols) ? 0.0f : __half2float(bias[col_idx]);
+        local_biasValue[j] = ((bias == nullptr) || col_idx >= numCols) ? 0.0f : (float)(bias[col_idx]);
     }
 
     // Each block loads THREADS * ITEMS_PER_THREAD values from A
@@ -1424,9 +1424,8 @@ __global__ void kdequant_mm_int32_fp16(
 
 #pragma unroll ITEMS_PER_THREAD
     for (int j = 0; j < ITEMS_PER_THREAD; ++j) {
-        local_output[j] = __float2half(
-            fmaf(local_values[j] * local_rowStats[j] * local_colStats[j], MM_DEQUANT_CONST, local_biasValue[j])
-        );
+        local_output[j] =
+            (T)(fmaf(local_values[j] * local_rowStats[j] * local_colStats[j], MM_DEQUANT_CONST, local_biasValue[j]));
     }
 
 #pragma unroll ITEMS_PER_THREAD
@@ -1595,9 +1594,13 @@ template __global__ void kgemm_4bit_inference_naive<float, 128, 32>(
     float* out, int lda, int ldb, int ldc, int blocksize
 );
 
-template __global__ void kdequant_mm_int32_fp16<4, 512>(
+template __global__ void kdequant_mm_int32_fp16<half, 4, 512>(
     int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats, half* out,
     half* __restrict__ const bias, const int numRows, const int numCols, const int n
+);
+template __global__ void kdequant_mm_int32_fp16<bnb_bfloat16, 4, 512>(
+    int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats,
+    bnb_bfloat16* out, bnb_bfloat16* __restrict__ const bias, const int numRows, const int numCols, const int n
 );
 
 template __device__ unsigned char dQuantize<0>(float* smem_code, const float rand, float x);

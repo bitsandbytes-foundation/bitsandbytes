@@ -1561,6 +1561,7 @@ def int8_mm_dequant(
     col_stats: torch.Tensor,
     out: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
+    dtype: Optional[torch.dtype] = None,
 ):
     """Performs dequantization on the result of a quantized int8 matrix multiplication.
 
@@ -1570,11 +1571,15 @@ def int8_mm_dequant(
         col_stats (`torch.Tensor`): The column-wise quantization statistics for the rhs operand of the matrix multiplication.
         out (`torch.Tensor`, *optional*): A pre-allocated tensor to store the output of the operation.
         bias (`torch.Tensor`, *optional*): An optional bias vector to add to the result.
+        dtype (`torch.dtype`, *optional*): The desired output dtype. Supports `torch.float16` and
+            `torch.bfloat16`. Defaults to `torch.float16`.
 
     Returns:
-        `torch.Tensor`: The dequantized result with an optional bias, with dtype `torch.float16`.
+        `torch.Tensor`: The dequantized result with an optional bias, with the requested dtype.
     """
-    result = torch.ops.bitsandbytes.int8_mm_dequant.default(A, row_stats, col_stats, dtype=torch.float16, bias=bias)
+    result = torch.ops.bitsandbytes.int8_mm_dequant.default(
+        A, row_stats, col_stats, dtype=dtype or torch.float16, bias=bias
+    )
 
     # TODO(matthewdouglas): Deprecate out kwarg
     if out is not None:
