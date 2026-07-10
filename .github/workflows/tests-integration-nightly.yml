@@ -1,0 +1,436 @@
+name: Integration Tests (Downstream)
+
+# Nightly smoke tests: run the bnb-specific test suites from transformers,
+# accelerate, and peft against the latest main-branch bnb wheel. Catches
+# downstream breakage before it reaches users.
+#
+# bnb is installed from the `continuous-release_main` pre-release which
+# python-package.yml publishes on every push to main — no duplicate build.
+#
+# See agents/integration_tests_guide.md for background.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/tests-integration-nightly.yml'
+      - 'scripts/integration_test_report.py'
+  # schedule:
+  #   - cron: "30 3 * * *"  # enable once stable; runs after python-package + tests-nightly
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.10"
+  TORCH_VERSION: "2.9.1"
+  PYPI_INDEX: "https://download.pytorch.org/whl/cu128"
+  BNB_WHEEL_URL: "https://github.com/bitsandbytes-foundation/bitsandbytes/releases/download/continuous-release_main/bitsandbytes-1.33.7.preview-py3-none-manylinux_2_24_x86_64.whl"
+  CUDA_VISIBLE_DEVICES: "0,1"
+
+jobs:
+  # ─── Downstream test jobs ─────────────────────────────────────────────────
+  # Each job:
+  #   1. Installs torch, then bnb from the continuous-release wheel
+  #   2. Installs the downstream lib (latest release from PyPI)
+  #   3. Clones the matching version tag for the test files
+  #   4. Runs the library's bnb-specific tests with --junitxml
+  #   5. Uploads the XML + full log as an artifact for the report job
+  #
+  # Runner matching rationale (see integration_tests_guide.md):
+  #   transformers CI runs on T4 → we use T4
+  #   accelerate / peft CI runs on L4 → closest bnb equivalent is A10
+  # This reduces spurious failures from expected values calibrated on their runners.
+
+  test-transformers:
+    name: Transformers bnb tests (single GPU)
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    runs-on: bandb-aws-g5-4xlarge-plus-use1-public-80  # A10G (matches transformers CI)
+    steps:
+      - name: Show GPU information
+        run: nvidia-smi
+
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install torch + bnb (from continuous-release)
+        run: |
+          pip install torch==${TORCH_VERSION} --index-url ${PYPI_INDEX}
+          pip install "bitsandbytes[test] @ ${BNB_WHEEL_URL}"
+
+      - name: Install transformers and clone matching tag
+        run: |
+          pip install -U transformers accelerate pytest-xdist
+          TRANSFORMERS_VERSION=$(pip show transformers | awk '/^Version:/ {print $2}')
+          echo "Installed transformers v${TRANSFORMERS_VERSION}"
+          git clone --depth=1 --branch "v${TRANSFORMERS_VERSION}" \
+            https://github.com/huggingface/transformers.git /tmp/transformers
+
+      - name: Show environment
+        run: |
+          pip list
+          python -m torch.utils.collect_env
+
+      - name: Run transformers bnb tests
+        working-directory: /tmp/transformers
+        env:
+          RUN_SLOW: "1"
+        shell: bash -o pipefail {0}
+        run: |
+          mkdir -p ${GITHUB_WORKSPACE}/reports
+          python -m pytest tests/quantization/bnb/ \
+            -v \
+            -k "not MultiGpu and not multi_gpu" \
+            --junitxml=${GITHUB_WORKSPACE}/reports/transformers.xml \
+            -o junit_logging=all \
+            2>&1 | tee ${GITHUB_WORKSPACE}/reports/transformers.log
+
+      - name: Upload JUnit XML and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-transformers
+          path: reports/
+          retention-days: 7
+
+  test-transformers-multigpu:
+    name: Transformers bnb tests (multi GPU)
+    if: false  # disabled until bandb-aws-g6-12xlarge-plus runner is provisioned
+    runs-on: bandb-aws-g6-12xlarge-plus-use1-public-80  # 4× L4 (2 used)
+    steps:
+      - name: Show GPU information
+        run: nvidia-smi
+
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install torch + bnb (from continuous-release)
+        run: |
+          pip install torch==${TORCH_VERSION} --index-url ${PYPI_INDEX}
+          pip install "bitsandbytes[test] @ ${BNB_WHEEL_URL}"
+
+      - name: Install transformers and clone matching tag
+        run: |
+          pip install -U transformers accelerate pytest-xdist
+          TRANSFORMERS_VERSION=$(pip show transformers | awk '/^Version:/ {print $2}')
+          echo "Installed transformers v${TRANSFORMERS_VERSION}"
+          git clone --depth=1 --branch "v${TRANSFORMERS_VERSION}" \
+            https://github.com/huggingface/transformers.git /tmp/transformers
+
+      - name: Show environment
+        run: |
+          pip list
+          python -m torch.utils.collect_env
+
+      - name: Run transformers bnb tests (multi-GPU only)
+        working-directory: /tmp/transformers
+        env:
+          RUN_SLOW: "1"
+        shell: bash -o pipefail {0}
+        run: |
+          mkdir -p ${GITHUB_WORKSPACE}/reports
+          python -m pytest tests/quantization/bnb/ \
+            -v \
+            -k "MultiGpu or multi_gpu" \
+            --junitxml=${GITHUB_WORKSPACE}/reports/transformers-multigpu.xml \
+            -o junit_logging=all \
+            2>&1 | tee ${GITHUB_WORKSPACE}/reports/transformers-multigpu.log
+
+      - name: Upload JUnit XML and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-transformers-multigpu
+          path: reports/
+          retention-days: 7
+
+  test-diffusers:
+    name: Diffusers bnb tests
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    runs-on: bandb-aws-g6e-4xlarge-plus-use1-public-80  # L40S (matches diffusers CI)
+    container:
+      image: diffusers/diffusers-pytorch-cuda
+      options: --gpus all --shm-size "16gb" --ipc host
+    steps:
+      - name: Show GPU information
+        run: nvidia-smi
+
+      - uses: actions/checkout@v4
+
+      - name: Install bnb + diffusers from PyPI (overriding image versions)
+        run: |
+          pip install "bitsandbytes[test] @ ${BNB_WHEEL_URL}"
+          pip install --force-reinstall --no-deps diffusers
+
+      - name: Clone diffusers matching installed version
+        run: |
+          DIFFUSERS_VERSION=$(pip show diffusers | awk '/^Version:/ {print $2}')
+          echo "Installed diffusers v${DIFFUSERS_VERSION}"
+          git clone --depth=1 --branch "v${DIFFUSERS_VERSION}" \
+            https://github.com/huggingface/diffusers.git /tmp/diffusers
+
+      - name: Show environment
+        run: |
+          pip list
+          python -m torch.utils.collect_env
+
+      - name: Run diffusers bnb tests
+        working-directory: /tmp/diffusers
+        env:
+          RUN_SLOW: "1"
+          CUBLAS_WORKSPACE_CONFIG: ":16:8"
+        shell: bash -o pipefail {0}
+        run: |
+          mkdir -p ${GITHUB_WORKSPACE}/reports
+          python -m pytest \
+            -m bitsandbytes \
+            tests/ \
+            -v \
+            --junitxml=${GITHUB_WORKSPACE}/reports/diffusers.xml \
+            -o junit_logging=all \
+            2>&1 | tee ${GITHUB_WORKSPACE}/reports/diffusers.log
+
+      - name: Upload JUnit XML and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-diffusers
+          path: reports/
+          retention-days: 7
+
+  test-axolotl:
+    name: Axolotl bnb kernel tests
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    runs-on: bandb-aws-g5-4xlarge-plus-use1-public-80  # A10G
+    steps:
+      - name: Show GPU information
+        run: nvidia-smi
+
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install torch + bnb (from continuous-release)
+        run: |
+          pip install torch==${TORCH_VERSION} --index-url ${PYPI_INDEX}
+          pip install "bitsandbytes[test] @ ${BNB_WHEEL_URL}"
+
+      - name: Install axolotl from latest release tag
+        run: |
+          AXOLOTL_TAG=$(curl -s https://api.github.com/repos/axolotl-ai-cloud/axolotl/releases/latest | python -c "import json,sys; print(json.load(sys.stdin)['tag_name'])")
+          echo "Latest axolotl release: ${AXOLOTL_TAG}"
+          git clone --depth=1 --branch "${AXOLOTL_TAG}" \
+            https://github.com/axolotl-ai-cloud/axolotl.git /tmp/axolotl
+          pip install /tmp/axolotl transformers accelerate peft
+
+      - name: Show environment
+        run: |
+          pip list
+          python -m torch.utils.collect_env
+
+      - name: Run axolotl bnb kernel + optimizer tests
+        working-directory: /tmp/axolotl
+        shell: bash -o pipefail {0}
+        run: |
+          mkdir -p ${GITHUB_WORKSPACE}/reports
+          python -m pytest \
+            tests/e2e/kernels/test_quantize.py \
+            tests/e2e/kernels/test_lora.py \
+            "tests/e2e/kernels/test_lora_features.py::TestQuantizedModels" \
+            "tests/e2e/test_llama.py::TestLlama::test_fft_trust_remote_code" \
+            -v \
+            --junitxml=${GITHUB_WORKSPACE}/reports/axolotl.xml \
+            -o junit_logging=all \
+            2>&1 | tee ${GITHUB_WORKSPACE}/reports/axolotl.log
+
+      - name: Upload JUnit XML and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-axolotl
+          path: reports/
+          retention-days: 7
+
+  test-peft:
+    name: PEFT bnb tests (single GPU)
+    if: github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    runs-on: bandb-aws-g6-4xlarge-plus-use1-public-80  # L4 (matches peft CI)
+    steps:
+      - name: Show GPU information
+        run: nvidia-smi
+
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install torch + bnb (from continuous-release)
+        run: |
+          pip install torch==${TORCH_VERSION} --index-url ${PYPI_INDEX}
+          pip install "bitsandbytes[test] @ ${BNB_WHEEL_URL}"
+
+      - name: Install peft and clone matching tag
+        run: |
+          pip install "peft[test]" transformers accelerate
+          PEFT_VERSION=$(pip show peft | awk '/^Version:/ {print $2}')
+          echo "Installed peft v${PEFT_VERSION}"
+          git clone --depth=1 --branch "v${PEFT_VERSION}" \
+            https://github.com/huggingface/peft.git /tmp/peft
+
+      - name: Show environment
+        run: |
+          pip list
+          python -m torch.utils.collect_env
+
+      - name: Run peft bnb tests
+        working-directory: /tmp/peft
+        env:
+          IS_GITHUB_CI: "1"
+        shell: bash -o pipefail {0}
+        run: |
+          mkdir -p ${GITHUB_WORKSPACE}/reports
+          python -m pytest \
+            -m single_gpu_tests \
+            -k PeftBnbGPUExampleTests \
+            tests/test_gpu_examples.py \
+            -v \
+            --junitxml=${GITHUB_WORKSPACE}/reports/peft.xml \
+            -o junit_logging=all \
+            2>&1 | tee ${GITHUB_WORKSPACE}/reports/peft.log
+
+      - name: Upload JUnit XML and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-peft
+          path: reports/
+          retention-days: 7
+
+  test-peft-multigpu:
+    name: PEFT bnb tests (multi GPU)
+    if: false  # disabled until bandb-aws-g6-12xlarge-plus runner is provisioned
+    runs-on: bandb-aws-g6-12xlarge-plus-use1-public-80  # 4× L4
+    steps:
+      - name: Show GPU information
+        run: nvidia-smi
+
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install torch + bnb (from continuous-release)
+        run: |
+          pip install torch==${TORCH_VERSION} --index-url ${PYPI_INDEX}
+          pip install "bitsandbytes[test] @ ${BNB_WHEEL_URL}"
+
+      - name: Install peft and clone matching tag
+        run: |
+          pip install "peft[test]" transformers accelerate
+          PEFT_VERSION=$(pip show peft | awk '/^Version:/ {print $2}')
+          echo "Installed peft v${PEFT_VERSION}"
+          git clone --depth=1 --branch "v${PEFT_VERSION}" \
+            https://github.com/huggingface/peft.git /tmp/peft
+
+      - name: Show environment
+        run: |
+          pip list
+          python -m torch.utils.collect_env
+
+      - name: Run peft bnb tests
+        working-directory: /tmp/peft
+        env:
+          IS_GITHUB_CI: "1"
+        shell: bash -o pipefail {0}
+        run: |
+          mkdir -p ${GITHUB_WORKSPACE}/reports
+          python -m pytest \
+            -m multi_gpu_tests \
+            -k PeftBnbGPUExampleTests \
+            tests/test_gpu_examples.py \
+            -v \
+            --junitxml=${GITHUB_WORKSPACE}/reports/peft-multigpu.xml \
+            -o junit_logging=all \
+            2>&1 | tee ${GITHUB_WORKSPACE}/reports/peft-multigpu.log
+
+      - name: Upload JUnit XML and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-peft-multigpu
+          path: reports/
+          retention-days: 7
+
+  # ─── Consolidated report ──────────────────────────────────────────────────
+  # Runs after all test jobs finish (success or failure).
+  # Downloads the JUnit XMLs, runs our report script, writes to the job
+  # summary, uploads artifacts, and posts a consolidated message to
+  # #bnb-daily-ci-collab on Slack.
+
+  report:
+    name: Consolidated report
+    needs: [test-transformers, test-transformers-multigpu, test-diffusers, test-axolotl, test-peft, test-peft-multigpu]
+    if: always() && github.repository == 'bitsandbytes-foundation/bitsandbytes'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Download all report artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: reports-*
+
+      - name: Consolidate XMLs into reports/
+        run: |
+          mkdir -p reports
+          # Each artifact lands in artifacts/reports-<suite>/ — flatten to reports/<suite>.xml
+          find artifacts -name '*.xml' -exec cp {} reports/ \;
+          find artifacts -name '*.log' -exec cp {} reports/ \;
+          ls -la reports/
+
+      - name: Generate consolidated report + post to Slack
+        env:
+          SLACK_API_TOKEN: ${{ secrets.SLACK_CIFEEDBACK_BOT_TOKEN }}
+        run: |
+          pip install slack_sdk
+          python scripts/integration_test_report.py \
+            --reports-dir reports/ \
+            --output consolidated_report.md \
+            --slack-channel bnb-daily-ci-collab
+
+      - name: Write to job summary
+        if: always()
+        run: |
+          cat consolidated_report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload consolidated report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: consolidated-report
+          path: |
+            consolidated_report.md
+            reports/
+          retention-days: 14
