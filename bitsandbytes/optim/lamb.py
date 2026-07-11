@@ -60,7 +60,7 @@ class LAMB(Optimizer2State):
             optim_bits,
             args,
             min_8bit_size,
-            max_unorm=1.0,
+            max_unorm=max_unorm,
         )
 
 
@@ -97,6 +97,7 @@ class LAMB8bit(Optimizer2State):
                 The weight decay value for the optimizer.
             amsgrad (`bool`, defaults to `False`):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
+                Note: This parameter is not supported in LAMB8bit and must be False.
             adam_w_mode (`bool`, defaults to `True`):
                 Whether to use the AdamW variant.
             args (`object`, defaults to `None`):
@@ -104,8 +105,15 @@ class LAMB8bit(Optimizer2State):
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             max_unorm (`float`, defaults to 1.0):
-                The maximum gradient norm.
+                The maximum update norm for trust-ratio clipping.
+                Note: The 8-bit blockwise update does not apply update-norm clipping, so this
+                value is stored on the optimizer but has no effect on LAMB8bit. It is honored by
+                the 32-bit LAMB / LAMB32bit optimizers.
         """
+        # Validate unsupported parameters
+        if amsgrad:
+            raise ValueError("LAMB8bit does not support amsgrad=True")
+
         super().__init__(
             "lamb",
             params,
@@ -116,7 +124,7 @@ class LAMB8bit(Optimizer2State):
             8,
             args,
             min_8bit_size,
-            max_unorm=1.0,
+            max_unorm=max_unorm,
         )
 
 
@@ -172,5 +180,5 @@ class LAMB32bit(Optimizer2State):
             32,
             args,
             min_8bit_size,
-            max_unorm=1.0,
+            max_unorm=max_unorm,
         )
