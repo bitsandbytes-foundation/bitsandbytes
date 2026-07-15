@@ -10,9 +10,6 @@
 #if BUILD_HIP
 #include <ops.cuh>
 #endif
-#if BUILD_MPS
-// #include <mps_ops.h>
-#endif
 #if BUILD_XPU
 #include <xpu_ops.h>
 #endif

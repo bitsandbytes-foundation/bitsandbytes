@@ -3,7 +3,7 @@
 #   For  GCC: `cmake -B build . && cmake --build build`
 #   For MSVC: `cmake -B build . && cmake --build build --config Release`
 # You can also use the following options and variables
-#  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, or `mps` to select the backend
+#  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, `hip`, or `xpu` to select the backend
 #  - CUDA_VERSION: The expected CUDA version, for sanity checking. The actual version
 #                  is whatever CMake finds on your path.
 #  - COMPUTE_CAPABILITY: Which GPU Arch/Compute codes to provide to NVCC.
@@ -62,14 +62,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Define included source files
 set(CPP_FILES csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
 set(GPU_FILES csrc/ops.cu csrc/kernels.cu)
-set(MPS_FILES csrc/mps_ops.mm)
-set(METAL_FILES csrc/mps_kernels.metal)
 set(XPU_FILES csrc/xpu_ops.cpp csrc/xpu_kernels.cpp)
 # C++ sources are always included
 list(APPEND SRC_FILES ${CPP_FILES})
 
-set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, hip, mps, xpu)")
-set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip mps xpu)
+set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, hip, xpu)")
+set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip xpu)
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
 if(APPLE)
@@ -86,33 +84,22 @@ if(${COMPUTE_BACKEND} STREQUAL "cuda")
     endif()
     set(BUILD_CUDA ON)
     set(BUILD_HIP OFF)
-    set(BUILD_MPS OFF)
 elseif(${COMPUTE_BACKEND} STREQUAL "hip")
     if(APPLE)
         message(FATAL_ERROR "HIP is not supported on macOS" )
     endif()
     set(BUILD_CUDA OFF)
     set(BUILD_HIP ON)
-    set(BUILD_MPS OFF)
-elseif(${COMPUTE_BACKEND} STREQUAL "mps")
-    if(NOT APPLE)
-        message(FATAL_ERROR "MPS is only supported on macOS" )
-    endif()
-    set(BUILD_CUDA OFF)
-    set(BUILD_HIP OFF)
-    set(BUILD_MPS ON)
 elseif(${COMPUTE_BACKEND} STREQUAL "xpu")
     if(APPLE)
         message(FATAL_ERROR "XPU is not supported on macOS" )
     endif()
     set(BUILD_CUDA OFF)
     set(BUILD_HIP OFF)
-    set(BUILD_MPS OFF)
     set(BUILD_XPU ON)
 else()
     set(BUILD_CUDA OFF)
     set(BUILD_HIP OFF)
-    set(BUILD_MPS OFF)
     set(BUILD_XPU OFF)
     set(BUILD_CPU ON)
 endif()
@@ -312,25 +299,6 @@ elseif(BUILD_HIP)
     add_compile_definitions(__HIP_PLATFORM_AMD__)
     add_compile_definitions(__HIP_PLATFORM_HCC__)
     add_compile_definitions(BUILD_HIP)
-elseif(BUILD_MPS)
-    if(NOT APPLE)
-        message(FATAL_ERROR "MPS is only supported on macOS" )
-    endif()
-
-    enable_language(OBJCXX)
-
-    list(APPEND SRC_FILES ${MPS_FILES})
-
-    string(APPEND BNB_OUTPUT_NAME "_mps")
-    add_compile_definitions(BUILD_MPS)
-    file(MAKE_DIRECTORY "build")
-    add_custom_command(OUTPUT "bitsandbytes/bitsandbytes.metallib"
-                COMMAND xcrun metal -c -o "build/bitsandbytes.air" ${METAL_FILES}
-                COMMAND xcrun metallib "build/bitsandbytes.air" -o "bitsandbytes/bitsandbytes.metallib"
-                DEPENDS "${METAL_FILES}"
-                COMMENT "Compiling Metal kernels"
-                VERBATIM)
-    add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
 elseif(BUILD_XPU)
     list(APPEND SRC_FILES ${XPU_FILES})
     string(APPEND BNB_OUTPUT_NAME "_xpu")
@@ -468,10 +436,6 @@ if(BUILD_HIP)
 	find_package(hipblaslt)
         target_link_libraries(bitsandbytes PUBLIC roc::hipblaslt)
     endif()
-endif()
-if(BUILD_MPS)
-    add_dependencies(bitsandbytes metallib)
-    target_link_libraries(bitsandbytes objc "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
 endif()
 if(BUILD_XPU)
     set(SYCL_LINK_FLAGS "-fsycl;--offload-compress;-fsycl-targets=spir64_gen,spir64;-Xs;-device pvc,xe-lpg,ats-m150 -options ' -cl-intel-enable-auto-large-GRF-mode -cl-poison-unsupported-fp64-kernels -cl-intel-greater-than-4GB-buffer-required'")
