@@ -333,12 +333,28 @@ elseif(BUILD_MPS)
     add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
 elseif(BUILD_XPU)
     list(APPEND SRC_FILES ${XPU_FILES})
-    string(APPEND BNB_OUTPUT_NAME "_xpu")
     add_compile_definitions(BUILD_XPU)
     set(CMAKE_C_COMPILER icx)
     set(CMAKE_CXX_COMPILER icpx)
     if(WIN32)
         set(CMAKE_CXX_COMPILER icx)
+    endif()
+
+    # Get the oneAPI year (2025, 2026, ...) so we can name the library with it.
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} --version
+        OUTPUT_VARIABLE _XPU_COMPILER_VERSION_OUTPUT
+        ERROR_VARIABLE _XPU_COMPILER_VERSION_OUTPUT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    string(REGEX MATCH "20[0-9][0-9]" XPU_VERSION "${_XPU_COMPILER_VERSION_OUTPUT}")
+
+    if(XPU_VERSION)
+        message(STATUS "XPU oneAPI Version: ${XPU_VERSION}")
+        string(APPEND BNB_OUTPUT_NAME "_xpu${XPU_VERSION}")
+    else()
+        message(WARNING "Could not detect oneAPI version from icpx; building unversioned libbitsandbytes_xpu.")
+        string(APPEND BNB_OUTPUT_NAME "_xpu")
     endif()
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
