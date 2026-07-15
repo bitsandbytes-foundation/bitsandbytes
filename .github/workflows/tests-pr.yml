@@ -45,7 +45,7 @@ jobs:
           # icelake doesn't apply to windows-arm64
           - platform: windows-arm64
             cpu_type: icelake
-          # Windows ARM64 minimum torch version is 2.12.0
+          # windows-arm64 minimum torch version is 2.7.0
           - platform: windows-arm64
             torch_version: "2.4.1"
 
@@ -79,7 +79,7 @@ jobs:
             torch_version: "2.4.1"
             pypi_index: "https://download.pytorch.org/whl/cu118"
           - cuda_version: "12.6.3"
-            torch_version: "2.12.1"
+            torch_version: "2.12.0"
             pypi_index: "https://download.pytorch.org/whl/cu126"
           - cuda_version: "13.0.2"
             torch_version: "2.13.0"
