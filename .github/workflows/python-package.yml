@@ -94,28 +94,35 @@ jobs:
 
   build-xpu:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-22.04, windows-2022]
+        oneapi_version: ["2025", "2026"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Build C++ (Linux)
         if: runner.os == 'Linux'
         run: bash .github/scripts/build-xpu.sh
+        env:
+          ONEAPI_VERSION: ${{ matrix.oneapi_version }}
       - name: Build C++ (Windows)
         if: runner.os == 'Windows'
         run: .github/scripts/build-xpu-windows.bat
         shell: cmd
+        env:
+          ONEAPI_VERSION: ${{ matrix.oneapi_version }}
       - name: Upload build artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shared_library_xpu_${{ runner.os }}_${{ runner.arch }}
+          name: shared_library_xpu_${{ runner.os }}_${{ runner.arch }}_${{ matrix.oneapi_version }}
           path: output/*
           retention-days: 7
           if-no-files-found: error
 
   build-rocm:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-22.04]
         rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1.1", "7.2.4"]
