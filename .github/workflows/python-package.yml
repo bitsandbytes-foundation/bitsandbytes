@@ -118,10 +118,12 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04]
-        rocm_version: ["6.2.4", "6.3.4", "6.4.4", "7.0.2", "7.1.1", "7.2.4"]
+        rocm_version: ["6.4.4", "7.0.2", "7.1.1", "7.2.4", "7.14.0"]
         include:
           - os: windows-2025
             rocm_version: "7.2.1"
+          - os: windows-2025
+            rocm_version: "7.14.0"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

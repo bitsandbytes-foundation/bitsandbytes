@@ -4,16 +4,48 @@ set -xeuo pipefail
 : "${RUNNER_OS:?RUNNER_OS must be set (Linux/Windows)}"
 : "${ROCM_VERSION:?ROCM_VERSION must be set}"
 
+rocm_version_at_least() {
+    local required_version="$1"
+    local current_major current_minor required_major required_minor
+
+    IFS=. read -r current_major current_minor _ <<< "${ROCM_VERSION}"
+    IFS=. read -r required_major required_minor _ <<< "${required_version}"
+
+    if ((current_major > required_major)); then
+        return 0
+    fi
+    if ((current_major < required_major)); then
+        return 1
+    fi
+    if ((current_minor >= required_minor)); then
+        return 0
+    fi
+    return 1
+}
+
 bnb_rocm_arch="gfx90a;gfx942;gfx1100;gfx1101;gfx1102;gfx1103"
 
 # ROCm 6.4+ - Add RDNA4 and RDNA3.5 targets. Note we assume >=6.4.4.
-[[ "${ROCM_VERSION}" == 6.4.* || "${ROCM_VERSION}" == 7.* ]] && bnb_rocm_arch="${bnb_rocm_arch};gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
+if rocm_version_at_least "6.4"; then
+    bnb_rocm_arch="${bnb_rocm_arch};gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201"
+fi
 
 # ROCm 7.0+ - Add gfx950
-[[ "${ROCM_VERSION}" == 7.* ]] && bnb_rocm_arch="${bnb_rocm_arch};gfx950"
+if rocm_version_at_least "7.0"; then
+    bnb_rocm_arch="${bnb_rocm_arch};gfx950"
+fi
+
+# ROCm 7.14+ - Add CDNA1 and RDNA2 targets.
+if rocm_version_at_least "7.14"; then
+    bnb_rocm_arch="${bnb_rocm_arch};gfx908;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
+fi
 
 if [ "${RUNNER_OS}" == "Linux" ]; then
-    image=rocm/dev-ubuntu-22.04:${ROCM_VERSION}-complete
+    image_suffix="complete"
+    if rocm_version_at_least "7.14"; then
+        image_suffix="full"
+    fi
+    image=rocm/dev-ubuntu-22.04:${ROCM_VERSION}-${image_suffix}
     echo "Using image $image"
     docker run --rm -i \
         -w /src -v "$PWD:/src" "$image" sh -c \
@@ -23,15 +55,23 @@ if [ "${RUNNER_OS}" == "Linux" ]; then
 else
     bnb_rocm_arch="gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1200;gfx1201"
 
-    # Install ROCm SDK wheels from repo.radeon.com.
-    rocm_base_url="https://repo.radeon.com/rocm/windows/rocm-rel-${ROCM_VERSION}"
-    pip install \
-        "${rocm_base_url}/rocm_sdk_core-${ROCM_VERSION}-py3-none-win_amd64.whl" \
-        "${rocm_base_url}/rocm_sdk_devel-${ROCM_VERSION}-py3-none-win_amd64.whl" \
-        "${rocm_base_url}/rocm_sdk_libraries_custom-${ROCM_VERSION}-py3-none-win_amd64.whl" \
-        "${rocm_base_url}/rocm-${ROCM_VERSION}.tar.gz"
+    if rocm_version_at_least "7.14"; then
+        # Add RDNA2 and additional RDNA3.5 targets.
+        bnb_rocm_arch="${bnb_rocm_arch};gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1152;gfx1153"
 
-    # Expand the devel tarball
+        pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,devel]==${ROCM_VERSION}"
+    else
+        # Install ROCm SDK wheels from repo.radeon.com.
+        rocm_base_url="https://repo.radeon.com/rocm/windows/rocm-rel-${ROCM_VERSION}"
+        pip install \
+            "${rocm_base_url}/rocm_sdk_core-${ROCM_VERSION}-py3-none-win_amd64.whl" \
+            "${rocm_base_url}/rocm_sdk_devel-${ROCM_VERSION}-py3-none-win_amd64.whl" \
+            "${rocm_base_url}/rocm_sdk_libraries_custom-${ROCM_VERSION}-py3-none-win_amd64.whl" \
+            "${rocm_base_url}/rocm-${ROCM_VERSION}.tar.gz"
+
+    fi
+
+    # Expand the devel tarball.
     rocm-sdk init
 
     ROCM_PATH="$(rocm-sdk path --root | tr '\\' '/')"
