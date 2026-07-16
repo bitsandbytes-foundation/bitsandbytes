@@ -106,13 +106,19 @@ class LAMB8bit(Optimizer2State):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             max_unorm (`float`, defaults to 1.0):
                 The maximum update norm for trust-ratio clipping.
-                Note: The 8-bit blockwise update does not apply update-norm clipping, so this
-                value is stored on the optimizer but has no effect on LAMB8bit. It is honored by
-                the 32-bit LAMB / LAMB32bit optimizers.
+                Note: This parameter is not supported in LAMB8bit and must be left at the
+                default 1.0. The 8-bit blockwise update does not implement update-norm
+                clipping; it is honored by the 32-bit LAMB / LAMB32bit optimizers.
         """
         # Validate unsupported parameters
         if amsgrad:
             raise ValueError("LAMB8bit does not support amsgrad=True")
+
+        if max_unorm != 1.0:
+            # We allow the default value of 1.0 to maintain compatibility with the function
+            # signature, but the 8-bit blockwise update does not implement update-norm
+            # clipping, so any other value would be silently ignored.
+            raise ValueError("LAMB8bit only supports max_unorm=1.0 (default value for compatibility)")
 
         super().__init__(
             "lamb",
