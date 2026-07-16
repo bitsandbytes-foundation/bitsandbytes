@@ -127,7 +127,9 @@ def replace_parameter_4bit(
 
 
 def _disable_parametrization_cache(module: nn.Module, inputs: tuple[Any, ...], output: Any):
-    P._cache_enabled -= 1
+    # Clamp at zero: with always_call=True this hook can fire without its matching
+    # pre-hook having run, and a negative count would never clear the cache again.
+    P._cache_enabled = max(0, P._cache_enabled - 1)
     if not P._cache_enabled:
         P._cache = {}
 
@@ -149,8 +151,11 @@ def _register_parametrization_hooks(module: nn.Module, param_name: str):
     # Register hooks to enable caching for the dequantization parametrization.
     # This helps preserve time and memory when the same quantized parameter
     # is accessed multiple times in the forward computation.
+    # always_call so that an exception escaping forward -- notably the
+    # _StopRecomputationError non-reentrant checkpointing raises to early-stop
+    # recomputation -- cannot leave the cache enabled and its tensors pinned.
     module.register_forward_pre_hook(_enable_parametrization_cache)
-    module.register_forward_hook(_disable_parametrization_cache)
+    module.register_forward_hook(_disable_parametrization_cache, always_call=True)
 
 
 def _parametrized_state_dict_post_hook(

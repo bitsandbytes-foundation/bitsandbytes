@@ -1,6 +1,7 @@
 import pytest
 import torch
 import torch.nn as nn
+import torch.nn.utils.parametrize as P
 
 from bitsandbytes import functional as F
 from bitsandbytes.nn.parametrize import (
@@ -431,3 +432,30 @@ def test_gradient_behavior(device, dtype):
     # The dequantized output should also not require gradients
     reconstructed = module.weight_2d
     assert not reconstructed.requires_grad, "Dequantized parameter should not require gradients"
+
+
+def test_cache_released_when_forward_raises():
+    """The cache must be released even when the module's forward raises.
+
+    Non-reentrant activation checkpointing early-stops recomputation by raising
+    through the module's forward, which would otherwise leave the cache enabled
+    and pin every dequantized weight for the rest of the process.
+    """
+
+    class RaisingModule(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.randn(64, 64, dtype=torch.float32))
+
+        def forward(self, x):
+            _ = self.weight  # populate the cache, then unwind before the post-hook
+            raise RuntimeError("boom")
+
+    module = RaisingModule()
+    replace_parameter_4bit(module, "weight", quant_type="nf4")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        module(torch.randn(1, 64))
+
+    assert P._cache_enabled == 0, "Cache should be disabled again after forward raises"
+    assert not P._cache, "Dequantized weights should not stay pinned after forward raises"
