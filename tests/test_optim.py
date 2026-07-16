@@ -681,3 +681,63 @@ def test_ademamix_state_dict_no_nan(optim_name, optim_factory, device):
 
     for p_a, p_b in zip(model.parameters(), model2.parameters()):
         torch.testing.assert_close(p_a, p_b)
+
+
+@pytest.mark.parametrize("optim_cls", [bnb.optim.LAMB, bnb.optim.LAMB32bit], ids=id_formatter("opt"))
+@pytest.mark.parametrize("max_unorm", [0.0, 0.5, 2.0], ids=id_formatter("max_unorm"))
+def test_lamb_max_unorm_threaded_to_config(optim_cls, max_unorm):
+    # The LAMB constructors accepted a `max_unorm` argument but passed a hardcoded 1.0
+    # to the base optimizer, so the user value never reached the optimizer config.
+    # (LAMB8bit rejects non-default values instead, since the 8-bit blockwise kernel
+    # does not apply update-norm clipping; see test_lamb8bit_rejects_non_default_max_unorm.)
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    opt = optim_cls(p, max_unorm=max_unorm)
+    assert opt.args.max_unorm == max_unorm
+
+
+def test_lamb_max_unorm_changes_update():
+    # Behavioral regression: on the 32-bit LAMB path, `max_unorm` drives trust-ratio
+    # clipping of the update. Before the fix the argument was ignored (always 1.0), so a
+    # tight and a loose value produced identical updates. Runs on CPU, which implements
+    # the 32-bit LAMB kernel.
+    def one_step(max_unorm):
+        torch.manual_seed(0)
+        p = torch.nn.Parameter(torch.randn(128, 128))
+        opt = bnb.optim.LAMB([p], lr=1e-1, max_unorm=max_unorm)
+        p.grad = torch.randn(128, 128) * 5.0
+        opt.step()
+        return p.detach().clone()
+
+    tight = one_step(1e-4)  # aggressive clipping
+    loose = one_step(10.0)  # effectively no clipping
+    assert not torch.allclose(tight, loose)
+
+
+def test_lamb8bit_rejects_amsgrad():
+    # amsgrad is unused by the base optimizer; mirror the Adam8bit/AdamW8bit guard (relates to #1261).
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        bnb.optim.LAMB8bit(p, amsgrad=True)
+    # default (amsgrad=False) still constructs
+    bnb.optim.LAMB8bit(p)
+
+
+def test_lamb8bit_rejects_non_default_max_unorm():
+    # The 8-bit blockwise update does not implement update-norm clipping, so a
+    # non-default max_unorm would be silently ignored; reject it instead.
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        bnb.optim.LAMB8bit(p, max_unorm=0.5)
+    with pytest.raises(ValueError):
+        bnb.optim.LAMB8bit(p, max_unorm=0.0)
+    # default (max_unorm=1.0) still constructs
+    bnb.optim.LAMB8bit(p, max_unorm=1.0)
+
+
+def test_adagrad8bit_rejects_non_8_optim_bits():
+    # optim_bits is ignored (Adagrad8bit always uses 8-bit); guard invalid values (relates to #1261).
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        bnb.optim.Adagrad8bit(p, optim_bits=32)
+    # default (optim_bits=8) still constructs
+    bnb.optim.Adagrad8bit(p)
