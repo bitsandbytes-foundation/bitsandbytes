@@ -72,7 +72,7 @@ jobs:
                 esac
               fi
               ;;
-            linux-aarch64) TEST_RUNNER="ubuntu-22.04-arm" ;;
+            linux-aarch64) TEST_RUNNER="ubuntu-24.04-arm" ;;
             macos)         TEST_RUNNER="macos-15" ;;
             windows)
               [[ "${{ inputs.backend }}" == "cuda" ]] && TEST_RUNNER="CUDA-Windows-x64" || TEST_RUNNER="windows-2025"
