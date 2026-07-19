@@ -490,7 +490,14 @@ void launch_gemm_4bit_simt(
     bnb_stream_t stream           // CUDA/HIP stream
     // clang-format on
 ) {
-    const int n_blocks = (N + WARPS_PER_BLOCK - 1) / WARPS_PER_BLOCK;
+    int n_blocks = (N + WARPS_PER_BLOCK - 1) / WARPS_PER_BLOCK;
+#if BNB_HIP
+    // Large HIP SIMT dispatches can underutilize the GPU when the workgroup
+    // count is an exact multiple of 256. One additional bounds-checked block
+    // breaks the scheduler resonance without changing useful work.
+    if (n_blocks >= 512 && n_blocks % 256 == 0)
+        n_blocks++;
+#endif
 
     // M=1..8: M_BLOCK == M, so the inner m-loop fully unrolls at compile time.
     // M>8: M_BLOCK=8, ceil(M/8) grid rows.
