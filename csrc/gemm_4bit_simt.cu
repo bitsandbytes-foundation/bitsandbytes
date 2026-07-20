@@ -4,10 +4,11 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "common.cuh"
 #include "gemm_4bit_common.cuh"
 #include "gemm_4bit_simt.cuh"
 
-#if defined(__GFX9__)
+#if IS_CDNA
 // gfx9/CDNA tuning:
 // - use fmaf for fp32 accumulation
 // - accumulate fp16/bf16 pairs in fp32 via fused multiply-add
@@ -26,9 +27,9 @@
 #define BNB_SIMT_FP16_PACKED_ACCUM 0
 #endif
 
-// RDNA3/RDNA4 tuning:
+// RDNA3/RDNA3.5/RDNA4 tuning:
 // - use native packed bf16/fp16 dot2 instructions with fp32 accumulation
-#if defined(__GFX11__) || defined(__GFX12__)
+#if IS_RDNA
 #define BNB_HIP_BF16_VDOT2 1
 #define BNB_HIP_FP16_DOT2 1
 #else
