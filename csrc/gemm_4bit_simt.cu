@@ -29,7 +29,7 @@
 
 // RDNA3/RDNA3.5/RDNA4 tuning:
 // - use native packed bf16/fp16 dot2 instructions with fp32 accumulation
-#if IS_RDNA
+#if IS_RDNA3 || IS_RDNA3_5 || IS_RDNA4
 #define BNB_HIP_BF16_VDOT2 1
 #define BNB_HIP_FP16_DOT2 1
 #else
