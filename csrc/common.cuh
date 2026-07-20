@@ -4,10 +4,26 @@
 
 #include "compat.cuh"
 
+// AMD GPU architecture detection. Use explicit device macros rather than the
+// broad __GFX9__/__GFX11__/__GFX12__ macros, which span distinct architectures.
+#define IS_RDNA2                                                                                                       \
+    (defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__) || defined(__gfx1033__) ||                   \
+     defined(__gfx1034__) || defined(__gfx1035__) || defined(__gfx1036__))
+#define IS_RDNA3 (defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__))
+#define IS_RDNA3_5 (defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__))
+#define IS_RDNA4 (defined(__gfx1200__) || defined(__gfx1201__))
+#define IS_RDNA (IS_RDNA2 || IS_RDNA3 || IS_RDNA3_5 || IS_RDNA4)
+
+#define IS_CDNA1 (defined(__gfx908__))
+#define IS_CDNA2 (defined(__gfx90a__))
+#define IS_CDNA3 (defined(__gfx942__))
+#define IS_CDNA4 (defined(__gfx950__))
+#define IS_CDNA (IS_CDNA1 || IS_CDNA2 || IS_CDNA3 || IS_CDNA4)
+
 // Warp size
 
 #if BNB_HIP
-#if defined(__GFX9__)
+#if IS_CDNA
 #define BNB_WARP_SIZE 64 // CDNA
 #else
 #define BNB_WARP_SIZE 32 // RDNA

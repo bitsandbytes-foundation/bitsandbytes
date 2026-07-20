@@ -4,10 +4,11 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "common.cuh"
 #include "gemm_4bit_common.cuh"
 #include "gemm_4bit_simt.cuh"
 
-#if defined(__GFX9__)
+#if IS_CDNA
 // gfx9/CDNA tuning:
 // - use fmaf for fp32 accumulation
 // - accumulate fp16/bf16 pairs in fp32 via fused multiply-add
@@ -26,9 +27,9 @@
 #define BNB_SIMT_FP16_PACKED_ACCUM 0
 #endif
 
-// RDNA3/RDNA4 tuning:
+// RDNA3/RDNA3.5/RDNA4 tuning:
 // - use native packed bf16/fp16 dot2 instructions with fp32 accumulation
-#if defined(__GFX11__) || defined(__GFX12__)
+#if IS_RDNA3 || IS_RDNA3_5 || IS_RDNA4
 #define BNB_HIP_BF16_VDOT2 1
 #define BNB_HIP_FP16_DOT2 1
 #else
@@ -490,7 +491,14 @@ void launch_gemm_4bit_simt(
     bnb_stream_t stream           // CUDA/HIP stream
     // clang-format on
 ) {
-    const int n_blocks = (N + WARPS_PER_BLOCK - 1) / WARPS_PER_BLOCK;
+    int n_blocks = (N + WARPS_PER_BLOCK - 1) / WARPS_PER_BLOCK;
+#if BNB_HIP
+    // Large HIP SIMT dispatches can underutilize the GPU when the workgroup
+    // count is an exact multiple of 256. One additional bounds-checked block
+    // breaks the scheduler resonance without changing useful work.
+    if (n_blocks >= 512 && n_blocks % 256 == 0)
+        n_blocks++;
+#endif
 
     // M=1..8: M_BLOCK == M, so the inner m-loop fully unrolls at compile time.
     // M>8: M_BLOCK=8, ceil(M/8) grid rows.
