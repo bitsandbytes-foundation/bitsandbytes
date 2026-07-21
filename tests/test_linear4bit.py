@@ -612,3 +612,54 @@ def test_fsdp_state_dict_save_4bit():
             f"stdout: {result.stdout}\n"
             f"stderr: {result.stderr}"
         )
+
+
+class _Linear4bitWrapper(torch.nn.Module):
+    """Nest Linear4bit under a prefix so load_state_dict exercises the real path."""
+
+    def __init__(self, quant_type, compress_statistics):
+        super().__init__()
+        self.fc = bnb.nn.Linear4bit(
+            64,
+            64,
+            bias=False,
+            compute_dtype=torch.float32,
+            compress_statistics=compress_statistics,
+            quant_type=quant_type,
+        )
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+@pytest.mark.parametrize("strict", TRUE_FALSE, ids=id_formatter("strict"))
+def test_linear4bit_load_from_state_dict(device, quant_type, compress_statistics, strict):
+    """Regression test for load_state_dict silently dropping QuantState keys.
+
+    The existing serialization tests restore via ``from_prequantized`` and never
+    call ``load_state_dict``, so the ``_load_from_state_dict`` override was
+    uncovered. Without the fix, the packed ``weight`` bytes load but the stale
+    ``quant_state`` is kept: ``strict=True`` raises on unexpected keys and
+    ``strict=False`` silently produces wrong outputs. Fails on main, passes here.
+    """
+
+    def build(seed):
+        torch.manual_seed(seed)
+        net = _Linear4bitWrapper(quant_type, compress_statistics)
+        with torch.no_grad():
+            net.fc.weight.data = torch.randn(64, 64) * 0.1
+        return net.to(device)  # triggers 4-bit quantization
+
+    src = build(0)
+    dst = build(999)  # different weights, so a no-op load would be caught
+
+    result = dst.load_state_dict(src.state_dict(), strict=strict)
+
+    assert result.missing_keys == []
+    assert result.unexpected_keys == []
+    assert dst.fc.weight.quant_state is not None
+    assert torch.equal(src.fc.weight.quant_state.absmax, dst.fc.weight.quant_state.absmax)
+
+    x = torch.randn(8, 64, device=device)
+    with torch.no_grad():
+        assert torch.equal(src.fc(x), dst.fc(x))
