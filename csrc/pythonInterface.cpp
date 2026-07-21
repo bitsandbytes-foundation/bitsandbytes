@@ -545,13 +545,27 @@ int cigemmlt_8_rowscale(
 void cdequant_mm_int32_fp16(
     int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, cudaStream_t stream
 ) {
-    dequant_mm_int32_fp16(A, rowStats, colStats, out, bias, numRows, numCols, stream);
+    dequant_mm_int32_fp16<half>(A, rowStats, colStats, out, bias, numRows, numCols, stream);
+}
+
+void cdequant_mm_int32_bf16(
+    int* A, float* rowStats, float* colStats, __nv_bfloat16* out, __nv_bfloat16* bias, int numRows, int numCols,
+    cudaStream_t stream
+) {
+    dequant_mm_int32_fp16<__nv_bfloat16>(A, rowStats, colStats, out, bias, numRows, numCols, stream);
 }
 
 void cint8_vector_quant(
     half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, cudaStream_t stream
 ) {
-    int8VectorQuant(A, out, rowStats, threshold, rows, cols, stream);
+    int8VectorQuant<half>(A, out, rowStats, threshold, rows, cols, stream);
+}
+
+void cint8_vector_quant_bf16(
+    __nv_bfloat16* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols,
+    cudaStream_t stream
+) {
+    int8VectorQuant<__nv_bfloat16>(A, out, rowStats, threshold, rows, cols, stream);
 }
 
 void* cget_managed_ptr(size_t bytes) {

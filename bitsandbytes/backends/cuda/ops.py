@@ -47,17 +47,17 @@ _setup_ctypes(
 )
 
 # int8 mm dequant: (A, row_stats, col_stats, out, bias, numRows, numCols, stream)
+# int8 mm dequant: (A, row_stats, col_stats, out, bias, numRows, numCols, stream)
 _setup_ctypes(
-    ["cdequant_mm_int32_fp16"],
+    ["cdequant_mm_int32_fp16", "cdequant_mm_int32_bf16"],
     [ct.c_void_p] * 5 + [ct.c_int32, ct.c_int32, ct.c_void_p],
 )
 
 # int8 vectorwise quant: (A, out, row_stats, threshold, rows, cols, stream)
 _setup_ctypes(
-    ["cint8_vector_quant"],
+    ["cint8_vector_quant", "cint8_vector_quant_bf16"],
     [ct.c_void_p] * 3 + [ct.c_float, ct.c_int32, ct.c_int32, ct.c_void_p],
 )
-
 # 4-bit/8-bit blockwise quantize: (code, A, absmax, out, blocksize, n)
 _setup_ctypes(
     [f"cquantize_blockwise_{d}_{q}" for d in ("fp32", "bf16", "fp16") for q in ("nf4", "fp4")]
@@ -185,14 +185,18 @@ def _(
 
     # Note: cuda kernel only currently supports fp16 output.
     # We'll later cast to desired dtype if needed.
-    out = torch.empty_like(A, dtype=torch.float16)
+    out_dtype = dtype or torch.float16
+    if out_dtype not in (torch.float16, torch.bfloat16):
+        raise ValueError(f"dtype must be float16 or bfloat16, got {out_dtype}")
 
-    # Note: fused bias in the kernel is only supported for fp16
-    # TODO(matthewdouglas): Consider supporting bf16 fused bias
-    bias_ptr = bias.data_ptr() if bias is not None and bias.dtype == torch.float16 else None
+    out = torch.empty_like(A, dtype=out_dtype)
+
+    # Fuse bias in the kernel when it already matches the output dtype; otherwise add it afterward.
+    bias_ptr = bias.data_ptr() if bias is not None and bias.dtype == out_dtype else None
+    fn = lib.cdequant_mm_int32_bf16 if out_dtype == torch.bfloat16 else lib.cdequant_mm_int32_fp16
 
     with _cuda_device_of(A):
-        lib.cdequant_mm_int32_fp16(
+        fn(
             A.data_ptr(),
             row_stats.data_ptr(),
             col_stats.data_ptr(),
@@ -204,16 +208,16 @@ def _(
         )
 
     # Add bias separately if not fused in kernel
-    if bias is not None and bias.dtype != torch.float16:
+    if bias is not None and bias.dtype != out_dtype:
         out.add_(bias)
 
-    return out.to(dtype or torch.float16)
+    return out
 
 
 @register_kernel("bitsandbytes::int8_vectorwise_quant", "cuda")
 def _(A: torch.Tensor, threshold=0.0):
-    if A.dtype != torch.float16:
-        raise ValueError(f"A must be float16, got {A.dtype}")
+    if A.dtype not in (torch.float16, torch.bfloat16):
+        raise ValueError(f"A must be float16 or bfloat16, got {A.dtype}")
     if threshold < 0.0:
         raise ValueError("threshold must be non-negative")
 
@@ -235,8 +239,9 @@ def _(A: torch.Tensor, threshold=0.0):
             # Needed for torch.compile support.
             outlier_cols = torch.empty(0, device=A.device, dtype=torch.int64)
 
+    fn = lib.cint8_vector_quant_bf16 if A.dtype == torch.bfloat16 else lib.cint8_vector_quant
     with _cuda_device_of(A):
-        lib.cint8_vector_quant(
+        fn(
             A.data_ptr(),
             out_row.data_ptr(),
             row_stats.data_ptr(),
