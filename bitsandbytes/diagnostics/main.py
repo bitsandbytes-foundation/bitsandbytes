@@ -1,7 +1,7 @@
-import importlib
 import platform
 import sys
 import traceback
+from importlib import metadata as importlib_metadata
 
 import torch
 
@@ -41,8 +41,8 @@ def sanity_check():
 
 def get_package_version(name: str) -> str:
     try:
-        version = importlib.metadata.version(name)
-    except importlib.metadata.PackageNotFoundError:
+        version = importlib_metadata.version(name)
+    except importlib_metadata.PackageNotFoundError:
         version = "not found"
     return version
 
