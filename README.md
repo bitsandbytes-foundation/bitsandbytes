@@ -32,7 +32,7 @@ bitsandbytes has the following minimum requirements for all platforms:
 ##### Legend:
 🚧 = Planned |
 〰️ = Partially Supported |
-✅ = Supported | 
+✅ = Supported |
 ❌ = Not Supported
 
 <table>
