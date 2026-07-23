@@ -24,7 +24,7 @@ rocm_version_at_least() {
 }
 
 # Baseline: GCN 5.1, CDNA2, CDNA3, RDNA2, RDNA3.
-bnb_rocm_arch="gfx906;gfx906:sramecc-;gfx90a;gfx90a:sramecc-;gfx942;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103"
+bnb_rocm_arch="gfx906:sramecc+;gfx906:sramecc-;gfx90a:sramecc+;gfx90a:sramecc-;gfx942;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1100;gfx1101;gfx1102;gfx1103"
 
 # ROCm 6.4+ - Add CDNA1, RDNA1, RDNA3.5, and RDNA4 and targets. Note we assume >=6.4.4.
 if rocm_version_at_least "6.4"; then
