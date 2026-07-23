@@ -30,10 +30,9 @@ bitsandbytes has the following minimum requirements for all platforms:
 </small>
 
 ##### Legend:
-🚧 = In Development,
-〰️ = Partially Supported,
-✅ = Supported,
-🐢 = Slow Implementation Supported,
+🚧 = Planned |
+〰️ = Partially Supported |
+✅ = Supported | 
 ❌ = Not Supported
 
 <table>
@@ -71,8 +70,8 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td></td>
       <td>🟥 AMD GPU <br><code>cuda</code></td>
       <td>
-        CDNA: gfx90a, gfx942, gfx950<br>
-        RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
+        CDNA: gfx908, gfx90a, gfx942, gfx950<br>
+        RDNA: gfx103X, gfx110X, gfx115X, gfx120X
       </td>
       <td>✅</td>
       <td>✅</td>
@@ -102,7 +101,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td align="right">aarch64</td>
       <td>◻️ CPU</td>
       <td></td>
-      <td>✅</td>
+      <td>✅ *</td>
       <td>✅</td>
       <td>✅</td>
     </tr>
@@ -137,9 +136,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td></td>
       <td>🟥 AMD GPU <br><code>cuda</code></td>
       <td>
-        RDNA: gfx1100, gfx1101, gfx1102,<br>
-        gfx1150, gfx1151,<br>
-        gfx1200, gfx1201
+        RDNA: gfx103X, gfx110X, gfx115X, gfx120X
       </td>
       <td>✅</td>
       <td>✅</td>
@@ -171,7 +168,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td align="right">arm64</td>
       <td>◻️ CPU</td>
       <td>Apple M1+</td>
-      <td>✅</td>
+      <td>✅ *</td>
       <td>✅</td>
       <td>✅</td>
     </tr>
@@ -179,11 +176,12 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td></td>
       <td>⬜ Metal <br><code>mps</code></td>
       <td>Apple M1+</td>
-      <td>🐢</td>
-      <td>🐢</td>
+      <td>✅ *</td>
+      <td>✅</td>
       <td>🚧</td>
   </tbody>
 </table>
+<sup>* While supported, these marked features may lack in performance optimizations.</sup>
 
 ## :book: Documentation
 * [Official Documentation](https://huggingface.co/docs/bitsandbytes/main)
@@ -195,8 +193,6 @@ bitsandbytes has the following minimum requirements for all platforms:
 The continued maintenance and development of `bitsandbytes` is made possible thanks to the generous support of our sponsors. Their contributions help ensure that we can keep improving the project and delivering valuable updates to the community.
 
 <kbd><a href="https://hf.co" target="_blank"><img width="100" src="https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.svg" alt="Hugging Face"></a></kbd>
-&nbsp;
-<kbd><a href="https://intel.com" target="_blank"><img width="100" src="https://avatars.githubusercontent.com/u/17888862?s=100&v=4" alt="Intel"></a></kbd>
 
 ## License
 `bitsandbytes` is MIT licensed.
