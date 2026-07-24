@@ -8,8 +8,6 @@
 #include <limits>
 #include <ops.cuh>
 
-#define ERR_NOT_IMPLEMENTED 100
-
 #if BNB_HIP
 #include <atomic>
 #include <hip/hip_runtime.h>
@@ -406,6 +404,17 @@ int igemmlt(
 int fill_up_to_nearest_multiple(int value, int multiple) {
     return value + (value % multiple == 0 ? 0 : (multiple - (value % multiple)));
 }
+
+#if BNB_HIP && defined(NO_HIPBLASLT)
+int igemmlt_32_gemmex_fallback(
+    Context* context, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, int lda, int ldb, int ldc,
+    bnb_stream_t stream
+) {
+    rocblas_set_stream(context->m_handle, stream);
+    gemmex(context, true, false, k, n, m, (void*)A, (void*)B, (void*)C, lda, ldb, ldc);
+    return 0;
+}
+#endif
 
 void dequant_mm_int32_fp16(
     int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, bnb_stream_t stream
