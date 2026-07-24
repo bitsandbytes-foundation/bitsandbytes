@@ -59,5 +59,7 @@
       title: LLM.int8()
     - local: reference/nn/linear4bit
       title: 4-bit quantizer
+    - local: reference/nn/experts
+      title: 4-bit MoE experts
     - local: reference/nn/embeddings
       title: Embedding

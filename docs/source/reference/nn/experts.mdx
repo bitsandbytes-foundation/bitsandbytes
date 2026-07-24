@@ -1,0 +1,24 @@
+# 4-bit MoE experts
+
+Some Mixture-of-Experts (MoE) models store their expert weights as a single fused 3D parameter of shape `[num_experts, out_features, in_features]` (for example `OlmoeExperts` and `Qwen3MoeExperts` in Transformers) instead of a collection of `nn.Linear` layers. The `nn.Linear`-based 4-bit replacement path skips these fused parameters, leaving the experts — typically the bulk of the model's weights — in full precision.
+
+`Experts4bit` stores the fused `gate_up_proj` and `down_proj` expert stacks in 4-bit (NF4 or FP4) precision with per-expert quantization statistics, and dequantizes one expert at a time during the forward pass.
+
+```py
+from bitsandbytes.nn import Experts4bit
+
+# Quantize an existing fp16/bf16 fused-expert stack:
+experts = Experts4bit.from_float(gate_up_proj, down_proj, quant_type="nf4")
+out = experts(hidden_states, top_k_index, top_k_weights)
+
+# Or construct empty and load a pre-quantized checkpoint:
+experts = Experts4bit(num_experts, hidden_dim, intermediate_dim)
+experts.load_state_dict(sd)
+```
+
+## Experts4bit
+
+[[autodoc]] bitsandbytes.nn.Experts4bit
+    - __init__
+    - from_float
+    - forward
