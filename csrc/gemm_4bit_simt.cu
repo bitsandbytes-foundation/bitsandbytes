@@ -8,12 +8,16 @@
 #include "gemm_4bit_common.cuh"
 #include "gemm_4bit_simt.cuh"
 
-#if IS_CDNA
-// gfx9/CDNA tuning:
+// gfx9/CDNA tuning (CDNA1-4 and CDNA5/gfx1250):
 // - use fmaf for fp32 accumulation
 // - accumulate fp16/bf16 pairs in fp32 via fused multiply-add
 // - keep 16-bit centroids unscaled and fold scale into the fp32 accumulator
 // - use packed fp16 accumulation
+// CDNA5 (gfx1250) is Wave32, but it does NOT implement the SIMT dot instructions
+// (no dot12-insts / v_dot2_f32_* builtins), so it opts into this fp32-FMA path
+// rather than the v_dot2 path below. This improves bf16/fp16 accuracy relative
+// to the generic fallback.
+#if IS_CDNA || IS_CDNA5
 #define BNB_SIMT_F32_FMAF 1
 #define BNB_SIMT_16BIT_FLOAT_FMA 1
 #define BNB_SIMT_BF16_UNSCALED_CENTROID 1
@@ -28,7 +32,11 @@
 #endif
 
 // RDNA3/RDNA3.5/RDNA4 tuning:
-// - use native packed bf16/fp16 dot2 instructions with fp32 accumulation
+// - use native packed bf16/fp16 dot2 instructions with fp32 accumulation.
+// Note: CDNA5 (gfx1250) is intentionally excluded here. Despite its gfx12xx
+// target number, it lacks the dot12-insts v_dot2_f32_bf16 / v_dot2_f32_f16
+// builtins (they fail to compile for gfx1250), so it uses the fp32-FMA CDNA path
+// above.
 #if IS_RDNA3 || IS_RDNA3_5 || IS_RDNA4
 #define BNB_HIP_BF16_VDOT2 1
 #define BNB_HIP_FP16_DOT2 1

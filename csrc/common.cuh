@@ -20,6 +20,14 @@
 #define IS_CDNA4 (defined(__gfx950__))
 #define IS_CDNA (IS_CDNA1 || IS_CDNA2 || IS_CDNA3 || IS_CDNA4)
 
+// CDNA5 (gfx1250, gfx1251). Unlike the Wave64 CDNA1-4, CDNA5
+// runs in Wave32 mode. It is deliberately kept OUT of IS_CDNA (which implies
+// Wave64) so the default warp size below already resolves to 32 for it, unchanged
+// from upstream. It is detected separately only so the 4-bit GEMM can opt into
+// the CDNA fp32-FMA math path -- CDNA5 has no SIMT v_dot2 instruction (no
+// dot12-insts).
+#define IS_CDNA5 (defined(__gfx1250__) || defined(__gfx1251__))
+
 // Warp size
 
 #if BNB_HIP

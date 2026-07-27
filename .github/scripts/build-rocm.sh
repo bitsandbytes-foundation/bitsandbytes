@@ -40,6 +40,11 @@ if rocm_version_at_least "7.14"; then
     bnb_rocm_arch="${bnb_rocm_arch};gfx908;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
 fi
 
+# ROCm 7.14+ - Add CDNA5 (gfx1250).
+if rocm_version_at_least "7.14"; then
+    bnb_rocm_arch="${bnb_rocm_arch};gfx1250"
+fi
+
 if [ "${RUNNER_OS}" == "Linux" ]; then
     image_suffix="complete"
     if rocm_version_at_least "7.14"; then
