@@ -807,18 +807,21 @@ def _gemm_4bit_use_custom_rocm(device_index, dtype, M, N, K):
     Fused SIMT kernel vs dequant+F.linear heuristic for ROCm.
 
     RDNA3/RDNA4 calibration keeps the SIMT kernel through ~M=8.
+    gfx125x (CDNA5) is Wave32 but lacks the v_dot2 SIMT
+    instructions, so its kernel takes the fp32-FMA CDNA math path. The crossover
+    below is left at the gfx12 default (M<=8) pending dedicated calibration.
     CDNA/gfx9 is calibrated on MI308X (gfx942): bf16/fp16 win through M<=4
     after the SIMT math-path tuning, while fp32 only has a broad win through M<=2.
 
-    TODO: revisit once WMMA/MFMA kernels land.
+    TODO: revisit once WMMA/MFMA kernels land; calibrate the gfx125x crossover.
     """
     if M <= _GEMM_4BIT_CUSTOM_FLOOR_M and dtype != torch.float32:
         return True
 
     arch = _rocm_gfx_arch(device_index)
-    if arch.startswith("gfx11") or arch.startswith("gfx12"):  # RDNA3 / RDNA4
+    if arch.startswith("gfx11") or arch.startswith("gfx12"):  # RDNA3 / RDNA4 / CDNA5 (gfx125x)
         return M <= 8
-    if arch.startswith("gfx9"):  # CDNA / MI-series
+    if arch.startswith("gfx9"):  # CDNA1-4 / MI-series (Wave64)
         return M <= (2 if dtype == torch.float32 else 4)
     return M <= 4  # unknown ROCm arch: conservative tiny-batch floor
 
