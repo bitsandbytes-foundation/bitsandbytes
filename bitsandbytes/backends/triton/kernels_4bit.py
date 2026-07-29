@@ -219,7 +219,7 @@ def dequantize_fp4_tree(val, absmax):
     branch2 = tl.where(
         second_bit,
         tl.where(first_bit, 1.0, 0.66666667),  # 1011, 1010
-        tl.where(first_bit, 0.00520833, 0.0),  # 1001, 1000
+        tl.where(first_bit, 0.005208333333, 0.0),  # 1001, 1000
     )
     out = tl.where(third_bit, branch1, branch2)
     return out * sign * absmax
