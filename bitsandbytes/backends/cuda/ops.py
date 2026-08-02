@@ -3,7 +3,6 @@ import ctypes as ct
 import functools
 from math import prod
 from typing import Optional
-from warnings import warn
 
 import torch
 
@@ -11,6 +10,7 @@ from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, get_ptr
 
 from ..._ops import register_kernel
 from ...cextension import lib
+from ..utils import _warn_gemm_4bit_unaligned
 
 
 def _setup_ctypes(names, argtypes, restype=None):
@@ -943,15 +943,13 @@ def _(
     # fallback.
     if M > _gemm_4bit_custom_max_m:
         use_custom = False
-    elif K % blocksize != 0:
-        warn(
-            f"inner dimension ({K}) is not aligned for fast kernel "
-            f"with blocksize={blocksize}, falling back to slower implementation.",
-            UserWarning,
-        )
-        use_custom = False
     else:
         use_custom = _gemm_4bit_use_custom_fn(A.device.index, A.dtype, M, N, K)
+        if use_custom and K % blocksize != 0:
+            # Only warn when misalignment is what costs us the fused kernel; when the
+            # heuristic picks the fallback anyway (larger M, e.g. training), it doesn't.
+            _warn_gemm_4bit_unaligned(K, blocksize)
+            use_custom = False
 
     if not use_custom:
         return _dequant_linear_fallback(
