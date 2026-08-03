@@ -338,12 +338,12 @@ if(WIN32)
 endif()
 
 if(MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast /Zc:preprocessor")
+
     # /arch:AVX2 is only valid for x86/x64 targets, not ARM64
     string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _msvc_arch)
     if(_msvc_arch MATCHES "x86|x64|amd64")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2 /fp:fast")
-    else()
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2")
     endif()
 endif()
 
