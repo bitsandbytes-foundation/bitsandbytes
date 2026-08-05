@@ -759,11 +759,9 @@ def _gemm_4bit_use_custom_cuda(device_index, dtype, M, N, K):
         return False
 
     if is_sm121:
-        # GB10 (DGX Spark): unified LPDDR5X, far less bandwidth than the sm89 GDDR6X
-        # parts this used to fall through to, so dequant+F.linear stays expensive
-        # much further up the M range. Calibrated on GB10 at >=1 wave only; below
-        # one wave the crossover is strongly K-dependent, so those shapes keep using
-        # the shared tiers below (which already branch on tall-K).
+        # GB10 (DGX Spark): unified LPDDR5X. Calibrated at >=1 wave only; below one
+        # wave the crossover is strongly K-dependent, so those shapes use the shared
+        # tiers below (which already branch on tall-K).
         if n_blocks >= num_sms:
             return M <= 256
 
