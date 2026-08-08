@@ -53,17 +53,44 @@ def cuda_dequantize_nvfp4(packed, block_scales, tensor_scale, n, dtype=torch.flo
     return output
 
 
-def cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K):
-    """Run GEMM using the CUDA kernel (BF16 output)."""
+def swizzle_scales(flat_scales, rows, scale_K):
+    """Convert flat row-major scales to CUTLASS block-scaled (swizzled) layout."""
     lib = get_lib()
+    n_row_blocks = (rows + 127) // 128
+    n_col_blocks = (scale_K + 3) // 4
+    out_size = n_row_blocks * n_col_blocks * 128 * 4
+    swizzled = torch.empty(out_size, dtype=torch.uint8, device=flat_scales.device)
+    stream = torch.cuda.current_stream()
+    lib.cscale_to_blocked(
+        ctypes.c_void_p(flat_scales.data_ptr()),
+        ctypes.c_void_p(swizzled.data_ptr()),
+        ctypes.c_int(rows),
+        ctypes.c_int(scale_K),
+        ctypes.c_void_p(stream.cuda_stream),
+    )
+    torch.cuda.synchronize()
+    return swizzled
+
+
+def cuda_gemm_nvfp4(A_packed, B_packed, A_scales, B_scales, M, N, K):
+    """Run GEMM using the CUDA kernel (BF16 output).
+
+    A_scales and B_scales must be in flat row-major format; they are
+    swizzled to CUTLASS block-scaled layout before calling the kernel.
+    """
+    lib = get_lib()
+    scale_K = K // 16
+    A_scales_sw = swizzle_scales(A_scales, M, scale_K)
+    B_scales_sw = swizzle_scales(B_scales, N, scale_K)
+
     D_out = torch.zeros(M, N, dtype=torch.bfloat16, device=A_packed.device)
     workspace = torch.zeros(M, N, dtype=torch.float32, device=A_packed.device)
     stream = torch.cuda.current_stream()
     lib.cgemm_nvfp4_bf16(
         ctypes.c_void_p(A_packed.data_ptr()),
         ctypes.c_void_p(B_packed.data_ptr()),
-        ctypes.c_void_p(A_scales.data_ptr()),
-        ctypes.c_void_p(B_scales.data_ptr()),
+        ctypes.c_void_p(A_scales_sw.data_ptr()),
+        ctypes.c_void_p(B_scales_sw.data_ptr()),
         ctypes.c_void_p(D_out.data_ptr()),
         ctypes.c_void_p(workspace.data_ptr()),
         ctypes.c_int(M),

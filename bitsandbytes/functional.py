@@ -1266,16 +1266,19 @@ def gemm_nvfp4(
     N = B_state.shape[0]
 
     if M < _GEMM_HW_M_THRESHOLD and _has_hw_gemm() and A_data.is_cuda:
-        # Hand-written kernel: flat (non-swizzled) scales, BF16 output
+        # Hand-written kernel: swizzled (block-scaled) layout, BF16 output
         from bitsandbytes.backends.cuda.ops import _gemm_nvfp4_hw_bf16_raw
+
+        A_scales = A_state.block_scales_blocked if A_state.block_scales_blocked is not None else A_state.block_scales
+        B_scales = B_state.block_scales_blocked if B_state.block_scales_blocked is not None else B_state.block_scales
 
         D_out = torch.empty(M, N, dtype=torch.bfloat16, device=A_data.device)
         workspace = torch.empty(M, N, dtype=torch.float32, device=A_data.device)
         _gemm_nvfp4_hw_bf16_raw(
             A_data,
             B_data,
-            A_state.block_scales,
-            B_state.block_scales,
+            A_scales,
+            B_scales,
             D_out,
             workspace,
             M,
