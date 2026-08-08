@@ -1,0 +1,428 @@
+{
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "cuda": "13.0",
+  "inner": 200,
+  "outer": 10,
+  "results": [
+    {
+      "method": "vq_mma_p2",
+      "kernel": "mma",
+      "M": 5,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 14.121,
+      "tflops": 7.4254,
+      "label": "gate/up"
+    },
+    {
+      "method": "vq_mma_p4",
+      "kernel": "mma",
+      "M": 5,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 36.973,
+      "tflops": 2.836,
+      "label": "gate/up"
+    },
+    {
+      "method": "kbit_mma_k4",
+      "kernel": "mma",
+      "M": 5,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 20.438,
+      "tflops": 5.1304,
+      "label": "gate/up"
+    },
+    {
+      "method": "cublas_fp16",
+      "kernel": "dense",
+      "M": 5,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 8.202,
+      "tflops": 12.7843,
+      "label": "gate/up"
+    },
+    {
+      "method": "vq_mma_p2",
+      "kernel": "mma",
+      "M": 8,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 14.341,
+      "tflops": 11.6987,
+      "label": "gate/up"
+    },
+    {
+      "method": "vq_mma_p4",
+      "kernel": "mma",
+      "M": 8,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 37.508,
+      "tflops": 4.4729,
+      "label": "gate/up"
+    },
+    {
+      "method": "kbit_mma_k4",
+      "kernel": "mma",
+      "M": 8,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 20.481,
+      "tflops": 8.1914,
+      "label": "gate/up"
+    },
+    {
+      "method": "cublas_fp16",
+      "kernel": "dense",
+      "M": 8,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 8.202,
+      "tflops": 20.4544,
+      "label": "gate/up"
+    },
+    {
+      "method": "vq_mma_p2",
+      "kernel": "mma",
+      "M": 16,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 14.932,
+      "tflops": 22.4717,
+      "label": "gate/up"
+    },
+    {
+      "method": "vq_mma_p4",
+      "kernel": "mma",
+      "M": 16,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 38.939,
+      "tflops": 8.6173,
+      "label": "gate/up"
+    },
+    {
+      "method": "kbit_mma_k4",
+      "kernel": "mma",
+      "M": 16,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 20.967,
+      "tflops": 16.0038,
+      "label": "gate/up"
+    },
+    {
+      "method": "cublas_fp16",
+      "kernel": "dense",
+      "M": 16,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 10.242,
+      "tflops": 32.7613,
+      "label": "gate/up"
+    },
+    {
+      "method": "vq_mma_p2",
+      "kernel": "mma",
+      "M": 5,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 14.096,
+      "tflops": 7.4386,
+      "label": "down"
+    },
+    {
+      "method": "vq_mma_p4",
+      "kernel": "mma",
+      "M": 5,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 36.733,
+      "tflops": 2.8546,
+      "label": "down"
+    },
+    {
+      "method": "kbit_mma_k4",
+      "kernel": "mma",
+      "M": 5,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 18.437,
+      "tflops": 5.6874,
+      "label": "down"
+    },
+    {
+      "method": "cublas_fp16",
+      "kernel": "dense",
+      "M": 5,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 8.198,
+      "tflops": 12.79,
+      "label": "down"
+    },
+    {
+      "method": "vq_mma_p2",
+      "kernel": "mma",
+      "M": 8,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 14.337,
+      "tflops": 11.7021,
+      "label": "down"
+    },
+    {
+      "method": "vq_mma_p4",
+      "kernel": "mma",
+      "M": 8,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 37.017,
+      "tflops": 4.5323,
+      "label": "down"
+    },
+    {
+      "method": "kbit_mma_k4",
+      "kernel": "mma",
+      "M": 8,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 19.758,
+      "tflops": 8.4913,
+      "label": "down"
+    },
+    {
+      "method": "cublas_fp16",
+      "kernel": "dense",
+      "M": 8,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 8.397,
+      "tflops": 19.9801,
+      "label": "down"
+    },
+    {
+      "method": "vq_mma_p2",
+      "kernel": "mma",
+      "M": 16,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 14.338,
+      "tflops": 23.4018,
+      "label": "down"
+    },
+    {
+      "method": "vq_mma_p4",
+      "kernel": "mma",
+      "M": 16,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 38.916,
+      "tflops": 8.6223,
+      "label": "down"
+    },
+    {
+      "method": "kbit_mma_k4",
+      "kernel": "mma",
+      "M": 16,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 20.483,
+      "tflops": 16.3817,
+      "label": "down"
+    },
+    {
+      "method": "cublas_fp16",
+      "kernel": "dense",
+      "M": 16,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 10.242,
+      "tflops": 32.7619,
+      "label": "down"
+    },
+    {
+      "method": "vq_mma_p2",
+      "kernel": "mma",
+      "M": 5,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 12.291,
+      "tflops": 6.8249,
+      "label": "Q proj"
+    },
+    {
+      "method": "vq_mma_p4",
+      "kernel": "mma",
+      "M": 5,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 30.72,
+      "tflops": 2.7307,
+      "label": "Q proj"
+    },
+    {
+      "method": "kbit_mma_k4",
+      "kernel": "mma",
+      "M": 5,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 16.392,
+      "tflops": 5.1175,
+      "label": "Q proj"
+    },
+    {
+      "method": "cublas_fp16",
+      "kernel": "dense",
+      "M": 5,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 8.194,
+      "tflops": 10.2376,
+      "label": "Q proj"
+    },
+    {
+      "method": "vq_mma_p2",
+      "kernel": "mma",
+      "M": 8,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 12.289,
+      "tflops": 10.922,
+      "label": "Q proj"
+    },
+    {
+      "method": "vq_mma_p4",
+      "kernel": "mma",
+      "M": 8,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 30.751,
+      "tflops": 4.3647,
+      "label": "Q proj"
+    },
+    {
+      "method": "kbit_mma_k4",
+      "kernel": "mma",
+      "M": 8,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 16.387,
+      "tflops": 8.1904,
+      "label": "Q proj"
+    },
+    {
+      "method": "cublas_fp16",
+      "kernel": "dense",
+      "M": 8,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 8.197,
+      "tflops": 16.3744,
+      "label": "Q proj"
+    },
+    {
+      "method": "vq_mma_p2",
+      "kernel": "mma",
+      "M": 16,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 13.029,
+      "tflops": 20.603,
+      "label": "Q proj"
+    },
+    {
+      "method": "vq_mma_p4",
+      "kernel": "mma",
+      "M": 16,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 33.152,
+      "tflops": 8.0972,
+      "label": "Q proj"
+    },
+    {
+      "method": "kbit_mma_k4",
+      "kernel": "mma",
+      "M": 16,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 18.44,
+      "tflops": 14.5569,
+      "label": "Q proj"
+    },
+    {
+      "method": "cublas_fp16",
+      "kernel": "dense",
+      "M": 16,
+      "K": 2048,
+      "N": 4096,
+      "time_us": 8.201,
+      "tflops": 32.7328,
+      "label": "Q proj"
+    },
+    {
+      "method": "vq_dequant_p2",
+      "kernel": "dequant+cublas",
+      "M": 32,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 34.885,
+      "tflops": 19.2369,
+      "label": "gate/up"
+    },
+    {
+      "method": "vq_dequant_p4",
+      "kernel": "dequant+cublas",
+      "M": 32,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 34.834,
+      "tflops": 19.2654,
+      "label": "gate/up"
+    },
+    {
+      "method": "cublas_fp16",
+      "kernel": "dense",
+      "M": 32,
+      "K": 2048,
+      "N": 5120,
+      "time_us": 10.243,
+      "tflops": 65.5186,
+      "label": "gate/up"
+    },
+    {
+      "method": "vq_dequant_p2",
+      "kernel": "dequant+cublas",
+      "M": 32,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 36.419,
+      "tflops": 18.4271,
+      "label": "down"
+    },
+    {
+      "method": "vq_dequant_p4",
+      "kernel": "dequant+cublas",
+      "M": 32,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 36.856,
+      "tflops": 18.2086,
+      "label": "down"
+    },
+    {
+      "method": "cublas_fp16",
+      "kernel": "dense",
+      "M": 32,
+      "K": 5120,
+      "N": 2048,
+      "time_us": 10.243,
+      "tflops": 65.5165,
+      "label": "down"
+    }
+  ]
+}
