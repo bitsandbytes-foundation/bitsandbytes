@@ -69,6 +69,22 @@ Use `pip` or `uv` to install the latest release:
 pip install bitsandbytes
 ```
 
+> [!NOTE]
+> **NVIDIA Spark (ARM64).** To install bitsandbytes with PyTorch on NVIDIA Spark devices (such as an RTX Spark laptop) running ARM64, install PyTorch from the NVIDIA PyPI index. These devices require NVIDIA's ARM64 builds of PyTorch, which are not available on the default PyPI index or the standard PyTorch wheel index.
+>
+> Run the command below to check if your system detects an NVIDIA GPU.
+>
+> ```bash
+> nvidia-smi
+> ```
+>
+> Install PyTorch from the NVIDIA PyPI index, then install bitsandbytes.
+>
+> ```bash
+> pip install torch --index-url https://pypi.nvidia.com
+> pip install bitsandbytes
+> ```
+
 > [!WARNING]
 > **NVIDIA Jetson (L4T / JetPack) — source build required.** The `Linux aarch64` wheels above are built on aarch64-sbsa runners (server-class ARM with the standard CUDA Toolkit). They are **not compatible** with the L4T runtime on Jetson devices (Orin Nano / NX / AGX, Xavier, Thor on CUDA 12), even though both are aarch64 and even though the cubins are binary-compatible with the device's compute capability (e.g., `sm_80` cubin runs on `sm_87` hardware via Ampere-family binary compat — see [NVIDIA's docs on binary compatibility](https://developer.nvidia.com/blog/understanding-ptx-the-assembly-language-of-cuda-gpu-computing/#binary_compatibility)). The mismatch is at the CUDA library / ABI layer (JetPack ships its own CUDA Toolkit and system libraries), and surfaces as a runtime symbol-resolution error like `Error named symbol not found in /src/csrc/ops.cu` on the first CUDA op.
 >
