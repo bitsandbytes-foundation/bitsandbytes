@@ -338,7 +338,13 @@ if(WIN32)
 endif()
 
 if(MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast /Zc:preprocessor")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast")
+
+    # Only real cl.exe needs (and accepts) the conformant preprocessor switch;
+    # clang-cl / icx are already conformant and warn on it.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor")
+    endif()
 
     # /arch:AVX2 is only valid for x86/x64 targets, not ARM64
     string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _msvc_arch)
