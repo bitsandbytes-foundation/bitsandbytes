@@ -162,6 +162,14 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>✅</td>
     </tr>
     <tr>
+      <td></td>
+      <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
+      <td>SM121</td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
+    </tr>
+    <tr>
       <td colspan="6">🍎 <strong>macOS 14+</strong></td>
     </tr>
     <tr>
