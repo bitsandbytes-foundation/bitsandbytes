@@ -60,12 +60,15 @@ jobs:
         os: [ubuntu-22.04, ubuntu-22.04-arm, windows-2025]
         cuda_version:
           ["11.8.0", "12.1.1", "12.4.1", "12.6.3", "12.8.1", "13.0.2", "13.2.0"]
+        include:
+          - os: windows-11-vs2026-arm
+            cuda_version: "13.4.0"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Windows: We install Cuda on the agent (slow)
       - uses: Jimver/cuda-toolkit@3d45d157f327c09c04b50ee6ccdea2d9d017ec76 # v0.2.35
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && runner.arch == 'X64'
         id: cuda-toolkit
         with:
           cuda: ${{ matrix.cuda_version }}
@@ -75,11 +78,16 @@ jobs:
           use-github-cache: false
           use-local-cache: false
           log-file-suffix: ${{ runner.os }}-${{ runner.arch }}-${{matrix.cuda_version}}.txt
+      - name: Install CUDA Toolkit (WoA)
+        if: runner.os == 'Windows' && runner.arch == 'ARM64'
+        run: ./.github/scripts/install-cuda-woa.ps1
+        shell: pwsh
       - name: Setup MSVC
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
-          toolset: "14.44"
+          arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+          toolset: ${{ runner.arch == 'X64' && '14.44' || '' }}
       - name: Build C++
         run: bash .github/scripts/build-cuda.sh
         env:
