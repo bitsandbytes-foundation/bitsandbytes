@@ -592,6 +592,10 @@ def _gemm_4bit_use_custom_cuda(device_index, dtype, M, N, K):
       sm90 (H100/H200, HBM3/HBM3e):  dequant+linear is much faster; thresholds are tight.
       sm100 (B200/B300, HBM3e):       exits early at top of function.
       sm120 (RTX 5000, GDDR7):        dedicated block; medium-N tiers differ from sm89.
+      sm121 (GB10 DGX Spark, LPDDR5X):  dedicated block at >=1 wave only; the low
+                                     memory bandwidth keeps the custom kernel ahead
+                                     through M=256 there. Sub-wave shapes use the
+                                     sm89 tiers below.
     """
     if M <= _GEMM_4BIT_CUSTOM_FLOOR_M:
         return True
@@ -623,6 +627,7 @@ def _gemm_4bit_use_custom_cuda(device_index, dtype, M, N, K):
     is_sm86 = major == 8 and minor == 6
     is_sm90 = major == 9
     is_sm120 = major == 12 and minor == 0
+    is_sm121 = major == 12 and minor == 1
     is_hbm = is_sm80 or is_sm90  # sm100 already returned above
     tall_k_2xn = K > N * 2
 
@@ -753,10 +758,15 @@ def _gemm_4bit_use_custom_cuda(device_index, dtype, M, N, K):
             return M <= 16
         return False
 
+    if is_sm121:
+        # GB10 (DGX Spark): unified LPDDR5X. Calibrated at >=1 wave only; below one
+        # wave the crossover is strongly K-dependent, so those shapes use the shared
+        # tiers below (which already branch on tall-K).
+        if n_blocks >= num_sms:
+            return M <= 256
+
     if is_sm120:
         # GDDR7 (~1-1.8 TB/s). Medium-N threshold tiers differ from sm89.
-        # sm121 (DGX Spark) has a different bandwidth/SM profile; uses sm89
-        # fallback below until validated.
         if n_blocks >= num_sms * 3:
             return M <= 256
         if n_blocks >= num_sms * 2:
@@ -773,7 +783,7 @@ def _gemm_4bit_use_custom_cuda(device_index, dtype, M, N, K):
             return M <= 16
         return M <= 8
 
-    # Fallback: sm89 (4090, L40S, L4), sm121 (DGX Spark), unrecognized arches.
+    # Fallback: sm89 (4090, L40S, L4), sm121 below one wave, unrecognized arches.
     # GDDR bandwidth makes dequant relatively expensive so custom wins at higher M.
     if n_blocks >= num_sms * 3:
         return M <= 256
