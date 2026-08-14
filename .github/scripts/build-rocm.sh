@@ -91,9 +91,11 @@ fi
 output_dir="output/${RUNNER_OS}/X64"
 mkdir -p "${output_dir}"
 
-shopt -s nullglob
-libraries=(bitsandbytes/libbitsandbytes_rocm${rocm_version_tag}.{so,dylib,dll})
-shopt -u nullglob
+libraries=()
+for extension in so dylib dll; do
+    library="bitsandbytes/libbitsandbytes_rocm${rocm_version_tag}.${extension}"
+    [ -f "${library}" ] && libraries+=("${library}")
+done
 
 if [ "${#libraries[@]}" -eq 0 ]; then
     expected_pattern="bitsandbytes/libbitsandbytes_rocm${rocm_version_tag}.{so,dylib,dll}"
