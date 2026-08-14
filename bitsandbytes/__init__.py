@@ -75,4 +75,4 @@ __pdoc__ = {
     "optim.optimizer.MockArgs": False,
 }
 
-__version__ = "0.50.1.dev0"
+__version__ = "0.50.2.dev0"

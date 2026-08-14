@@ -53,13 +53,15 @@ The currently distributed `bitsandbytes` packages are built with the following c
 | **OS**             | **CUDA Toolkit** | **Host Compiler**    | **Targets**
 |--------------------|------------------|----------------------|--------------
 | **Linux x86-64**   | 11.8 - 12.6      | GCC 11.2             | sm60, sm70, sm75, sm80, sm86, sm89, sm90
-| **Linux x86-64**   | 12.8 - 12.9      | GCC 11.2             | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
-| **Linux x86-64**   | 13.0             | GCC 11.2             | sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Linux x86-64**   | 12.8             | GCC 11.2             | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Linux x86-64**   | 13.0 - 13.2      | GCC 11.2             | sm75, sm80, sm86, sm89, sm90, sm100, sm120
 | **Linux aarch64**  | 11.8 - 12.6      | GCC 11.2             | sm75, sm80, sm90
-| **Linux aarch64**  | 12.8 - 13.0      | GCC 11.2             | sm75, sm80, sm90, sm100, sm110, sm120, sm121
+| **Linux aarch64**  | 12.8             | GCC 11.2             | sm75, sm80, sm90, sm100, sm120
+| **Linux aarch64**  | 13.0 - 13.2      | GCC 11.2             | sm75, sm80, sm90, sm100, sm110, sm120, sm121
 | **Windows x86-64** | 11.8 - 12.6      | MSVC 19.43+ (VS2022) | sm50, sm60, sm75, sm80, sm86, sm89, sm90
-| **Windows x86-64** | 12.8 - 12.9      | MSVC 19.43+ (VS2022) | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
-| **Windows x86-64** | 13.0             | MSVC 19.43+ (VS2022) | sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Windows x86-64** | 12.8             | MSVC 19.43+ (VS2022) | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Windows x86-64** | 13.0 - 13.2      | MSVC 19.43+ (VS2022) | sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Windows arm64**  | 13.4             | MSVC 19.51+ (VS2026) | sm121
 
 The Linux build has a minimum glibc version of 2.24.
 
@@ -129,6 +131,8 @@ pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise
 Compilation from source on Windows systems require Visual Studio with C++ support as well as an installation of the CUDA Toolkit.
 
 To compile from source, you need CMake >= **3.22.1** and Python >= **3.10** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version that we support is **11.8**.
+
+On Windows ARM64, the CUDA Toolkit is supported from version **13.4**, and Visual Studio must include the **ARM64 C++ build tools** component.
 
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
@@ -345,7 +349,7 @@ pip install -e .
 ```
 
 > [!NOTE]
-> The build system will detect the ARM64 architecture automatically via CMake. Only the CPU backend is supported on Windows ARM64 at this time (no CUDA).
+> The build system will detect the ARM64 architecture automatically via CMake. For a CUDA build on Windows ARM64, see [Compile from Source](#cuda-compile) in the CUDA section; CUDA Toolkit 13.4 or newer is required.
 
 </hfoption>
 </hfoptions>
