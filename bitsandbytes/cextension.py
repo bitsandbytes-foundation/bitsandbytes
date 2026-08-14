@@ -25,8 +25,8 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
 
     When no override is set, selects from packaged libraries using the following priority:
     1. Exact version match.
-    2. Highest packaged version <= runtime version, same major.
-    3. Lowest packaged version > runtime version, same major.
+    2. Highest packaged version <= runtime version, same major (e.g. runtime 12.9, packaged 12.8).
+    3. Lowest packaged version > runtime version, same major (e.g. runtime 12.0, packaged 12.1).
     4. For ROCm only, repeat the same older-first selection across major versions.
     CUDA does not fall back across major versions. A warning is logged when falling back.
     Overrides select the requested filename directly. The returned path is not guaranteed
