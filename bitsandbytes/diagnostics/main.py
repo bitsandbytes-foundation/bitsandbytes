@@ -58,8 +58,9 @@ def show_environment():
 
     print(f"PyTorch: {torch.__version__}")
     print(f"  CUDA: {torch.version.cuda or 'N/A'}")
+    print(f"  ROCm: {getattr(torch.version, 'rocm', None) or 'N/A'}")
     print(f"  HIP: {torch.version.hip or 'N/A'}")
-    print(f"  XPU: {getattr(torch.version, 'xpu', 'N/A') or 'N/A'}")
+    print(f"  XPU: {getattr(torch.version, 'xpu', None) or 'N/A'}")
 
     print("Related packages:")
     for pkg in _RELATED_PACKAGES:

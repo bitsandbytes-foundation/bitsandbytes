@@ -176,6 +176,8 @@ pip install bitsandbytes
 
 bitsandbytes can be compiled from ROCm 6.3 - ROCm 7.14.0. See the `CMakeLists.txt` for additional options.
 
+CMake uses the ROCm release, rather than the HIP SDK version, to name the native library. It detects the release from the active ROCm installation's `.info/version` file or `rocm-sdk version`. If neither is available, pass the version explicitly as a dotted release such as `-DROCM_VERSION=7.14.0` or its shortcode, `-DROCM_VERSION=714`. The major and minor versions are concatenated in the filename, for example `libbitsandbytes_rocm714.so`.
+
 <hfoptions id="rocm-source">
 <hfoption id="Linux">
 
@@ -220,7 +222,7 @@ export ROCM_PATH="$(rocm-sdk path --root)"
 export PATH="${ROCM_PATH}/bin:${PATH}"
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 # Use the same GPU architecture selected above. Separate multiple architectures with semicolons.
-cmake -G Ninja -DCOMPUTE_BACKEND=hip -DBNB_ROCM_ARCH="gfx1100" -DCMAKE_BUILD_TYPE=Release -DCMAKE_HIP_COMPILER_ROCM_ROOT="${ROCM_PATH}" -S .
+cmake -G Ninja -DCOMPUTE_BACKEND=hip -DROCM_VERSION=7.14.0 -DBNB_ROCM_ARCH="gfx1100" -DCMAKE_BUILD_TYPE=Release -DCMAKE_HIP_COMPILER_ROCM_ROOT="${ROCM_PATH}" -S .
 cmake --build . --config Release
 pip install .
 ```
@@ -242,7 +244,7 @@ rocm-sdk init
 export ROCM_PATH="$(rocm-sdk path --root)"
 export PATH="${ROCM_PATH}/bin:${PATH}"
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
-cmake -G Ninja -DCOMPUTE_BACKEND=hip -DBNB_ROCM_ARCH="gfx1100" -DCMAKE_BUILD_TYPE=Release -S .
+cmake -G Ninja -DCOMPUTE_BACKEND=hip -DROCM_VERSION=7.2.1 -DBNB_ROCM_ARCH="gfx1100" -DCMAKE_BUILD_TYPE=Release -S .
 cmake --build . --config Release
 pip install .
 ```

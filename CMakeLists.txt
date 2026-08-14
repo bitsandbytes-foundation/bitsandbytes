@@ -10,17 +10,21 @@
 #                        Separate by semicolons, i.e. `-DCOMPUTE_CAPABILITY=89;90;100;120`
 #                        Check your compute capability here: https://developer.nvidia.com/cuda-gpus
 #  - PTXAS_VERBOSE: Pass the `-v` option to the PTX Assembler
-#  - ROCM_VERSION: Override the ROCm version shortcode used in the output library name.
-#                  Useful when PyTorch was built against a different ROCm version than the
-#                  system install. For example, `-DROCM_VERSION=70` produces
-#                  libbitsandbytes_rocm70.so even if the system has ROCm 7.2.
+#  - ROCM_VERSION: Override the ROCm release used in the output library name. Accepts a
+#                  dotted release or shortcode. For example, `7.14.0` and `714`
+#                  both produce libbitsandbytes_rocm714.so.
 cmake_minimum_required(VERSION 3.22.1)
 
 # On Windows with HIP backend, auto-detect compilers from ROCM_PATH before project()
 if(WIN32 AND COMPUTE_BACKEND STREQUAL "hip")
-    if(DEFINED ENV{ROCM_PATH})
-        file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" ROCM_PATH)
+    if(NOT DEFINED ENV{ROCM_PATH} OR "$ENV{ROCM_PATH}" STREQUAL "")
+        message(FATAL_ERROR
+            "ROCM_PATH must be set for HIP builds on Windows. "
+            "After 'rocm-sdk init', set it from 'rocm-sdk path --root'. "
+            "PowerShell: $env:ROCM_PATH = (rocm-sdk path --root)"
+        )
     endif()
+    file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" ROCM_PATH)
     if(ROCM_PATH AND NOT DEFINED CMAKE_CXX_COMPILER)
         set(CMAKE_CXX_COMPILER "${ROCM_PATH}/lib/llvm/bin/clang++.exe")
     endif()
@@ -282,20 +286,75 @@ elseif(BUILD_HIP)
 
     string(APPEND BNB_OUTPUT_NAME "_rocm")
 
-    # get hip version
-    execute_process(COMMAND hipconfig --version OUTPUT_VARIABLE HIP_CONFIG_VERSION)
-    string(REGEX MATCH "[0-9]+\\.[0-9]+" HIP_VERSION "${HIP_CONFIG_VERSION}")
-    string(REPLACE "." "" HIP_VERSION_SHORT "${HIP_VERSION}")
+    # HIP and ROCm releases can diverge, so use the ROCm release for the filename.
+    set(ROCM_VERSION "" CACHE STRING "ROCm release used in the output library name")
+    set(_ROCM_VERSION_RAW "${ROCM_VERSION}")
+    set(_ROCM_VERSION_SOURCE "-DROCM_VERSION")
 
-    # Expose a cache variable that the user can set to override the ROCm version in the library name
-    set(ROCM_VERSION "${HIP_VERSION_SHORT}" CACHE STRING "Expected ROCm Version Shortcode")
+    if(NOT _ROCM_VERSION_RAW)
+        if(NOT ROCM_PATH)
+            if(DEFINED ENV{ROCM_PATH})
+                file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" ROCM_PATH)
+            elseif(CMAKE_HIP_COMPILER_ROCM_ROOT)
+                set(ROCM_PATH "${CMAKE_HIP_COMPILER_ROCM_ROOT}")
+            elseif(WIN32)
+                message(FATAL_ERROR "ROCM_PATH must be set for HIP builds on Windows")
+            else()
+                message(WARNING "ROCM_PATH is not set; falling back to /opt/rocm")
+                set(ROCM_PATH "/opt/rocm")
+            endif()
+        endif()
 
-    message(STATUS "ROCm Version: ${HIP_VERSION_SHORT} (from hipconfig)")
-    if(NOT ROCM_VERSION STREQUAL "${HIP_VERSION_SHORT}")
-        message(WARNING "Overriding ROCm version in library name: ${HIP_VERSION_SHORT} -> ${ROCM_VERSION}")
+        foreach(_VERSION_FILE "${ROCM_PATH}/.info/version" "${ROCM_PATH}/core/.info/version")
+            if(NOT _ROCM_VERSION_RAW AND EXISTS "${_VERSION_FILE}")
+                file(READ "${_VERSION_FILE}" _ROCM_VERSION_RAW)
+                set(_ROCM_VERSION_SOURCE "${_VERSION_FILE}")
+            endif()
+        endforeach()
+
+        if(NOT _ROCM_VERSION_RAW)
+            execute_process(
+                COMMAND rocm-sdk version
+                OUTPUT_VARIABLE _ROCM_VERSION_RAW
+                ERROR_QUIET
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+            )
+            set(_ROCM_VERSION_SOURCE "rocm-sdk version")
+        endif()
+
+        if(NOT _ROCM_VERSION_RAW)
+            message(FATAL_ERROR
+                "Could not determine the ROCm version from ${ROCM_PATH}/.info/version, "
+                "${ROCM_PATH}/core/.info/version, or 'rocm-sdk version'. "
+                "Set ROCM_PATH correctly or pass -DROCM_VERSION=<version>."
+            )
+        endif()
     endif()
 
-    string(APPEND BNB_OUTPUT_NAME "${ROCM_VERSION}")
+    string(STRIP "${_ROCM_VERSION_RAW}" _ROCM_VERSION_RAW)
+    if(_ROCM_VERSION_RAW MATCHES "^([0-9]+)\\.([0-9]+)")
+        set(_ROCM_VERSION_MAJOR "${CMAKE_MATCH_1}")
+        set(_ROCM_VERSION_MINOR "${CMAKE_MATCH_2}")
+    elseif(_ROCM_VERSION_RAW MATCHES "^([6-9])([0-9]+)$")
+        set(_ROCM_VERSION_MAJOR "${CMAKE_MATCH_1}")
+        set(_ROCM_VERSION_MINOR "${CMAKE_MATCH_2}")
+    elseif(_ROCM_VERSION_RAW MATCHES "^([1-5][0-9])([0-9]+)$")
+        set(_ROCM_VERSION_MAJOR "${CMAKE_MATCH_1}")
+        set(_ROCM_VERSION_MINOR "${CMAKE_MATCH_2}")
+    else()
+        message(FATAL_ERROR
+            "Could not parse ROCm version '${_ROCM_VERSION_RAW}'. "
+            "Pass -DROCM_VERSION=7.14.0 (or 714)."
+        )
+    endif()
+
+    set(ROCM_VERSION "${_ROCM_VERSION_MAJOR}.${_ROCM_VERSION_MINOR}")
+    set(_ROCM_VERSION_TAG "${_ROCM_VERSION_MAJOR}${_ROCM_VERSION_MINOR}")
+    message(STATUS
+        "ROCm Release: ${_ROCM_VERSION_MAJOR}.${_ROCM_VERSION_MINOR}; "
+        "library suffix: rocm${_ROCM_VERSION_TAG} (from ${_ROCM_VERSION_SOURCE})"
+    )
+    string(APPEND BNB_OUTPUT_NAME "${_ROCM_VERSION_TAG}")
     add_compile_definitions(__HIP_PLATFORM_AMD__)
     add_compile_definitions(__HIP_PLATFORM_HCC__)
     add_compile_definitions(BUILD_HIP)
@@ -416,11 +475,16 @@ if(BUILD_CUDA)
     )
 endif()
 if(BUILD_HIP)
-    # Determine ROCM_PATH from environment variable, fallback to /opt/rocm on Linux
-    if(DEFINED ENV{ROCM_PATH})
-      file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" ROCM_PATH)
-    else()
-      set(ROCM_PATH /opt/rocm)
+    # ROCM_PATH was resolved during version detection; retain it for package discovery.
+    if(NOT ROCM_PATH)
+        if(DEFINED ENV{ROCM_PATH})
+            file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" ROCM_PATH)
+        elseif(WIN32)
+            message(FATAL_ERROR "ROCM_PATH must be set for ROCm builds on Windows")
+        else()
+            message(WARNING "ROCM_PATH is not set; falling back to /opt/rocm")
+            set(ROCM_PATH "/opt/rocm")
+        endif()
     endif()
     list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
     macro(find_package_and_print_version PACKAGE_NAME)
@@ -452,12 +516,8 @@ if(BUILD_HIP)
     set_source_files_properties(${GPU_FILES} PROPERTIES LANGUAGE HIP)
     set_target_properties(bitsandbytes PROPERTIES LINKER_LANGUAGE CXX)
 
-    if(HIP_VERSION VERSION_LESS "6.1")
-	target_compile_definitions(bitsandbytes PUBLIC NO_HIPBLASLT)
-    else()
-	find_package(hipblaslt)
-        target_link_libraries(bitsandbytes PUBLIC roc::hipblaslt)
-    endif()
+    find_package(hipblaslt REQUIRED)
+    target_link_libraries(bitsandbytes PUBLIC roc::hipblaslt)
 endif()
 if(BUILD_XPU)
     set(SYCL_LINK_FLAGS "-fsycl;--offload-compress;-fsycl-targets=spir64_gen,spir64;-Xs;-device pvc,xe-lpg,ats-m150 -options ' -cl-intel-enable-auto-large-GRF-mode -cl-poison-unsupported-fp64-kernels -cl-intel-greater-than-4GB-buffer-required'")

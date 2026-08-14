@@ -144,9 +144,7 @@ using bnb_bfloat162 = __nv_bfloat162;
 
 #if BNB_HIP
 
-#ifndef NO_HIPBLASLT
 #include <hipblaslt/hipblaslt.h>
-#endif
 
 using bnb_blasLt_handle_t = hipblasLtHandle_t;
 using bnb_blasLt_matmul_desc_t = hipblasLtMatmulDesc_t;

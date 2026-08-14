@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 
 from bitsandbytes.cextension import HIP_ENVIRONMENT, get_cuda_bnb_library_path
-from bitsandbytes.cuda_specs import CUDASpecs
+from bitsandbytes.cuda_specs import CUDASpecs, get_rocm_version
 from bitsandbytes.diagnostics.utils import print_dedented
 
 CUDART_PATH_PREFERRED_ENVVARS = ("CONDA_PREFIX", "LD_LIBRARY_PATH")
@@ -137,7 +137,13 @@ def _print_cuda_diagnostics(cuda_specs: CUDASpecs) -> None:
 
 
 def _print_hip_diagnostics(cuda_specs: CUDASpecs) -> None:
-    print(f"PyTorch settings found: ROCM_VERSION={cuda_specs.cuda_version_string}")
+    rocm_major, rocm_minor = cuda_specs.cuda_version_tuple
+    print(
+        "PyTorch settings found: "
+        f"ROCm={getattr(torch.version, 'rocm', None) or 'N/A'}, "
+        f"HIP={getattr(torch.version, 'hip', None) or 'N/A'}, "
+        f"binary suffix=rocm{rocm_major}{rocm_minor}"
+    )
 
     rocm_override = os.environ.get("BNB_ROCM_VERSION")
     if rocm_override:
@@ -153,11 +159,10 @@ def _print_hip_diagnostics(cuda_specs: CUDASpecs) -> None:
             """,
         )
 
-    hip_major, hip_minor = cuda_specs.cuda_version_tuple
-    if (hip_major, hip_minor) < (6, 1):
+    if (rocm_major, rocm_minor) < (6, 3):
         print_dedented(
             """
-            WARNING: bitsandbytes is fully supported only from ROCm 6.1.
+            WARNING: bitsandbytes is fully supported only from ROCm 6.3.
             """,
         )
 
@@ -171,7 +176,7 @@ def print_diagnostics(cuda_specs: CUDASpecs) -> None:
 
 def print_runtime_diagnostics() -> None:
     backend = "ROCm" if HIP_ENVIRONMENT else "CUDA"
-    runtime_version = torch.version.hip if HIP_ENVIRONMENT else torch.version.cuda
+    runtime_version = get_rocm_version() if HIP_ENVIRONMENT else torch.version.cuda
     override_var = "BNB_ROCM_VERSION" if HIP_ENVIRONMENT else "BNB_CUDA_VERSION"
     override_example = "72" if HIP_ENVIRONMENT else "122"
 

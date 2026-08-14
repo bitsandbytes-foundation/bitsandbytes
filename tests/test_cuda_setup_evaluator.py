@@ -2,134 +2,143 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import torch
 
 from bitsandbytes.cextension import get_cuda_bnb_library_path
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX
 from bitsandbytes.cuda_specs import CUDASpecs
 
 
-@pytest.fixture
-def cuda120_spec() -> CUDASpecs:
-    """Simulates torch+cuda12.0 and a representative Ampere-class capability."""
+def specs(version: tuple[int, int]) -> CUDASpecs:
     return CUDASpecs(
-        cuda_version_string="120",
-        highest_compute_capability=(8, 6),
-        cuda_version_tuple=(12, 0),
-    )
-
-
-@pytest.fixture
-def rocm70_spec() -> CUDASpecs:
-    """Simulates torch+rocm7.0."""
-    return CUDASpecs(
-        cuda_version_string="70",
+        cuda_version_string=f"{version[0]}{version[1]}",
         highest_compute_capability=(0, 0),
-        cuda_version_tuple=(7, 0),
+        cuda_version_tuple=version,
     )
 
 
 @pytest.mark.parametrize(
-    "spec,fake_libs,hip_version,expected_name,expect_warning",
+    "backend,backend_version,runtime_version,available,expected,warning",
     [
-        # exact match
-        (
-            CUDASpecs(cuda_version_string="124", highest_compute_capability=(8, 6), cuda_version_tuple=(12, 4)),
-            {(12, 4): Path(f"libbitsandbytes_cuda124{DYNAMIC_LIBRARY_SUFFIX}")},
-            None,
-            f"libbitsandbytes_cuda124{DYNAMIC_LIBRARY_SUFFIX}",
-            False,
-        ),
-        # forward fallback within major: 12.0 -> 12.1
-        (
-            CUDASpecs(cuda_version_string="120", highest_compute_capability=(8, 6), cuda_version_tuple=(12, 0)),
-            {
-                (12, 1): Path(f"libbitsandbytes_cuda121{DYNAMIC_LIBRARY_SUFFIX}"),
-                (12, 4): Path(f"libbitsandbytes_cuda124{DYNAMIC_LIBRARY_SUFFIX}"),
-            },
-            None,
-            f"libbitsandbytes_cuda121{DYNAMIC_LIBRARY_SUFFIX}",
-            True,
-        ),
-        # backward fallback: 12.9 -> 12.8
-        (
-            CUDASpecs(cuda_version_string="129", highest_compute_capability=(8, 9), cuda_version_tuple=(12, 9)),
-            {
-                (12, 4): Path(f"libbitsandbytes_cuda124{DYNAMIC_LIBRARY_SUFFIX}"),
-                (12, 8): Path(f"libbitsandbytes_cuda128{DYNAMIC_LIBRARY_SUFFIX}"),
-            },
-            None,
-            f"libbitsandbytes_cuda128{DYNAMIC_LIBRARY_SUFFIX}",
-            True,
-        ),
-        # ROCm double-digit minor: 7.13 -> 7.2
-        (
-            CUDASpecs(cuda_version_string="713", highest_compute_capability=(0, 0), cuda_version_tuple=(7, 13)),
-            {(7, 2): Path(f"libbitsandbytes_rocm72{DYNAMIC_LIBRARY_SUFFIX}")},
-            "7.13.0",
-            f"libbitsandbytes_rocm72{DYNAMIC_LIBRARY_SUFFIX}",
-            True,
-        ),
-        # no same-major match: 11.8 with only 12.x -> non-existent exact path, no warning
-        (
-            CUDASpecs(cuda_version_string="118", highest_compute_capability=(7, 5), cuda_version_tuple=(11, 8)),
-            {(12, 1): Path("libbitsandbytes_cuda121.so"), (12, 4): Path("libbitsandbytes_cuda124.so")},
-            None,
-            f"libbitsandbytes_cuda118{DYNAMIC_LIBRARY_SUFFIX}",
-            False,
-        ),
-        # no libs at all -> non-existent exact path, no warning
-        (
-            CUDASpecs(cuda_version_string="129", highest_compute_capability=(8, 9), cuda_version_tuple=(12, 9)),
-            {},
-            None,
-            f"libbitsandbytes_cuda129{DYNAMIC_LIBRARY_SUFFIX}",
-            False,
-        ),
+        # Exact match.
+        ("cuda", "12.4", (12, 4), [(12, 4)], (12, 4), False),
+        # Same-major fallback to the newest older binary.
+        ("cuda", "12.9", (12, 9), [(12, 4), (12, 8)], (12, 8), True),
+        # Same-major fallback to the oldest newer binary.
+        ("cuda", "12.0", (12, 0), [(12, 1), (12, 4)], (12, 1), True),
+        # CUDA does not fall back across major versions.
+        ("cuda", "11.8", (11, 8), [(12, 1)], None, False),
+        # ROCm same-major fallback with a double-digit minor.
+        ("hip", "7.13.0", (7, 13), [(7, 2), (7, 14)], (7, 2), True),
+        # ROCm same-major fallback to the newest older binary.
+        ("hip", "7.9.0", (7, 9), [(7, 2), (7, 14)], (7, 2), True),
+        # ROCm/HIP version-line divergence with an older cross-major fallback.
+        ("hip", "7.16.0", (12, 1), [(8, 0), (7, 14)], (8, 0), True),
+        # ROCm cross-major fallback to the newest older binary.
+        ("hip", "8.0.0", (8, 0), [(7, 14)], (7, 14), True),
+        # ROCm cross-major fallback to the oldest newer binary.
+        ("hip", "6.4.0", (6, 4), [(7, 0)], (7, 0), True),
+        # No packaged libraries returns the requested path without a warning.
+        ("hip", "7.14.0", (7, 14), [], None, False),
     ],
 )
-def test_version_selection(monkeypatch, caplog, spec, fake_libs, hip_version, expected_name, expect_warning):
-    """Library selection: exact match, fallback, no-same-major, no-libs."""
+def test_library_selection(
+    backend,
+    backend_version,
+    runtime_version,
+    available,
+    expected,
+    warning,
+    monkeypatch,
+    caplog,
+):
     monkeypatch.delenv("BNB_CUDA_VERSION", raising=False)
     monkeypatch.delenv("BNB_ROCM_VERSION", raising=False)
-    is_hip = spec.cuda_version_tuple[0] < 10
+    other_backend = "cuda" if backend == "hip" else "hip"
+    prefix = "rocm" if backend == "hip" else "cuda"
+    paths = {
+        version: Path(f"libbitsandbytes_{prefix}{version[0]}{version[1]}{DYNAMIC_LIBRARY_SUFFIX}")
+        for version in available
+    }
     with (
-        patch("torch.version.hip", hip_version if is_hip else None),
-        patch("bitsandbytes.cextension._find_cuda_libs", return_value=fake_libs),
+        patch.object(torch.version, backend, backend_version),
+        patch.object(torch.version, other_backend, None),
+        patch("bitsandbytes.cextension._find_cuda_libs", return_value=paths),
+        caplog.at_level("WARNING"),
     ):
-        with caplog.at_level("WARNING"):
-            result = get_cuda_bnb_library_path(spec)
-    assert result.name == expected_name
-    if expect_warning:
-        assert caplog.text
+        result = get_cuda_bnb_library_path(specs(runtime_version))
+
+    if expected is None:
+        tag = f"{runtime_version[0]}{runtime_version[1]}"
+        assert result.name == f"libbitsandbytes_{prefix}{tag}{DYNAMIC_LIBRARY_SUFFIX}"
     else:
-        assert not caplog.text
+        assert result == paths[expected]
+    assert bool(caplog.text) is warning
 
 
-def test_override(monkeypatch, cuda120_spec, caplog):
-    """BNB_CUDA_VERSION overrides path selection."""
-    monkeypatch.setenv("BNB_CUDA_VERSION", "110")
-    with patch("bitsandbytes.cextension._find_cuda_libs", return_value={}):
-        with caplog.at_level("WARNING"):
-            result = get_cuda_bnb_library_path(cuda120_spec)
-    assert result.stem == "libbitsandbytes_cuda110"
-    assert "BNB_CUDA_VERSION" in caplog.text
-
-
-def test_rocm_override(monkeypatch, rocm70_spec, caplog):
-    """BNB_ROCM_VERSION overrides path selection."""
-    monkeypatch.setenv("BNB_ROCM_VERSION", "72")
+@pytest.mark.parametrize(
+    "backend,backend_version,version,override,expected_stem",
+    [
+        ("hip", "7.0.0", (7, 0), "72", "libbitsandbytes_rocm72"),
+        ("hip", "7.0.0", (7, 0), "7.2", "libbitsandbytes_rocm72"),
+        ("cuda", "12.0", (12, 0), "128", "libbitsandbytes_cuda128"),
+        ("cuda", "12.0", (12, 0), "12.8", "libbitsandbytes_cuda128"),
+        ("cuda", "12.0", (12, 0), "12.8.1", "libbitsandbytes_cuda128"),
+    ],
+)
+def test_override_formats(monkeypatch, backend, backend_version, version, override, expected_stem):
+    other_backend = "cuda" if backend == "hip" else "hip"
+    override_var = "BNB_ROCM_VERSION" if backend == "hip" else "BNB_CUDA_VERSION"
+    other_var = "BNB_CUDA_VERSION" if backend == "hip" else "BNB_ROCM_VERSION"
+    monkeypatch.setenv(override_var, override)
+    monkeypatch.delenv(other_var, raising=False)
     with (
-        patch("torch.version.hip", "7.0.0"),
-        patch("bitsandbytes.cextension._find_cuda_libs", return_value={}),
+        patch.object(torch.version, backend, backend_version),
+        patch.object(torch.version, other_backend, None),
     ):
-        with caplog.at_level("WARNING"):
-            result = get_cuda_bnb_library_path(rocm70_spec)
-    assert result.stem == "libbitsandbytes_rocm72"
-    assert "BNB_ROCM_VERSION" in caplog.text
+        assert get_cuda_bnb_library_path(specs(version)).stem == expected_stem
 
 
-def test_override_invalid_format(monkeypatch, cuda120_spec):
-    """Override value must be digits only (e.g. '124'), not dotted or alphanumeric."""
-    monkeypatch.setenv("BNB_CUDA_VERSION", "12.4")
-    with pytest.raises(RuntimeError, match="digits only"):
-        get_cuda_bnb_library_path(cuda120_spec)
+@pytest.mark.parametrize(
+    "backend,backend_version,version",
+    [
+        ("cuda", "12.0", (12, 0)),
+        ("hip", "7.2.0", (7, 2)),
+    ],
+)
+def test_opposite_backend_override_warns(monkeypatch, caplog, backend, backend_version, version):
+    other_backend = "hip" if backend == "cuda" else "cuda"
+    correct_var = "BNB_CUDA_VERSION" if backend == "cuda" else "BNB_ROCM_VERSION"
+    wrong_var = "BNB_ROCM_VERSION" if backend == "cuda" else "BNB_CUDA_VERSION"
+    monkeypatch.setenv(wrong_var, "72")
+    monkeypatch.delenv(correct_var, raising=False)
+    with (
+        patch.object(torch.version, backend, backend_version),
+        patch.object(torch.version, other_backend, None),
+        patch("bitsandbytes.cextension._find_cuda_libs", return_value={}),
+        caplog.at_level("WARNING"),
+    ):
+        get_cuda_bnb_library_path(specs(version))
+    assert f"{wrong_var} is ignored" in caplog.text
+    assert f"use {correct_var} instead" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "backend,backend_version,version",
+    [
+        ("hip", "7.0.0", (7, 0)),
+        ("cuda", "12.0", (12, 0)),
+    ],
+)
+def test_invalid_override(monkeypatch, backend, backend_version, version):
+    other_backend = "cuda" if backend == "hip" else "hip"
+    override_var = "BNB_ROCM_VERSION" if backend == "hip" else "BNB_CUDA_VERSION"
+    other_var = "BNB_CUDA_VERSION" if backend == "hip" else "BNB_ROCM_VERSION"
+    monkeypatch.setenv(override_var, "not-a-version")
+    monkeypatch.delenv(other_var, raising=False)
+    with (
+        patch.object(torch.version, backend, backend_version),
+        patch.object(torch.version, other_backend, None),
+        pytest.raises(RuntimeError, match="dotted version"),
+    ):
+        get_cuda_bnb_library_path(specs(version))
