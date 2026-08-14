@@ -25,13 +25,12 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
 
     When no override is set, selects from packaged libraries using the following priority:
     1. Exact version match.
-    2. Same-major fallback, preferring the newest older binary, then the
-       lowest newer binary.
-    3. For ROCm only, cross-major fallback using the same older-first policy.
-    CUDA never falls back across major versions.
-    A warning is logged when falling back. Overrides select the requested filename
-    directly. The returned path is not guaranteed to exist when no packaged libs
-    are found, or when an override names an absent version.
+    2. Highest packaged version <= runtime version, same major.
+    3. Lowest packaged version > runtime version, same major.
+    4. For ROCm only, repeat the same older-first selection across major versions.
+    CUDA does not fall back across major versions. A warning is logged when falling back.
+    Overrides select the requested filename directly. The returned path is not guaranteed
+    to exist when no packaged libraries are found or an override names an absent version.
     """
     is_hip = bool(torch.version.hip)
     prefix = "rocm" if is_hip else "cuda"
