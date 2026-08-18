@@ -22,6 +22,7 @@ def quantize_fp4_blockwise_kernel(
     absmax_ptr,
     out_ptr,
     n_elements,
+    absmax_elements,
     BLOCK_SIZE: tl.constexpr,
     SPLIT_NUM_BLOCKS: tl.constexpr,
 ):
@@ -39,7 +40,8 @@ def quantize_fp4_blockwise_kernel(
 
     # Calculating absamax for each block
     absmax = tl.max(tl.abs(A_reshaped), axis=1)
-    tl.store(absmax_ptr + block_start_idx + tl.arange(0, PAIRED_SPLIT_NUM_BLOCKS), absmax)
+    absmax_offsets = block_start_idx + tl.arange(0, PAIRED_SPLIT_NUM_BLOCKS)
+    tl.store(absmax_ptr + absmax_offsets, absmax, mask=absmax_offsets < absmax_elements)
 
     A_normalized = A_reshaped / absmax[:, None]
     A_normalized = tl.clamp(A_normalized, -1.0, 1.0)
@@ -89,6 +91,7 @@ def quantize_nf4_blockwise_kernel(
     absmax_ptr,
     out_ptr,
     n_elements,
+    absmax_elements,
     BLOCK_SIZE: tl.constexpr,
     SPLIT_NUM_BLOCKS: tl.constexpr,
 ):
@@ -106,7 +109,8 @@ def quantize_nf4_blockwise_kernel(
 
     # Calculating absamax for each block
     absmax = tl.max(tl.abs(A_reshaped), axis=1)
-    tl.store(absmax_ptr + block_start_idx + tl.arange(0, PAIRED_SPLIT_NUM_BLOCKS), absmax)
+    absmax_offsets = block_start_idx + tl.arange(0, PAIRED_SPLIT_NUM_BLOCKS)
+    tl.store(absmax_ptr + absmax_offsets, absmax, mask=absmax_offsets < absmax_elements)
 
     A_normalized = A_reshaped / absmax[:, None]
     A_normalized = tl.clamp(A_normalized, -1.0, 1.0)
@@ -164,6 +168,7 @@ def quantize_4bit_blockwise_triton(A, blocksize, quant_type, blocks, absmax, num
             absmax_ptr=absmax,
             out_ptr=quantized_out,
             n_elements=num_elements,
+            absmax_elements=absmax.numel(),
             BLOCK_SIZE=blocksize,
             SPLIT_NUM_BLOCKS=split_num_blocks,
         )
@@ -173,6 +178,7 @@ def quantize_4bit_blockwise_triton(A, blocksize, quant_type, blocks, absmax, num
             absmax_ptr=absmax,
             out_ptr=quantized_out,
             n_elements=num_elements,
+            absmax_elements=absmax.numel(),
             BLOCK_SIZE=blocksize,
             SPLIT_NUM_BLOCKS=split_num_blocks,
         )
