@@ -92,6 +92,40 @@ class TestLLMInt8Ops:
 
         opcheck(torch.ops.bitsandbytes.int8_scaled_mm, (A, B, row_stats, col_stats, bias, dtype))
 
+    @pytest.mark.parametrize("has_outliers", TRUE_FALSE)
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_int8_mixed_scaled_mm(self, device, has_outliers):
+        A = torch.full((10, 20), 0.5, dtype=torch.float16, device=device)
+        threshold = 6.0
+        if has_outliers:
+            A[1, 0] = 10.0
+
+        CA, row_stats, outlier_cols = torch.ops.bitsandbytes.int8_vectorwise_quant(A, threshold)
+        B = torch.randn(30, 20, dtype=torch.float16, device=device)
+        CB, col_stats, _ = torch.ops.bitsandbytes.int8_vectorwise_quant(B)
+
+        out, subA = torch.ops.bitsandbytes.int8_mixed_scaled_mm(A, CA, CB, row_stats, col_stats, outlier_cols)
+
+        assert out.shape == (10, 30)
+        assert out.dtype == A.dtype
+        assert out.device == A.device
+        assert subA.shape == (10, int(has_outliers))
+        assert subA.dtype == A.dtype
+        assert subA.device == A.device
+
+        opcheck(
+            torch.ops.bitsandbytes.int8_mixed_scaled_mm.default,
+            (A, CA, CB, row_stats, col_stats, outlier_cols),
+        )
+
+        if not has_outliers:
+            _, subA_without_outlier_cols = torch.ops.bitsandbytes.int8_mixed_scaled_mm(A, CA, CB, row_stats, col_stats)
+            assert subA_without_outlier_cols.shape == (10, 0)
+            opcheck(
+                torch.ops.bitsandbytes.int8_mixed_scaled_mm.default,
+                (A, CA, CB, row_stats, col_stats),
+            )
+
 
 class TestInt8BlockwiseQuantOps:
     @pytest.mark.parametrize("device", get_available_devices())

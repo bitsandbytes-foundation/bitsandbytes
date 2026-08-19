@@ -27,8 +27,8 @@ def _(
 
     out = torch.empty(shapeC, device=A.device, dtype=A.dtype)
 
-    outlier_cols = torch.library.get_ctx().new_dynamic_size()
-    subA = A.new_empty(outlier_cols, dtype=torch.int64)
+    num_outlier_cols = 0 if outlier_cols is None else outlier_cols.shape[0]
+    subA = A.new_empty((A.shape[0], num_outlier_cols))
 
     return out, subA
 
