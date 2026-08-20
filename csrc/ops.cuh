@@ -94,7 +94,8 @@ class ContextLt {
 
 template <typename T, int STOCHASTIC, int DATA_TYPE>
 void quantizeBlockwise(
-    float* code, T* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+    float* code, T* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n,
+    bnb_stream_t stream
 );
 template <typename T, int DATA_TYPE>
 void dequantizeBlockwise(
