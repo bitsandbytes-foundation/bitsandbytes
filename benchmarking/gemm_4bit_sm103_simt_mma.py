@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Benchmark SM103 fused 4-bit GEMM SIMT, MMA, and automatic dispatch.
 
-This CLI builds three native SM103 libraries from the current commit. The SIMT
-and MMA forcing edits are applied only to temporary source copies. Measurements
-rotate variant order for every sample and are written as JSONL.
+This CLI builds three SM103-compatible libraries from the current commit. The
+SIMT and MMA forcing edits are applied only to temporary source copies.
+Measurements rotate variant order for every sample and are written as JSONL.
 """
 
 import argparse
@@ -15,6 +15,7 @@ from pathlib import Path
 import socket
 import statistics
 import subprocess
+import sys
 
 import torch
 
@@ -30,6 +31,8 @@ CALIBRATION_CASES = (
     ("wave3_below_tall", 28352, 32768, (3, 4, 5, 6, 7, 8)),
     ("wave3_at_tall", 28416, 32768, (3, 4, 5, 6, 7, 8)),
     ("wave3_above_tall", 28480, 32768, (3, 4, 5, 6, 7, 8)),
+    ("wave4_tall_k49152", 37888, 49152, (3, 4, 5, 6, 7, 8)),
+    ("wave8_tall_k81920", 75776, 81920, (3, 4, 5, 6, 7, 8)),
     ("vocab_128256x4096", 128256, 4096, (3, 4, 5, 6, 7, 8)),
 )
 DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16}
@@ -69,6 +72,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--build-root", required=True, type=Path)
+    parser.add_argument(
+        "--compute-capability",
+        default="103",
+        help="CMake COMPUTE_CAPABILITY target list; defaults to a native SM103 build",
+    )
     parser.add_argument("--warmup", type=positive_int, default=20)
     parser.add_argument("--repetitions", type=positive_int, default=100)
     parser.add_argument("--rounds", type=positive_int, default=7)
@@ -129,14 +137,14 @@ def force_variant(source_root, variant):
         raise ValueError(variant)
 
 
-def build_library(source_root, build_root):
+def build_library(source_root, build_root, compute_capability):
     run(
         [
             "cmake",
             "-G",
             "Ninja",
             "-DCOMPUTE_BACKEND=cuda",
-            "-DCOMPUTE_CAPABILITY=103",
+            f"-DCOMPUTE_CAPABILITY={compute_capability}",
             "-DCMAKE_BUILD_TYPE=Release",
             "-S",
             source_root,
@@ -148,19 +156,19 @@ def build_library(source_root, build_root):
     run(["cmake", "--build", build_root, "--parallel", str(parallel)])
 
 
-def prepare_libraries(repo_root, build_root):
+def prepare_libraries(repo_root, build_root, compute_capability):
     if build_root.exists():
         raise FileExistsError(f"build root must not exist: {build_root}")
     build_root.mkdir(parents=True)
     sources = {}
-    for variant in ("simt", "mma"):
+    for variant in VARIANTS:
         source_root = build_root / f"source-{variant}"
         extract_source(repo_root, source_root)
-        force_variant(source_root, variant)
-        build_library(source_root, build_root / f"build-{variant}")
+        if variant != "automatic":
+            force_variant(source_root, variant)
+        build_library(source_root, build_root / f"build-{variant}", compute_capability)
         sources[variant] = source_root
 
-    build_library(repo_root, build_root / "build-automatic")
     cuda_version = "".join(torch.version.cuda.split(".")[:2])
     libraries = {
         variant: source_root / "bitsandbytes" / f"libbitsandbytes_cuda{cuda_version}.so"
@@ -169,7 +177,7 @@ def prepare_libraries(repo_root, build_root):
     for path in libraries.values():
         if not path.is_file():
             raise FileNotFoundError(path)
-    return libraries
+    return sources, libraries
 
 
 def load_library(path):
@@ -358,13 +366,25 @@ def main():
     commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=repo_root, check=True, capture_output=True, text=True
     ).stdout.strip()
-    libraries_paths = prepare_libraries(repo_root, args.build_root.resolve())
+    source_roots, library_paths = prepare_libraries(
+        repo_root,
+        args.build_root.resolve(),
+        args.compute_capability,
+    )
 
+    sys.path.insert(0, str(source_roots["automatic"]))
     import bitsandbytes
     from bitsandbytes import functional
     from bitsandbytes.backends.cuda.ops import _gemm_4bit_use_custom_cuda
 
-    libraries = {variant: load_library(path) for variant, path in libraries_paths.items()}
+    automatic_library_name = getattr(getattr(bitsandbytes.cextension.lib, "_lib", None), "_name", None)
+    if not automatic_library_name:
+        raise RuntimeError("automatic bitsandbytes native library path is unavailable")
+    automatic_library = Path(automatic_library_name).resolve()
+    if automatic_library != library_paths["automatic"].resolve():
+        raise RuntimeError(f"expected automatic library {library_paths['automatic']}, loaded {automatic_library}")
+
+    libraries = {variant: load_library(library_paths[variant]) for variant in ("simt", "mma")}
     entrypoints = {
         variant: ct.cast(library.cgemm_4bit_fp16, ct.c_void_p).value for variant, library in libraries.items()
     }
@@ -388,9 +408,10 @@ def main():
         "torch": torch.__version__,
         "torch_cuda": torch.version.cuda,
         "bitsandbytes": bitsandbytes.__version__,
-        "automatic_library": str(getattr(getattr(bitsandbytes.cextension.lib, "_lib", None), "_name", None)),
-        "forced_libraries": {variant: str(path) for variant, path in libraries_paths.items()},
+        "automatic_library": str(automatic_library),
+        "forced_libraries": {variant: str(library_paths[variant]) for variant in ("simt", "mma")},
         "forced_entrypoints_distinct": True,
+        "compute_capability_targets": args.compute_capability,
         "cases": [{"name": name, "n": n, "k": k, "m_values": list(m_values)} for name, n, k, m_values in cases],
         "dtypes": list(dtype_names),
         "warmup": args.warmup,
