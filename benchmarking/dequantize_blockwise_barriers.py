@@ -265,6 +265,14 @@ def make_inputs(numel, dtype, quant_type, blocksize, seed):
     return code, packed, absmax, outputs
 
 
+def traffic_bytes(numel, dtype, quant_type, blocksize):
+    packed_bytes = numel if quant_type == "general8" else (numel + 1) // 2
+    code_bytes = 1024 if quant_type == "general8" else 0
+    absmax_bytes = ((numel + blocksize - 1) // blocksize) * 4
+    output_bytes = numel * torch.empty((), dtype=dtype).element_size()
+    return packed_bytes + code_bytes + absmax_bytes + output_bytes
+
+
 def direct_record(args, libraries, shape, dtype_name, quant_type, blocksize, case):
     dtype = DTYPES[dtype_name]
     numel = math.prod(shape)
@@ -294,6 +302,9 @@ def direct_record(args, libraries, shape, dtype_name, quant_type, blocksize, cas
         raise AssertionError("dequantization changed code")
     repetitions = repetitions_for(numel, args.repetitions)
     stats, round_medians, samples = measure(functions, args.warmup, repetitions, args.rounds)
+    bytes_moved = traffic_bytes(numel, dtype, quant_type, blocksize)
+    for value in stats.values():
+        value["effective_gbps"] = bytes_moved / (value["median_ms"] * 1.0e6)
     ratio = stats[BASELINE]["median_ms"] / stats[CANDIDATE]["median_ms"]
     return {
         "type": "direct_dequant",
@@ -304,6 +315,7 @@ def direct_record(args, libraries, shape, dtype_name, quant_type, blocksize, cas
         "quant_type": quant_type,
         "blocksize": blocksize,
         "repetitions": repetitions,
+        "bytes_moved": bytes_moved,
         "stats": stats,
         "baseline_over_candidate": ratio,
         "round_ratios": [
@@ -438,6 +450,13 @@ def main():
         "warmup": args.warmup,
         "repetitions_max": args.repetitions,
         "rounds": args.rounds,
+        "formats": args.formats,
+        "dtypes": args.dtypes,
+        "shapes": [list(shape) for shape in shapes],
+        "tail_counts": tails,
+        "general8_blocksizes": general8_blocks,
+        "fourbit_blocksizes": fourbit_blocks,
+        "include_user_controls": args.include_user_controls,
         "build_seconds": build_seconds,
         "library_bytes": {name: path.stat().st_size for name, path in paths.items()},
         "libraries": {name: str(path) for name, path in paths.items()},
