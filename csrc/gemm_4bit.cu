@@ -96,8 +96,9 @@ static void gemm_4bit(
 
     // GDDR tall-K (K>N): K-loop too long relative to output tile at small M.
     const bool tall_k_simt = gddr_arch && K > N && M <= 17 && mma_blocks * 3 < num_sms;
-    // B300 at >=3 waves: SIMT wins for the two smallest fused tall-K shapes.
-    const bool sm103_tall_k_simt = cc_maj == 10 && cc_min == 3 && K > N && M <= 5 && mma_blocks >= num_sms * 3;
+    // B300 at 3-4 waves: SIMT wins for the two smallest fused tall-K shapes.
+    const bool sm103_tall_k_simt =
+        cc_maj == 10 && cc_min == 3 && K > N && M <= 5 && mma_blocks >= num_sms * 3 && mma_blocks < num_sms * 4;
 
     const bool use_simt = (M == 4 && highbw_gddr) || undersubscribed || wide_n_simt || tall_k_simt ||
                           sm103_tall_k_simt || (M <= 16 && mma_blocks * 4 <= num_sms) ||

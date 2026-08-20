@@ -286,7 +286,7 @@ def automatic_internal_path(m, n, k, num_sms):
         return "simt"
     blocks = ((m + 31) // 32) * ((n + 63) // 64)
     undersubscribed = (m <= 8 and blocks * 3 <= num_sms * 2) or (m == 4 and blocks <= num_sms)
-    sm103_tall_k_simt = k > n and m <= 5 and blocks >= num_sms * 3
+    sm103_tall_k_simt = k > n and m <= 5 and num_sms * 3 <= blocks < num_sms * 4
     use_simt = (
         undersubscribed
         or sm103_tall_k_simt
