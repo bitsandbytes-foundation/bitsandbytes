@@ -36,21 +36,19 @@ class TestLLMInt8Ops:
 
         opcheck(torch.ops.bitsandbytes.int8_linear_matmul.out, (A, B, out))
 
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("threshold", [0.0, 6.0])
     @pytest.mark.parametrize("device", get_available_devices())
-    def test_int8_vectorwise_quant(self, threshold, device):
-        A = torch.randn(10, 20, dtype=torch.float16, device=device)
+    def test_int8_vectorwise_quant(self, dtype, threshold, device):
+        A = torch.randn(10, 20, dtype=dtype, device=device)
         A[1][0] = 1000.0
-
         out_row, row_stats, outlier_cols = torch.ops.bitsandbytes.int8_vectorwise_quant(A, threshold=threshold)
-
         assert out_row.shape == (10, 20)
         assert out_row.dtype == torch.int8
         assert out_row.device == A.device
         assert row_stats.shape == (10,)
         assert row_stats.dtype == torch.float32
         assert row_stats.device == A.device
-
         if threshold > 0.0:
             assert outlier_cols is not None
             assert outlier_cols.dim() == 1
@@ -58,7 +56,6 @@ class TestLLMInt8Ops:
             assert outlier_cols.device == A.device
         else:
             assert outlier_cols is None
-
         opcheck(torch.ops.bitsandbytes.int8_vectorwise_quant, (A,))
         opcheck(torch.ops.bitsandbytes.int8_vectorwise_quant, (A, threshold))
 
