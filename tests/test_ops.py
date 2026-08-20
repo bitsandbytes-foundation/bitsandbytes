@@ -187,6 +187,31 @@ class Test4bitBlockwiseQuantOps:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [64, 128])
+    def test_dequantize_4bit_1d_shape(self, device, dtype, quant_type, blocksize):
+        """1-D inputs must round-trip to 1-D outputs.
+
+        The output shape contract is the `shape` argument itself: the registered
+        fake kernel returns torch.empty(shape), and the CUDA/default/MPS backends
+        allocate the output that way. Regression test for the CPU native path
+        returning (1, n) for even-length 1-D shapes.
+        """
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
+            pytest.skip("This configuration is not supported on HPU.")
+
+        shape = (blocksize * 2,)
+        A = torch.randn(shape, dtype=dtype, device=device)
+
+        packed, absmax = torch.ops.bitsandbytes.quantize_4bit(A, blocksize, quant_type, torch.uint8)
+        out = torch.ops.bitsandbytes.dequantize_4bit(packed, absmax, blocksize, quant_type, shape, dtype)
+
+        assert out.shape == shape
+        assert out.dtype == dtype
+        assert out.device == A.device
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512])
