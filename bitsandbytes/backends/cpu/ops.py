@@ -169,9 +169,10 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-        if len(shape) == 1:
-            shape = (1, shape[0])
-
+        # The kernel views the input as a 2-D (m, n) matrix, with m == 1 for 1-D
+        # inputs. The output buffer keeps the caller-provided shape: the
+        # CUDA/default/MPS backends and the registered fake kernel all return
+        # exactly `shape`.
         m = prod(shape[:-1])
         n = shape[-1]
 
