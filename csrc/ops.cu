@@ -284,11 +284,6 @@ int igemmlt(
     bnb_blasLt_handle_t ltHandle, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale,
     int lda, int ldb, int ldc, bnb_stream_t stream
 ) {
-
-#if BNB_HIP && defined(NO_HIPBLASLT)
-    return ERR_NOT_IMPLEMENTED;
-#else
-
     // Calculate C = A^T @ B, in col-major layout.
     //
     // Use the IMMA kernels requires:
@@ -400,7 +395,6 @@ int igemmlt(
         printf("error detected");
 
     return has_error;
-#endif // NO_HIPBLASLT
 }
 
 int fill_up_to_nearest_multiple(int value, int multiple) {

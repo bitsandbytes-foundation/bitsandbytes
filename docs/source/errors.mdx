@@ -23,15 +23,18 @@ If this does not work, please open an issue and paste the printed environment if
 
 ## Library not found: version mismatch
 
-The library filename encodes the version: `libbitsandbytes_cuda{major}{minor}` for CUDA, `libbitsandbytes_rocm{major}{minor}` for ROCm. bitsandbytes selects which one to load based on what PyTorch reports:
+The library filename encodes the version by concatenating major and minor: `libbitsandbytes_cuda{major}{minor}` for CUDA and `libbitsandbytes_rocm{major}{minor}` for ROCm. bitsandbytes selects which one to load based on what PyTorch reports:
 
 ```python
 import torch
 print(torch.version.cuda)  # e.g. "12.8" -> looks for libbitsandbytes_cuda128
-print(torch.version.hip)   # e.g. "7.2"  -> looks for libbitsandbytes_rocm72
+print(getattr(torch.version, "rocm", None) or torch.version.hip)
+# e.g. "7.14" -> looks for libbitsandbytes_rocm714
 ```
 
 bitsandbytes will automatically fall back to the closest available pre-compiled version if an exact match is not found, and log a warning. For example, if your PyTorch was built with CUDA 12.9 but bitsandbytes only ships 12.8, it will load 12.8 automatically.
+
+ROCm may also fall back across major release numbers, preferring the newest available lower release and then the oldest newer release. Compatibility is not guaranteed: a binary from another major release may not contain code for your GPU architecture. A cross-major fallback therefore emits a stronger warning. Compile from source or set `BNB_ROCM_VERSION` if the selected binary fails to load or launch kernels.
 
 If you see an error like `No compatible CUDA library found`, it means no compatible pre-compiled library could be found at all. To resolve this:
 
@@ -44,4 +47,4 @@ If you see an error like `No compatible CUDA library found`, it means no compati
    # Windows (cmd)
    set BNB_CUDA_VERSION=128
    ```
-   The value must be digits only, e.g. `128` for CUDA 12.8 or `72` for ROCm 7.2.
+   Both backends accept dotted versions and compact shortcodes, for example `12.8` or `128` for CUDA and `7.14` or `714` for ROCm.

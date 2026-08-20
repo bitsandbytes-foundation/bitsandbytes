@@ -1,27 +1,27 @@
 #!/bin/bash
 set -xeuo pipefail
 
-: "${RUNNER_OS:?RUNNER_OS must be set (Linux/Windows)}"
-: "${ROCM_VERSION:?ROCM_VERSION must be set}"
-
 rocm_version_at_least() {
-    local required_version="$1"
-    local current_major current_minor required_major required_minor
+    local required_major required_minor
 
-    IFS=. read -r current_major current_minor _ <<< "${ROCM_VERSION}"
-    IFS=. read -r required_major required_minor _ <<< "${required_version}"
-
-    if ((current_major > required_major)); then
-        return 0
-    fi
-    if ((current_major < required_major)); then
-        return 1
-    fi
-    if ((current_minor >= required_minor)); then
-        return 0
-    fi
-    return 1
+    IFS=. read -r required_major required_minor <<< "$1"
+    ((rocm_version_major > required_major ||
+        (rocm_version_major == required_major && rocm_version_minor >= required_minor)))
 }
+
+if [[ "${RUNNER_OS:-}" != "Linux" && "${RUNNER_OS:-}" != "Windows" ]]; then
+    echo "Invalid RUNNER_OS '${RUNNER_OS:-<unset>}'; expected Linux or Windows." >&2
+    exit 1
+fi
+
+if [[ ! "${ROCM_VERSION:-}" =~ ^([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]]; then
+    echo "Invalid ROCM_VERSION '${ROCM_VERSION:-<unset>}'; expected a dotted ROCm release." >&2
+    exit 1
+fi
+
+rocm_version_major="$((10#${BASH_REMATCH[1]}))"
+rocm_version_minor="$((10#${BASH_REMATCH[2]}))"
+rocm_version_tag="${rocm_version_major}${rocm_version_minor}"
 
 bnb_rocm_arch="gfx90a;gfx942;gfx1100;gfx1101;gfx1102;gfx1103"
 
@@ -35,14 +35,9 @@ if rocm_version_at_least "7.0"; then
     bnb_rocm_arch="${bnb_rocm_arch};gfx950"
 fi
 
-# ROCm 7.14+ - Add CDNA1 and RDNA2 targets.
+# ROCm 7.14+ - Add CDNA1, CDNA5, and RDNA2 targets.
 if rocm_version_at_least "7.14"; then
-    bnb_rocm_arch="${bnb_rocm_arch};gfx908;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
-fi
-
-# ROCm 7.14+ - Add CDNA5 (gfx1250).
-if rocm_version_at_least "7.14"; then
-    bnb_rocm_arch="${bnb_rocm_arch};gfx1250"
+    bnb_rocm_arch="${bnb_rocm_arch};gfx908;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1250"
 fi
 
 if [ "${RUNNER_OS}" == "Linux" ]; then
@@ -55,7 +50,7 @@ if [ "${RUNNER_OS}" == "Linux" ]; then
     docker run --rm -i \
         -w /src -v "$PWD:/src" "$image" sh -c \
         "pip install cmake==3.31.6 \
-      && cmake -DCOMPUTE_BACKEND=hip -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_HIP_FLAGS=\"--offload-compress\" -DBNB_ROCM_ARCH=\"${bnb_rocm_arch}\" . \
+      && cmake -DCOMPUTE_BACKEND=hip -DROCM_VERSION=\"${ROCM_VERSION}\" -DCMAKE_BUILD_TYPE=MinSizeRel -DCMAKE_HIP_FLAGS=\"--offload-compress\" -DBNB_ROCM_ARCH=\"${bnb_rocm_arch}\" . \
       && cmake --build . --parallel"
 else
     bnb_rocm_arch="gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1200;gfx1201"
@@ -84,6 +79,7 @@ else
 
     cmake -G Ninja \
         -DCOMPUTE_BACKEND=hip \
+        -DROCM_VERSION="${ROCM_VERSION}" \
         -DBNB_ROCM_ARCH="${bnb_rocm_arch}" \
         -DCMAKE_BUILD_TYPE=MinSizeRel \
         -DCMAKE_HIP_FLAGS="--offload-compress" \
@@ -94,4 +90,17 @@ fi
 
 output_dir="output/${RUNNER_OS}/X64"
 mkdir -p "${output_dir}"
-(shopt -s nullglob && cp bitsandbytes/*.{so,dylib,dll} "${output_dir}")
+
+libraries=()
+for extension in so dylib dll; do
+    library="bitsandbytes/libbitsandbytes_rocm${rocm_version_tag}.${extension}"
+    [ -f "${library}" ] && libraries+=("${library}")
+done
+
+if [ "${#libraries[@]}" -eq 0 ]; then
+    expected_pattern="bitsandbytes/libbitsandbytes_rocm${rocm_version_tag}.{so,dylib,dll}"
+    echo "Expected ROCm ${ROCM_VERSION} library was not built: ${expected_pattern}" >&2
+    exit 1
+fi
+
+cp "${libraries[@]}" "${output_dir}/"
