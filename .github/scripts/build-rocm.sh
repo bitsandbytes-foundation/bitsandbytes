@@ -23,7 +23,7 @@ rocm_version_at_least() {
     return 1
 }
 
-bnb_rocm_arch="gfx90a;gfx942;gfx1100;gfx1101;gfx1102;gfx1103"
+bnb_rocm_arch="gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103"
 
 # ROCm 6.4+ - Add RDNA4 and RDNA3.5 targets. Note we assume >=6.4.4.
 if rocm_version_at_least "6.4"; then
@@ -35,9 +35,9 @@ if rocm_version_at_least "7.0"; then
     bnb_rocm_arch="${bnb_rocm_arch};gfx950"
 fi
 
-# ROCm 7.14+ - Add CDNA1 and RDNA2 targets.
+# ROCm 7.14+ - Add RDNA1 and additional RDNA2 targets.
 if rocm_version_at_least "7.14"; then
-    bnb_rocm_arch="${bnb_rocm_arch};gfx908;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
+    bnb_rocm_arch="${bnb_rocm_arch};gfx1010;gfx1011;gfx1012;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036"
 fi
 
 # ROCm 7.14+ - Add CDNA5 (gfx1250).
@@ -61,8 +61,8 @@ else
     bnb_rocm_arch="gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1200;gfx1201"
 
     if rocm_version_at_least "7.14"; then
-        # Add RDNA2 and additional RDNA3.5 targets.
-        bnb_rocm_arch="${bnb_rocm_arch};gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1152;gfx1153"
+        # Add the remaining targets available from the Windows multi-architecture index.
+        bnb_rocm_arch="${bnb_rocm_arch};gfx908;gfx90a;gfx1010;gfx1011;gfx1012;gfx1030;gfx1031;gfx1032;gfx1033;gfx1034;gfx1035;gfx1036;gfx1103;gfx1152;gfx1153"
 
         pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,devel]==${ROCM_VERSION}"
     else
