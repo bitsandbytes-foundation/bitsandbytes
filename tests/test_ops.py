@@ -374,6 +374,66 @@ class Test4bitBlockwiseQuantOps:
         )
         torch.testing.assert_close(out, ref)
 
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    def test_gemm_4bit_nested_fallback_sm103(self, device, dtype, quant_type, monkeypatch):
+        if device != "cuda":
+            pytest.skip("The nested CUDA specialization is only available on SM103")
+
+        from bitsandbytes.backends.cuda import ops as cuda_ops
+
+        if not cuda_ops._dequantize_4bit_nested_supported(torch.cuda.current_device()):
+            pytest.skip("The nested CUDA specialization is only selected on SM103")
+
+        n, k, blocksize = 64, 64, 64
+        activation = torch.randn((5, k), dtype=dtype, device=device)
+        weight = torch.randn((n, k), dtype=dtype, device=device)
+        packed, state = bitsandbytes.functional.quantize_4bit(
+            weight,
+            blocksize=blocksize,
+            quant_type=quant_type,
+            compress_statistics=True,
+        )
+        bias = torch.randn((n,), dtype=dtype, device=device)
+
+        legacy_absmax = bitsandbytes.functional.dequantize_blockwise(state.absmax, state.state2)
+        legacy_absmax += state.offset
+        legacy_weight = torch.ops.bitsandbytes.dequantize_4bit.default(
+            packed,
+            legacy_absmax.float(),
+            blocksize,
+            quant_type,
+            list(weight.shape),
+            dtype,
+        )
+        reference = torch.nn.functional.linear(activation, legacy_weight, bias)
+
+        calls = 0
+        nested_impl = cuda_ops._dequantize_4bit_nested_impl
+
+        def counted_nested_impl(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return nested_impl(*args, **kwargs)
+
+        monkeypatch.setattr(cuda_ops, "_dequantize_4bit_nested_impl", counted_nested_impl)
+        actual = cuda_ops._dequant_linear_fallback(
+            activation,
+            packed,
+            list(weight.shape),
+            state.state2.absmax,
+            blocksize,
+            quant_type,
+            bias,
+            absmax_8bit=state.absmax,
+            absmax_code=state.state2.code,
+            absmax_offset=state.offset,
+        )
+
+        assert calls == 1
+        assert torch.equal(actual, reference)
+
 
 class TestNonContiguousInputs:
     """Regression tests for #1342 and #1690: quantization must handle non-contiguous tensors correctly."""
