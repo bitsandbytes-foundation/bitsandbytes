@@ -2,7 +2,7 @@
 #
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 import ctypes as ct
 import itertools
 from math import prod
@@ -859,6 +859,102 @@ def get_4bit_type(typename, device=None, blocksize=64):
     return data
 
 
+# CUDA/C++ 4-bit kernels take `const int n` (int32). numel() == 2**31
+# (e.g. fused MoE expert weights [128, 4096, 4096]) overflows and fails
+# with cudaErrorInvalidArgument. Chunk on a blocksize-aligned split.
+# Kernel-level int64 indexing is tracked in #1785.
+_INT32_MAX = 2**31 - 1
+
+
+def _max_int32_chunk_numel(blocksize: int) -> int:
+    n = (_INT32_MAX // blocksize) * blocksize
+    return n if n > 0 else blocksize
+
+
+def _quantize_4bit_op(
+    A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
+) -> tuple[torch.Tensor, torch.Tensor]:
+    n = A.numel()
+    if n <= _INT32_MAX:
+        return torch.ops.bitsandbytes.quantize_4bit.default(A, blocksize, quant_type, quant_storage)
+
+    max_chunk = _max_int32_chunk_numel(blocksize)
+    n_blocks = (n + blocksize - 1) // blocksize
+    n_packed = (n + 1) // (quant_storage.itemsize * 2)
+    out = torch.empty((n_packed, 1), device=A.device, dtype=quant_storage)
+    absmax = torch.empty((n_blocks,), device=A.device, dtype=torch.float32)
+
+    flat = A.reshape(-1)
+    elem_off = 0
+    pack_off = 0
+    abs_off = 0
+    while elem_off < n:
+        n_chunk = min(max_chunk, n - elem_off)
+        q_chunk, am_chunk = torch.ops.bitsandbytes.quantize_4bit.default(
+            flat[elem_off : elem_off + n_chunk],
+            blocksize,
+            quant_type,
+            quant_storage,
+        )
+        n_pack = q_chunk.numel()
+        n_am = am_chunk.numel()
+        out.view(-1)[pack_off : pack_off + n_pack].copy_(q_chunk.reshape(-1))
+        absmax[abs_off : abs_off + n_am].copy_(am_chunk.reshape(-1))
+        elem_off += n_chunk
+        pack_off += n_pack
+        abs_off += n_am
+
+    return out, absmax
+
+
+def _dequantize_4bit_op(
+    A: torch.Tensor,
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+    out: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    n = int(prod(shape))
+    if n <= _INT32_MAX:
+        if out is not None:
+            torch.ops.bitsandbytes.dequantize_4bit.out(A, absmax, blocksize, quant_type, shape, dtype, out=out)
+            return out
+        return torch.ops.bitsandbytes.dequantize_4bit.default(A, absmax, blocksize, quant_type, shape, dtype)
+
+    max_chunk = _max_int32_chunk_numel(blocksize)
+    result = out if out is not None else torch.empty(shape, dtype=dtype, device=A.device)
+    flat_out = result.reshape(-1)
+    packed = A.reshape(-1)
+    packed_itemsize = A.element_size()
+
+    elem_off = 0
+    pack_off = 0
+    abs_off = 0
+    while elem_off < n:
+        n_chunk = min(max_chunk, n - elem_off)
+        n_blocks = (n_chunk + blocksize - 1) // blocksize
+        n_packed = (n_chunk + 1) // (packed_itemsize * 2)
+        # Column vector so dequantize_4bit's A.shape[0] == 1 transpose shim cannot fire
+        # if a future caller routes chunks through the Python wrapper.
+        chunk_A = packed[pack_off : pack_off + n_packed].reshape(-1, 1)
+        chunk_dq = torch.ops.bitsandbytes.dequantize_4bit.default(
+            chunk_A,
+            absmax[abs_off : abs_off + n_blocks],
+            blocksize,
+            quant_type,
+            (n_chunk,),
+            dtype,
+        )
+        flat_out[elem_off : elem_off + n_chunk].copy_(chunk_dq.reshape(-1))
+        elem_off += n_chunk
+        pack_off += n_packed
+        abs_off += n_blocks
+
+    return result
+
+
 def quantize_fp4(
     A: torch.Tensor,
     absmax: Optional[torch.Tensor] = None,
@@ -926,12 +1022,7 @@ def quantize_4bit(
 
     input_shape = A.shape
 
-    _out, _absmax = torch.ops.bitsandbytes.quantize_4bit.default(
-        A,
-        blocksize,
-        quant_type,
-        quant_storage,
-    )
+    _out, _absmax = _quantize_4bit_op(A, blocksize, quant_type, quant_storage)
 
     code = get_4bit_type(quant_type, device=A.device)
 
@@ -1055,19 +1146,15 @@ def dequantize_4bit(
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-    if out is not None:
-        torch.ops.bitsandbytes.dequantize_4bit.out(
-            A, absmax, quant_state.blocksize, quant_state.quant_type, quant_state.shape, quant_state.dtype, out=out
-        )
-    else:
-        out = torch.ops.bitsandbytes.dequantize_4bit.default(
-            A,
-            absmax,
-            quant_state.blocksize,
-            quant_state.quant_type,
-            quant_state.shape,
-            quant_state.dtype,
-        )
+    out = _dequantize_4bit_op(
+        A,
+        absmax,
+        quant_state.blocksize,
+        quant_state.quant_type,
+        quant_state.shape,
+        quant_state.dtype,
+        out=out,
+    )
 
     # BC shim: callers that pass the packed weight in transposed [1, (N*K+1)//2] form
     # receive the output transposed back to [K, N]. bnb's own paths no longer trigger

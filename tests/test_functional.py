@@ -702,7 +702,8 @@ class TestQuantize4BitFunctional:
     def test_4bit_quant_large(self, device, dtype, quant_type, blocksize):
         """
         Test that we can successfully quantize a large tensor. Note that the following limitations apply:
-        - On CUDA/XPU/ROCm, the maximum number of elements is limited to 2**31 - 1 due to int32 indexing in C++ kernels.
+        - CUDA/C++ 4-bit kernels take int32 `n`; tensors with numel() > 2**31 - 1 are
+          chunked in `quantize_4bit` / `dequantize_4bit` (see #1785).
         - On CUDA, this test requires ~10GiB of memory for fp32
         - On CPU, there is a significantly higher memory overhead for the quantization, so we skip this test.
         - Verification of the accuracy for dequantization has too high memory overhead for this test.
@@ -724,6 +725,69 @@ class TestQuantize4BitFunctional:
 
         assert dq.dtype == dtype
         assert dq.numel() == 2**31 - 1
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [64, 128], ids=id_formatter("blocksize"))
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
+    @pytest.mark.parametrize("compress_statistics", [False, True])
+    def test_4bit_quant_chunks_above_int32_limit(
+        self, monkeypatch, device, quant_type, blocksize, dtype, compress_statistics
+    ):
+        """Chunked 4-bit path must match a single kernel launch.
+
+        Kernels cannot take numel() > int32. Lower the threshold so the
+        chunked path runs on small tensors instead of allocating 2**31 elements.
+        """
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype):
+            pytest.skip("This configuration is not supported on HPU.")
+
+        # Two full chunks plus a short remainder, including a 3-D MoE-style layout.
+        monkeypatch.setattr(F, "_INT32_MAX", 4 * blocksize)
+        A = torch.randn(3, 5, 7 * blocksize + 13, device=device, dtype=dtype)
+
+        q_chunked, state_chunked = F.quantize_4bit(
+            A, blocksize=blocksize, quant_type=quant_type, compress_statistics=compress_statistics
+        )
+
+        monkeypatch.setattr(F, "_INT32_MAX", 2**31 - 1)
+        q_ref, state_ref = F.quantize_4bit(
+            A, blocksize=blocksize, quant_type=quant_type, compress_statistics=compress_statistics
+        )
+
+        torch.testing.assert_close(q_chunked, q_ref, rtol=0, atol=0)
+        assert state_chunked.shape == A.shape
+        assert tuple(state_chunked.shape) == tuple(state_ref.shape)
+        assert state_chunked.blocksize == blocksize
+        assert state_chunked.quant_type == quant_type
+        assert state_chunked.dtype == dtype
+        assert state_chunked.nested is compress_statistics
+
+        dq_chunked = F.dequantize_4bit(q_chunked, state_chunked)
+        dq_ref = F.dequantize_4bit(q_ref, state_ref)
+        torch.testing.assert_close(dq_chunked, dq_ref, rtol=0, atol=0)
+        assert dq_chunked.shape == A.shape
+        assert dq_chunked.dtype == dtype
+
+        monkeypatch.setattr(F, "_INT32_MAX", 4 * blocksize)
+        dq_chunked_limit = F.dequantize_4bit(q_ref, state_ref)
+        torch.testing.assert_close(dq_chunked_limit, dq_ref, rtol=0, atol=0)
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_4bit_quant_chunks_respects_out_and_quant_storage(self, monkeypatch, device):
+        monkeypatch.setattr(F, "_INT32_MAX", 256)
+        A = torch.randn(400, device=device, dtype=torch.float16)
+        storage = torch.uint8
+        n_packed = (A.numel() + 1) // (storage.itemsize * 2)
+        out = torch.empty((n_packed, 1), device=device, dtype=storage)
+
+        q, state = F.quantize_4bit(A, blocksize=64, quant_type="nf4", out=out, quant_storage=storage)
+        assert q.data_ptr() == out.data_ptr()
+
+        dq_out = torch.empty_like(A)
+        dq = F.dequantize_4bit(q, state, out=dq_out)
+        assert dq.data_ptr() == dq_out.data_ptr()
+        torch.testing.assert_close(dq, F.dequantize_4bit(q, state))
 
     # @pytest.mark.parametrize("quant_type", ['fp4', 'nf4'])
     @pytest.mark.parametrize("quant_type", ["nf4"])
