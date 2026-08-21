@@ -20,7 +20,63 @@ class TestLLMInt8Ops:
         assert out.dtype == torch.int32
         assert out.device == A.device
 
+        ref = torch.matmul(A.float(), B.t().float()).to(torch.int32)
+        torch.testing.assert_close(out, ref)
+
         opcheck(torch.ops.bitsandbytes.int8_linear_matmul.default, (A, B))
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_int8_linear_matmul_preserves_quant_stats(self, device):
+        """Regression: int8 matmul must use the (hip|cublas)Lt handle, not the BLAS handle.
+
+        Passing a rocblas/cublas handle to hipBLASLt/cuBLASLt caused OOB writes that
+        corrupted unrelated float32 quantization stats sitting in GPU memory.
+        """
+        if device == "cpu":
+            pytest.skip("int8 Lt matmul is GPU-only")
+
+        torch.manual_seed(0)
+        rows, inner, out_features = 256, 128, 64
+        activations = torch.randn(rows, inner, device=device)
+        weights = torch.randn(out_features, inner, device=device)
+        row_stats = torch.amax(torch.abs(activations), dim=1, keepdim=True)
+        col_stats = torch.amax(torch.abs(weights), dim=1, keepdim=True)
+        row_stats_before = row_stats.clone()
+        col_stats_before = col_stats.clone()
+
+        activations_q = torch.round(activations * (127.0 / row_stats)).to(torch.int8)
+        weights_q = torch.round(weights * (127.0 / col_stats)).to(torch.int8)
+
+        out = torch.ops.bitsandbytes.int8_linear_matmul.default(activations_q, weights_q)
+        torch.cuda.synchronize()
+
+        assert out.shape == (rows, out_features)
+        assert not torch.isnan(out.float()).any()
+        torch.testing.assert_close(row_stats, row_stats_before)
+        torch.testing.assert_close(col_stats, col_stats_before)
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_int8_scaled_mm_matches_reference(self, device):
+        """int8_scaled_mm composes Lt int8 matmul + dequant; validate end-to-end numerics."""
+        if device == "cpu":
+            pytest.skip("int8 Lt matmul is GPU-only")
+
+        torch.manual_seed(0)
+        rows, inner, out_features = 256, 128, 64
+        activations = torch.randn(rows, inner, device=device, dtype=torch.float16)
+        weights = torch.randn(out_features, inner, device=device, dtype=torch.float16)
+        row_stats = torch.amax(torch.abs(activations.float()), dim=1)
+        col_stats = torch.amax(torch.abs(weights.float()), dim=1)
+        activations_q = torch.round(activations.float() * (127.0 / row_stats.view(-1, 1))).to(torch.int8)
+        weights_q = torch.round(weights.float() * (127.0 / col_stats.view(-1, 1))).to(torch.int8)
+
+        out = torch.ops.bitsandbytes.int8_scaled_mm.default(
+            activations_q, weights_q, row_stats, col_stats, bias=None, dtype=torch.float16
+        )
+        ref = torch.matmul(activations, weights.t())
+
+        assert out.isfinite().all()
+        assert (out - ref).abs().mean() < 0.1
 
     @pytest.mark.parametrize("device", get_available_devices())
     def test_int8_linear_matmul_out(self, device):
