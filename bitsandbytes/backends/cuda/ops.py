@@ -1124,7 +1124,11 @@ def _optimizer_update_32bit_impl(
             f"Gradient+optimizer bit data type combination not supported: grad {g.dtype}, optimizer {state1.dtype}",
         )
 
+    is_paged = getattr(state1, "is_paged", False) or (state2 is not None and getattr(state2, "is_paged", False))
+
     with _cuda_device_of(g):
+        # Managed-state prefetches use stream 0, so keep actual paged updates ordered behind them.
+        stream = None if is_paged else _get_raw_stream(g.device.index)
         optim_func(
             get_ptr(g),
             get_ptr(p),
@@ -1144,7 +1148,7 @@ def _optimizer_update_32bit_impl(
             ct.c_float(gnorm_scale),
             ct.c_bool(skip_zeros),
             ct.c_int32(g.numel()),
-            ct.c_void_p(_get_raw_stream(g.device.index)),
+            ct.c_void_p(stream),
         )
 
 
@@ -1217,7 +1221,11 @@ def _optimizer_update_8bit_blockwise_impl(
             f"Unsupported gradient dtype: {g.dtype}. Supported dtypes: torch.float32, torch.float16, torch.bfloat16"
         )
 
+    is_paged = getattr(state1, "is_paged", False) or (state2 is not None and getattr(state2, "is_paged", False))
+
     with _cuda_device_of(g):
+        # Managed-state prefetches use stream 0, so keep actual paged updates ordered behind them.
+        stream = None if is_paged else _get_raw_stream(g.device.index)
         optimizer_fn(
             get_ptr(p),
             get_ptr(g),
@@ -1238,7 +1246,7 @@ def _optimizer_update_8bit_blockwise_impl(
             ct.c_float(gnorm_scale),
             ct.c_bool(skip_zeros),
             ct.c_int32(g.numel()),
-            ct.c_void_p(_get_raw_stream(g.device.index)),
+            ct.c_void_p(stream),
         )
 
 

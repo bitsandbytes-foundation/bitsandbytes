@@ -11,16 +11,26 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _optimizer_update_32bit(g, p, state1, state2):
+def _optimizer_update_32bit(
+    g,
+    p,
+    state1,
+    state2,
+    *,
+    optimizer_name="adam",
+    unorm_vec=None,
+    max_unorm=0.0,
+    param_norm=0.0,
+):
     torch.ops.bitsandbytes.optimizer_update_32bit(
-        "adam",
+        optimizer_name,
         g,
         p,
         state1,
         state2,
-        None,
-        0.0,
-        0.0,
+        unorm_vec,
+        max_unorm,
+        param_norm,
         0.9,
         0.999,
         0.0,
@@ -134,6 +144,90 @@ def test_optimizer_stream_symbols_are_additive_and_selected():
 
     assert cuda_ops.str2optimizer32bit["adam"][0] is lib.cadam32bit_grad_fp32_with_stream
     assert cuda_ops.str2optimizer8bit_blockwise["adam"][0] is lib.cadam_8bit_blockwise_grad_fp32_with_stream
+
+
+def test_paged_optimizer_preserves_default_stream_prefetch_order(monkeypatch):
+    from bitsandbytes.backends.cuda import ops as cuda_ops
+
+    p = torch.nn.Parameter(torch.randn(100_000, device="cuda"))
+    optimizer = bnb.optim.PagedAdamW32bit([p], lr=1e-3)
+    p.grad = torch.randn_like(p)
+    optimizer.step()
+
+    state = optimizer.state[p]
+    assert getattr(state["state1"], "is_paged", False)
+    assert getattr(state["state2"], "is_paged", False)
+
+    calls = []
+    real_prefetch = bnb.functional.prefetch_tensor
+    real_optimizers = cuda_ops.str2optimizer32bit["adam"]
+
+    def recording_prefetch(tensor):
+        calls.append(("prefetch", tensor))
+        real_prefetch(tensor)
+
+    def recording_update(*args):
+        calls.append(("update", args[-1].value))
+        return real_optimizers[0](*args)
+
+    monkeypatch.setattr(bnb.functional, "prefetch_tensor", recording_prefetch)
+    monkeypatch.setitem(cuda_ops.str2optimizer32bit, "adam", (recording_update, *real_optimizers[1:]))
+
+    p.grad = torch.randn_like(p)
+    torch.cuda.synchronize()
+    caller = torch.cuda.Stream()
+    with torch.cuda.stream(caller):
+        optimizer.step()
+
+    assert [kind for kind, _ in calls] == ["prefetch", "prefetch", "update"]
+    assert calls[-1][1] is None
+
+
+def test_optimizer_max_unorm_uses_current_stream():
+    torch.manual_seed(0)
+    n = 4097
+    p = torch.randn(n, device="cuda", dtype=torch.float32)
+    g = torch.zeros_like(p)
+    final_g = torch.randn_like(p) * 0.01
+    values = [g, p, torch.zeros_like(p), torch.zeros_like(p), torch.zeros(1, device="cuda")]
+    reference = [value.clone() for value in values]
+    param_norm = p.norm().item()
+
+    reference[0].copy_(final_g)
+    _optimizer_update_32bit(
+        *reference[:4],
+        optimizer_name="lamb",
+        unorm_vec=reference[4],
+        max_unorm=0.5,
+        param_norm=param_norm,
+    )
+    torch.cuda.synchronize()
+
+    blocker = torch.cuda.Stream()
+    caller = torch.cuda.Stream()
+    gate = torch.cuda.Event()
+    done = torch.cuda.Event()
+    with torch.cuda.stream(blocker):
+        torch.cuda._sleep(20_000_000)
+        gate.record()
+    assert not gate.query()
+
+    with torch.cuda.stream(caller):
+        caller.wait_event(gate)
+        values[0].copy_(final_g)
+        _optimizer_update_32bit(
+            *values[:4],
+            optimizer_name="lamb",
+            unorm_vec=values[4],
+            max_unorm=0.5,
+            param_norm=param_norm,
+        )
+        done.record()
+    done.synchronize()
+
+    assert torch.equal(values[0], reference[0])
+    for actual, expected in zip(values[1:], reference[1:]):
+        torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
 
 
 @pytest.mark.parametrize("paged,expected_syncs", [(False, 0), (True, 3)])
