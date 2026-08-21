@@ -561,6 +561,10 @@ def _dequantize_4bit_nested_if_supported(
 
     if out is None:
         out = torch.empty(shape, dtype=dtype, device=A.device)
+    elif out.shape != tuple(shape):
+        raise ValueError(f"Expected out.shape == {shape}, got {out.shape}")
+    elif out.dtype != dtype:
+        raise ValueError(f"Expected out.dtype == {dtype}, got {out.dtype}")
     _dequantize_4bit_nested_impl(
         A,
         absmax_8bit,

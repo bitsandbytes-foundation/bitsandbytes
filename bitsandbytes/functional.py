@@ -1051,7 +1051,7 @@ def dequantize_4bit(
 
     nested_out = None
     if quant_state.nested:
-        if A.is_cuda:
+        if A.is_cuda and not torch.compiler.is_compiling():
             from bitsandbytes.backends.cuda.ops import _dequantize_4bit_nested_if_supported
 
             nested_out = _dequantize_4bit_nested_if_supported(
