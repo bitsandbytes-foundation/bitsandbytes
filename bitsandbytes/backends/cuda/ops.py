@@ -65,6 +65,38 @@ _setup_ctypes(
     [ct.c_void_p] * 4 + [ct.c_int32, ct.c_int32],
 )
 
+# 32-bit optimizer update: (g, p, state1, state2, unorm, optimizer scalars, step, lr, gnorm, skip, n, stream)
+_setup_ctypes(
+    [
+        f"c{name}32bit_grad_{dtype}_with_stream"
+        for name, dtypes in (
+            ("adam", ("fp32", "fp16", "bf16")),
+            ("momentum", ("32", "16")),
+            ("rmsprop", ("32", "16")),
+            ("lion", ("fp32", "fp16", "bf16")),
+            ("adagrad", ("32", "16")),
+            ("ademamix", ("fp32", "fp16", "bf16")),
+        )
+        for dtype in dtypes
+    ],
+    [ct.c_void_p] * 5 + [ct.c_float] * 8 + [ct.c_int32, ct.c_float, ct.c_float, ct.c_bool, ct.c_int32, ct.c_void_p],
+)
+
+# Blockwise 8-bit optimizer update: (p, g, states, scalars, step, lr, maps, absmax, weight decay, gnorm, skip, n, stream)
+_setup_ctypes(
+    [
+        f"c{name}_8bit_blockwise_grad_{dtype}_with_stream"
+        for name in ("adam", "momentum", "rmsprop", "lion", "adagrad", "ademamix")
+        for dtype in ("fp32", "fp16", "bf16")
+    ],
+    [ct.c_void_p] * 4
+    + [ct.c_float] * 5
+    + [ct.c_int32, ct.c_float]
+    + [ct.c_void_p] * 4
+    + [ct.c_float] * 2
+    + [ct.c_bool, ct.c_int32, ct.c_void_p],
+)
+
 
 _get_raw_stream = torch._C._cuda_getCurrentRawStream
 
@@ -985,73 +1017,73 @@ def _(
 """C FUNCTIONS FOR OPTIMIZERS"""
 str2optimizer32bit = {
     "adam": (
-        lib.cadam32bit_grad_fp32,
-        lib.cadam32bit_grad_fp16,
-        lib.cadam32bit_grad_bf16,
+        lib.cadam32bit_grad_fp32_with_stream,
+        lib.cadam32bit_grad_fp16_with_stream,
+        lib.cadam32bit_grad_bf16_with_stream,
     ),
     "momentum": (
-        lib.cmomentum32bit_grad_32,
-        lib.cmomentum32bit_grad_16,
+        lib.cmomentum32bit_grad_32_with_stream,
+        lib.cmomentum32bit_grad_16_with_stream,
     ),
     "rmsprop": (
-        lib.crmsprop32bit_grad_32,
-        lib.crmsprop32bit_grad_16,
+        lib.crmsprop32bit_grad_32_with_stream,
+        lib.crmsprop32bit_grad_16_with_stream,
     ),
     "lion": (
-        lib.clion32bit_grad_fp32,
-        lib.clion32bit_grad_fp16,
-        lib.clion32bit_grad_bf16,
+        lib.clion32bit_grad_fp32_with_stream,
+        lib.clion32bit_grad_fp16_with_stream,
+        lib.clion32bit_grad_bf16_with_stream,
     ),
     "adagrad": (
-        lib.cadagrad32bit_grad_32,
-        lib.cadagrad32bit_grad_16,
+        lib.cadagrad32bit_grad_32_with_stream,
+        lib.cadagrad32bit_grad_16_with_stream,
     ),
     "lamb": (
-        lib.cadam32bit_grad_fp32,
-        lib.cadam32bit_grad_fp16,
-        lib.cadam32bit_grad_bf16,
+        lib.cadam32bit_grad_fp32_with_stream,
+        lib.cadam32bit_grad_fp16_with_stream,
+        lib.cadam32bit_grad_bf16_with_stream,
     ),
     "ademamix": (
-        lib.cademamix32bit_grad_fp32,
-        lib.cademamix32bit_grad_fp16,
-        lib.cademamix32bit_grad_bf16,
+        lib.cademamix32bit_grad_fp32_with_stream,
+        lib.cademamix32bit_grad_fp16_with_stream,
+        lib.cademamix32bit_grad_bf16_with_stream,
     ),
     "lars": (
-        lib.cmomentum32bit_grad_32,
-        lib.cmomentum32bit_grad_16,
+        lib.cmomentum32bit_grad_32_with_stream,
+        lib.cmomentum32bit_grad_16_with_stream,
     ),
 }
 
 str2optimizer8bit_blockwise = {
     "adam": (
-        lib.cadam_8bit_blockwise_grad_fp32,
-        lib.cadam_8bit_blockwise_grad_fp16,
-        lib.cadam_8bit_blockwise_grad_bf16,
+        lib.cadam_8bit_blockwise_grad_fp32_with_stream,
+        lib.cadam_8bit_blockwise_grad_fp16_with_stream,
+        lib.cadam_8bit_blockwise_grad_bf16_with_stream,
     ),
     "momentum": (
-        lib.cmomentum_8bit_blockwise_grad_fp32,
-        lib.cmomentum_8bit_blockwise_grad_fp16,
-        lib.cmomentum_8bit_blockwise_grad_bf16,
+        lib.cmomentum_8bit_blockwise_grad_fp32_with_stream,
+        lib.cmomentum_8bit_blockwise_grad_fp16_with_stream,
+        lib.cmomentum_8bit_blockwise_grad_bf16_with_stream,
     ),
     "rmsprop": (
-        lib.crmsprop_8bit_blockwise_grad_fp32,
-        lib.crmsprop_8bit_blockwise_grad_fp16,
-        lib.crmsprop_8bit_blockwise_grad_bf16,
+        lib.crmsprop_8bit_blockwise_grad_fp32_with_stream,
+        lib.crmsprop_8bit_blockwise_grad_fp16_with_stream,
+        lib.crmsprop_8bit_blockwise_grad_bf16_with_stream,
     ),
     "lion": (
-        lib.clion_8bit_blockwise_grad_fp32,
-        lib.clion_8bit_blockwise_grad_fp16,
-        lib.clion_8bit_blockwise_grad_bf16,
+        lib.clion_8bit_blockwise_grad_fp32_with_stream,
+        lib.clion_8bit_blockwise_grad_fp16_with_stream,
+        lib.clion_8bit_blockwise_grad_bf16_with_stream,
     ),
     "adagrad": (
-        lib.cadagrad_8bit_blockwise_grad_fp32,
-        lib.cadagrad_8bit_blockwise_grad_fp16,
-        lib.cadagrad_8bit_blockwise_grad_bf16,
+        lib.cadagrad_8bit_blockwise_grad_fp32_with_stream,
+        lib.cadagrad_8bit_blockwise_grad_fp16_with_stream,
+        lib.cadagrad_8bit_blockwise_grad_bf16_with_stream,
     ),
     "ademamix": (
-        lib.cademamix_8bit_blockwise_grad_fp32,
-        lib.cademamix_8bit_blockwise_grad_fp16,
-        lib.cademamix_8bit_blockwise_grad_bf16,
+        lib.cademamix_8bit_blockwise_grad_fp32_with_stream,
+        lib.cademamix_8bit_blockwise_grad_fp16_with_stream,
+        lib.cademamix_8bit_blockwise_grad_bf16_with_stream,
     ),
 }
 
@@ -1112,6 +1144,7 @@ def _optimizer_update_32bit_impl(
             ct.c_float(gnorm_scale),
             ct.c_bool(skip_zeros),
             ct.c_int32(g.numel()),
+            ct.c_void_p(_get_raw_stream(g.device.index)),
         )
 
 
@@ -1205,6 +1238,7 @@ def _optimizer_update_8bit_blockwise_impl(
             ct.c_float(gnorm_scale),
             ct.c_bool(skip_zeros),
             ct.c_int32(g.numel()),
+            ct.c_void_p(_get_raw_stream(g.device.index)),
         )
 
 

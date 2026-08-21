@@ -97,7 +97,7 @@ template <typename T, int OPTIMIZER>
 void optimizer32bit(
     T* g, T* p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm, const float beta1,
     const float beta2, const float beta3, const float alpha, const float eps, const float weight_decay, const int step,
-    const float lr, const float gnorm_scale, bool skip_zeros, const int n
+    const float lr, const float gnorm_scale, bool skip_zeros, const int n, bnb_stream_t stream
 ) {
     int num_blocks = n / 4096;
     num_blocks = n % 4096 == 0 ? num_blocks : num_blocks + 1;
@@ -105,13 +105,13 @@ void optimizer32bit(
     case ADAM:
     case ADEMAMIX:
         if (max_unorm > 0.0f) {
-            BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(unorm, 0, 1 * sizeof(float)));
-            kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512>>>(
+            BNB_CHECK_RETURN(BNB_DEVICE_MEMSET_ASYNC(unorm, 0, 1 * sizeof(float), stream));
+            kPreconditionOptimizer32bit2State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512, 0, stream>>>(
                 g, p, state1, state2, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n
             );
             BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
         }
-        kOptimizer32bit2State<T, OPTIMIZER><<<num_blocks, 1024>>>(
+        kOptimizer32bit2State<T, OPTIMIZER><<<num_blocks, 1024, 0, stream>>>(
             g, p, state1, state2, unorm, max_unorm, param_norm, beta1, beta2, beta3, alpha, eps, weight_decay, step, lr,
             gnorm_scale, skip_zeros, n
         );
@@ -121,13 +121,14 @@ void optimizer32bit(
     case RMSPROP:
     case ADAGRAD:
         if (max_unorm > 0.0f) {
-            BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(unorm, 0, 1 * sizeof(float)));
-            kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>
-                <<<num_blocks, 512>>>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+            BNB_CHECK_RETURN(BNB_DEVICE_MEMSET_ASYNC(unorm, 0, 1 * sizeof(float), stream));
+            kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512, 0, stream>>>(
+                g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n
+            );
             BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
         }
 
-        kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(
+        kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024, 0, stream>>>(
             g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale,
             skip_zeros, n
         );
@@ -135,16 +136,17 @@ void optimizer32bit(
         break;
     case LION:
         // in lion, the momentum update after the parameter update
-        kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024>>>(
+        kOptimizer32bit1State<T, OPTIMIZER><<<num_blocks, 1024, 0, stream>>>(
             g, p, state1, unorm, max_unorm, param_norm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale,
             skip_zeros, n
         );
         BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 
         if (max_unorm > 0.0f) {
-            BNB_CHECK_RETURN(BNB_DEVICE_MEMSET(unorm, 0, 1 * sizeof(float)));
-            kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8>
-                <<<num_blocks, 512>>>(g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n);
+            BNB_CHECK_RETURN(BNB_DEVICE_MEMSET_ASYNC(unorm, 0, 1 * sizeof(float), stream));
+            kPreconditionOptimizer32bit1State<T, OPTIMIZER, 4096, 8><<<num_blocks, 512, 0, stream>>>(
+                g, p, state1, unorm, beta1, beta2, eps, weight_decay, step, lr, gnorm_scale, n
+            );
             BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
         }
         break;
@@ -160,7 +162,7 @@ template <typename T, int OPTIMIZER>
 void optimizerStatic8bitBlockwise(
     T* p, T* g, unsigned char* state1, unsigned char* state2, float beta1, float beta2, float beta3, float alpha,
     float eps, int step, float lr, float* quantiles1, float* quantiles2, float* absmax1, float* absmax2,
-    float weight_decay, const float gnorm_scale, bool skip_zeros, int n
+    float weight_decay, const float gnorm_scale, bool skip_zeros, int n, bnb_stream_t stream
 ) {
 
     int num_blocks = 0;
@@ -170,7 +172,7 @@ void optimizerStatic8bitBlockwise(
         num_blocks = n / BLOCKSIZE_2STATE;
         num_blocks = n % BLOCKSIZE_2STATE == 0 ? num_blocks : num_blocks + 1;
         kOptimizerStatic8bit2StateBlockwise<T, OPTIMIZER, BLOCKSIZE_2STATE, NUM_2STATE>
-            <<<num_blocks, BLOCKSIZE_2STATE / NUM_2STATE>>>(
+            <<<num_blocks, BLOCKSIZE_2STATE / NUM_2STATE, 0, stream>>>(
                 p, g, state1, state2, beta1, beta2, beta3, alpha, eps, step, lr, quantiles1, quantiles2, absmax1,
                 absmax2, weight_decay, gnorm_scale, skip_zeros, n
             );
@@ -183,7 +185,7 @@ void optimizerStatic8bitBlockwise(
         num_blocks = n / BLOCKSIZE_1STATE;
         num_blocks = n % BLOCKSIZE_1STATE == 0 ? num_blocks : num_blocks + 1;
         kOptimizerStatic8bit1StateBlockwise<T, OPTIMIZER, BLOCKSIZE_1STATE, NUM_1STATE>
-            <<<num_blocks, BLOCKSIZE_1STATE / NUM_1STATE>>>(
+            <<<num_blocks, BLOCKSIZE_1STATE / NUM_1STATE, 0, stream>>>(
                 p, g, state1, beta1, beta2, eps, step, lr, quantiles1, absmax1, weight_decay, gnorm_scale, skip_zeros, n
             );
         BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
@@ -568,7 +570,7 @@ template void dequantizeBlockwise<bnb_bfloat16, NF4>(
         gtype * g, gtype * p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm,           \
         const float beta1, const float beta2, const float beta3, const float alpha, const float eps,                   \
         const float weight_decay, const int step, const float lr, const float gnorm_scale, const bool skip_zeros,      \
-        const int n                                                                                                    \
+        const int n, bnb_stream_t stream                                                                               \
     );
 
 MAKE_optimizer32bit(ADAM, half) MAKE_optimizer32bit(ADAM, float) MAKE_optimizer32bit(ADAM, bnb_bfloat16) MAKE_optimizer32bit(MOMENTUM, half) MAKE_optimizer32bit(MOMENTUM, float) MAKE_optimizer32bit(MOMENTUM, bnb_bfloat16) MAKE_optimizer32bit(RMSPROP, half) MAKE_optimizer32bit(RMSPROP, float) MAKE_optimizer32bit(RMSPROP, bnb_bfloat16) MAKE_optimizer32bit(
@@ -579,7 +581,7 @@ MAKE_optimizer32bit(ADAM, half) MAKE_optimizer32bit(ADAM, float) MAKE_optimizer3
     template void optimizerStatic8bitBlockwise<gtype, optim_name>(                                                     \
         gtype * p, gtype * g, unsigned char* state1, unsigned char* state2, float beta1, float beta2, float beta3,     \
         float alpha, float eps, int step, float lr, float* quantiles1, float* quantiles2, float* absmax1,              \
-        float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n                            \
+        float* absmax2, float weight_decay, const float gnorm_scale, bool skip_zeros, int n, bnb_stream_t stream       \
     );
 
     MAKE_optimizerStatic8bitBlockwise(half, ADAM);
