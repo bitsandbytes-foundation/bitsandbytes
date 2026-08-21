@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import ctypes as ct
 import json
 import os
 from pathlib import Path
@@ -42,6 +43,7 @@ def parse_csv(value, cast=str):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Compare legacy and current-stream non-paged optimizer updates")
+    parser.add_argument("--baseline-library", type=Path, required=True)
     parser.add_argument("--expected-library", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--warmups", type=int, default=10)
@@ -76,14 +78,14 @@ def summarize(values):
     }
 
 
-def build_symbol_maps():
+def build_symbol_maps(baseline_library):
     stream32 = cuda_ops.str2optimizer32bit.copy()
     stream8 = cuda_ops.str2optimizer8bit_blockwise.copy()
     legacy32 = {}
     for name, dtypes in OPTIMIZER_DTYPES_32.items():
         functions = []
         for dtype in dtypes:
-            legacy = getattr(lib, f"c{name}32bit_grad_{dtype}")
+            legacy = getattr(baseline_library, f"c{name}32bit_grad_{dtype}")
             current = getattr(lib, f"c{name}32bit_grad_{dtype}_with_stream")
             functions.append(LegacyFunction(legacy, current))
         legacy32[name] = tuple(functions)
@@ -94,7 +96,7 @@ def build_symbol_maps():
     for name in OPTIMIZER_NAMES_8:
         functions = []
         for dtype in ("fp32", "fp16", "bf16"):
-            legacy = getattr(lib, f"c{name}_8bit_blockwise_grad_{dtype}")
+            legacy = getattr(baseline_library, f"c{name}_8bit_blockwise_grad_{dtype}")
             current = getattr(lib, f"c{name}_8bit_blockwise_grad_{dtype}_with_stream")
             functions.append(LegacyFunction(legacy, current))
         legacy8[name] = tuple(functions)
@@ -345,6 +347,7 @@ def main():
     if args.warmups < 0 or args.rounds < 1:
         raise ValueError("warmups must be nonnegative and rounds must be positive")
     expected_library = args.expected_library.resolve()
+    baseline_library_path = args.baseline_library.resolve()
     loaded_library = Path(lib._lib._name).resolve()
     if loaded_library != expected_library:
         raise AssertionError(f"loaded {loaded_library}, expected {expected_library}")
@@ -352,7 +355,8 @@ def main():
     if "B300" not in props.name or (props.major, props.minor) != (10, 3):
         raise AssertionError(f"expected B300/SM103, got {props.name} CC {props.major}.{props.minor}")
 
-    maps = build_symbol_maps()
+    baseline_library = ct.CDLL(str(baseline_library_path))
+    maps = build_symbol_maps(baseline_library)
     metadata = {
         "type": "metadata",
         "job_id": os.environ.get("SLURM_JOB_ID"),
@@ -362,6 +366,7 @@ def main():
         "torch": torch.__version__,
         "torch_cuda": torch.version.cuda,
         "loaded_library": str(loaded_library),
+        "baseline_library": str(baseline_library_path),
         "warmups": args.warmups,
         "rounds": args.rounds,
     }
