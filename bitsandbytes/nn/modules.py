@@ -1101,7 +1101,7 @@ class Linear8bitLt(nn.Linear):
         # case 1: .cuda was called, SCB is in self.weight
         param_from_weight = getattr(self.weight, scb_name, None)
         # case 2: self.init_8bit_state was called, SCB is in self.state
-        param_from_state = getattr(self.state, scb_name)
+        param_from_state = getattr(self.state, scb_name, None)
 
         key_name = prefix + f"{scb_name}"
 
@@ -1152,7 +1152,7 @@ class Linear8bitLt(nn.Linear):
                 weight_scb.copy_(input_param)
 
                 if self.state.SCB is not None:
-                    self.state.SCB = self.weight.SCB
+                    self.state.SCB = weight_scb
 
                 unexpected_keys.remove(key)
 
@@ -1178,6 +1178,11 @@ class Linear8bitLt(nn.Linear):
         return result
 
     def forward(self, x: torch.Tensor):
+        # If weight is not Int8Params (e.g. due to weight tying with a non-quantized module
+        # like an embedding layer), fall back to regular linear. See issue #1634.
+        if not isinstance(self.weight, Int8Params):
+            return torch.nn.functional.linear(x, self.weight, self.bias)
+
         self.state.is_training = self.training
         if self.weight.CB is not None:
             self.init_8bit_state()
