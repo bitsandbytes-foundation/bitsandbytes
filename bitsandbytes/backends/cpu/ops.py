@@ -43,13 +43,14 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
 
         absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
         out = torch.empty(A.shape, device=A.device, dtype=torch.uint8)
+        out_ptr = out
 
         if A.dtype == torch.float32:
             lib.cquantize_blockwise_cpu_fp32(
                 get_ptr(code),
                 get_ptr(A),
                 get_ptr(absmax),
-                get_ptr(out),
+                get_ptr(out_ptr),
                 ct.c_longlong(blocksize),
                 ct.c_longlong(n),
             )
@@ -58,7 +59,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 get_ptr(code),
                 get_ptr(A),
                 get_ptr(absmax),
-                get_ptr(out),
+                get_ptr(out_ptr),
                 ct.c_longlong(blocksize),
                 ct.c_longlong(n),
             )
@@ -67,7 +68,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 get_ptr(code),
                 get_ptr(A),
                 get_ptr(absmax),
-                get_ptr(out),
+                get_ptr(out_ptr),
                 ct.c_longlong(blocksize),
                 ct.c_longlong(n),
             )
@@ -97,12 +98,13 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
     ) -> torch.Tensor:
         A = A.contiguous()
         out = torch.empty_like(A, dtype=dtype)
+        out_ptr = out
         if dtype == torch.float32:
             lib.cdequantize_blockwise_cpu_fp32(
                 get_ptr(code),
                 get_ptr(A),
                 get_ptr(absmax),
-                get_ptr(out),
+                get_ptr(out_ptr),
                 ct.c_longlong(blocksize),
                 ct.c_longlong(A.numel()),
             )
@@ -111,7 +113,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 get_ptr(code),
                 get_ptr(A),
                 get_ptr(absmax),
-                get_ptr(out),
+                get_ptr(out_ptr),
                 ct.c_longlong(blocksize),
                 ct.c_longlong(A.numel()),
             )
@@ -120,7 +122,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 get_ptr(code),
                 get_ptr(A),
                 get_ptr(absmax),
-                get_ptr(out),
+                get_ptr(out_ptr),
                 ct.c_longlong(blocksize),
                 ct.c_longlong(A.numel()),
             )
@@ -137,7 +139,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         return out
 
     @register_kernel("bitsandbytes::dequantize_4bit", "cpu")
-    def _(
+    def dequantize_4bit_cpu(
         A: torch.Tensor,
         absmax: torch.Tensor,
         blocksize: int,
@@ -169,21 +171,22 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-        if len(shape) == 1:
-            shape = (1, shape[0])
-
         m = prod(shape[:-1])
         n = shape[-1]
 
         A = A.reshape(m, n // 2)
+        
         out = torch.empty(shape, dtype=dtype, device=A.device)
+        out_ptr = out
+        if len(shape) == 1:
+            out_ptr = out.unsqueeze(0)
 
         if quant_type == "fp4":
             if dtype == torch.float32:
                 lib.cdequantize_blockwise_cpu_fp4_fp32(
                     get_ptr(A),
                     get_ptr(absmax),
-                    get_ptr(out),
+                    get_ptr(out_ptr),
                     ct.c_longlong(blocksize),
                     ct.c_longlong(m),
                     ct.c_longlong(n),
@@ -192,7 +195,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 lib.cdequantize_blockwise_cpu_fp4_bf16(
                     get_ptr(A),
                     get_ptr(absmax),
-                    get_ptr(out),
+                    get_ptr(out_ptr),
                     ct.c_longlong(blocksize),
                     ct.c_longlong(m),
                     ct.c_longlong(n),
@@ -201,7 +204,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 lib.cdequantize_blockwise_cpu_fp4_fp16(
                     get_ptr(A),
                     get_ptr(absmax),
-                    get_ptr(out),
+                    get_ptr(out_ptr),
                     ct.c_longlong(blocksize),
                     ct.c_longlong(m),
                     ct.c_longlong(n),
@@ -211,7 +214,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 lib.cdequantize_blockwise_cpu_nf4_fp32(
                     get_ptr(A),
                     get_ptr(absmax),
-                    get_ptr(out),
+                    get_ptr(out_ptr),
                     ct.c_longlong(blocksize),
                     ct.c_longlong(m),
                     ct.c_longlong(n),
@@ -220,7 +223,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 lib.cdequantize_blockwise_cpu_nf4_bf16(
                     get_ptr(A),
                     get_ptr(absmax),
-                    get_ptr(out),
+                    get_ptr(out_ptr),
                     ct.c_longlong(blocksize),
                     ct.c_longlong(m),
                     ct.c_longlong(n),
@@ -229,7 +232,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                 lib.cdequantize_blockwise_cpu_nf4_fp16(
                     get_ptr(A),
                     get_ptr(absmax),
-                    get_ptr(out),
+                    get_ptr(out_ptr),
                     ct.c_longlong(blocksize),
                     ct.c_longlong(m),
                     ct.c_longlong(n),
@@ -296,7 +299,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                         get_ptr(A),
                         get_ptr(B),
                         get_ptr(absmax),
-                        get_ptr(out),
+                        get_ptr(out_ptr),
                         ct.c_int64(blocksize),
                         ct.c_int64(x_strideM),
                         ct.c_int64(out_strideM),
@@ -309,7 +312,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
                         get_ptr(A),
                         get_ptr(B),
                         get_ptr(absmax),
-                        get_ptr(out),
+                        get_ptr(out_ptr),
                         ct.c_int64(blocksize),
                         ct.c_int64(x_strideM),
                         ct.c_int64(out_strideM),
