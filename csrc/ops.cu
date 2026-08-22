@@ -35,39 +35,48 @@ using std::endl;
 
 template <typename T, int STOCHASTIC, int DATA_TYPE>
 void quantizeBlockwise(
-    float* code, T* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+    float* code, T* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n,
+    bnb_stream_t stream
 ) {
     int num_blocks = n / blocksize;
     num_blocks = n % blocksize == 0 ? num_blocks : num_blocks + 1;
 
     if (blocksize == 4096)
         kQuantizeBlockwise<T, 4096, 4, STOCHASTIC, DATA_TYPE>
-            <<<num_blocks, 1024>>>(code, A, absmax, out, rand, rand_offset, n);
+            <<<num_blocks, 1024, 0, stream>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 2048)
-        kQuantizeBlockwise<T, 2048, 4, 0, DATA_TYPE><<<num_blocks, 512>>>(code, A, absmax, out, rand, rand_offset, n);
+        kQuantizeBlockwise<T, 2048, 4, 0, DATA_TYPE>
+            <<<num_blocks, 512, 0, stream>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 1024)
-        kQuantizeBlockwise<T, 1024, 4, 0, DATA_TYPE><<<num_blocks, 256>>>(code, A, absmax, out, rand, rand_offset, n);
+        kQuantizeBlockwise<T, 1024, 4, 0, DATA_TYPE>
+            <<<num_blocks, 256, 0, stream>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 512)
-        kQuantizeBlockwise<T, 512, 2, 0, DATA_TYPE><<<num_blocks, 256>>>(code, A, absmax, out, rand, rand_offset, n);
+        kQuantizeBlockwise<T, 512, 2, 0, DATA_TYPE>
+            <<<num_blocks, 256, 0, stream>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 256)
-        kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE><<<num_blocks, 128>>>(code, A, absmax, out, rand, rand_offset, n);
+        kQuantizeBlockwise<T, 256, 2, 0, DATA_TYPE>
+            <<<num_blocks, 128, 0, stream>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 128)
-        kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE><<<num_blocks, 64>>>(code, A, absmax, out, rand, rand_offset, n);
+        kQuantizeBlockwise<T, 128, 2, 0, DATA_TYPE>
+            <<<num_blocks, 64, 0, stream>>>(code, A, absmax, out, rand, rand_offset, n);
     else if (blocksize == 64) {
         if constexpr (DATA_TYPE > 0) {
             const int ws = bnb_host_warp_size();
             const int num_qb = ws / (64 / 2);
             int grid = (num_blocks + num_qb - 1) / num_qb;
-            kQuantizeBlockwiseSmall<T, 64, DATA_TYPE><<<grid, ws>>>(code, A, absmax, out, rand, rand_offset, n);
+            kQuantizeBlockwiseSmall<T, 64, DATA_TYPE>
+                <<<grid, ws, 0, stream>>>(code, A, absmax, out, rand, rand_offset, n);
         } else {
-            kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE><<<num_blocks, 32>>>(code, A, absmax, out, rand, rand_offset, n);
+            kQuantizeBlockwise<T, 64, 2, 0, DATA_TYPE>
+                <<<num_blocks, 32, 0, stream>>>(code, A, absmax, out, rand, rand_offset, n);
         }
     } else if (blocksize == 32) {
         if constexpr (DATA_TYPE > 0) {
             const int ws = bnb_host_warp_size();
             const int num_qb = ws / (32 / 2);
             int grid = (num_blocks + num_qb - 1) / num_qb;
-            kQuantizeBlockwiseSmall<T, 32, DATA_TYPE><<<grid, ws>>>(code, A, absmax, out, rand, rand_offset, n);
+            kQuantizeBlockwiseSmall<T, 32, DATA_TYPE>
+                <<<grid, ws, 0, stream>>>(code, A, absmax, out, rand, rand_offset, n);
         }
     }
 
@@ -495,44 +504,52 @@ template int igemmlt<8, 1>(
 );
 
 template void quantizeBlockwise<half, 1, General8bit>(
-    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n,
+    bnb_stream_t stream
 );
 template void quantizeBlockwise<half, 0, General8bit>(
-    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n,
+    bnb_stream_t stream
 );
 template void quantizeBlockwise<half, 0, FP4>(
-    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n,
+    bnb_stream_t stream
 );
 template void quantizeBlockwise<half, 0, NF4>(
-    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+    float* code, half* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n,
+    bnb_stream_t stream
 );
 template void quantizeBlockwise<float, 1, General8bit>(
-    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n,
+    bnb_stream_t stream
 );
 template void quantizeBlockwise<float, 0, General8bit>(
-    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n,
+    bnb_stream_t stream
 );
 template void quantizeBlockwise<float, 0, FP4>(
-    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n,
+    bnb_stream_t stream
 );
 template void quantizeBlockwise<float, 0, NF4>(
-    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n
+    float* code, float* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize, const int n,
+    bnb_stream_t stream
 );
 template void quantizeBlockwise<bnb_bfloat16, 1, General8bit>(
     float* code, bnb_bfloat16* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize,
-    const int n
+    const int n, bnb_stream_t stream
 );
 template void quantizeBlockwise<bnb_bfloat16, 0, General8bit>(
     float* code, bnb_bfloat16* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize,
-    const int n
+    const int n, bnb_stream_t stream
 );
 template void quantizeBlockwise<bnb_bfloat16, 0, FP4>(
     float* code, bnb_bfloat16* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize,
-    const int n
+    const int n, bnb_stream_t stream
 );
 template void quantizeBlockwise<bnb_bfloat16, 0, NF4>(
     float* code, bnb_bfloat16* A, float* absmax, unsigned char* out, float* rand, int rand_offset, int blocksize,
-    const int n
+    const int n, bnb_stream_t stream
 );
 
 template void dequantizeBlockwise<float, General8bit>(
