@@ -101,6 +101,14 @@ void dequantizeBlockwise(
     float* code, unsigned char* A, float* absmax, T* out, int block_size, const int n, bnb_stream_t stream
 );
 
+#if BUILD_CUDA
+template <typename T, int DATA_TYPE>
+void dequantizeBlockwiseNested(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, T* out,
+    int block_size, const int n, bnb_stream_t stream
+);
+#endif
+
 template <typename T, int OPTIMIZER>
 void optimizer32bit(
     T* g, T* p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm, float beta1, float beta2,

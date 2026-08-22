@@ -93,6 +93,20 @@ void dequantizeBlockwise(
     BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 }
 
+#if BUILD_CUDA
+template <typename T, int DATA_TYPE>
+void dequantizeBlockwiseNested(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, T* out,
+    int blocksize, const int n, bnb_stream_t stream
+) {
+    constexpr int tile_size = 1024;
+    int grid_blocks = (static_cast<int64_t>(n) + tile_size - 1) / tile_size;
+    kDequantizeBlockwiseNested<T, 512, 64, 8, DATA_TYPE>
+        <<<grid_blocks, 64, 0, stream>>>(A, absmax_8bit, nested_absmax, nested_code, offset, out, blocksize, n);
+    BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
+}
+#endif
+
 template <typename T, int OPTIMIZER>
 void optimizer32bit(
     T* g, T* p, float* state1, float* state2, float* unorm, float max_unorm, float param_norm, const float beta1,
@@ -562,6 +576,33 @@ template void dequantizeBlockwise<bnb_bfloat16, FP4>(
 template void dequantizeBlockwise<bnb_bfloat16, NF4>(
     float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, int blocksize, const int n, bnb_stream_t stream
 );
+
+#if BUILD_CUDA
+template void dequantizeBlockwiseNested<half, FP4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, half* out,
+    int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwiseNested<half, NF4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, half* out,
+    int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwiseNested<float, FP4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, float* out,
+    int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwiseNested<float, NF4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, float* out,
+    int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwiseNested<bnb_bfloat16, FP4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset,
+    bnb_bfloat16* out, int blocksize, const int n, bnb_stream_t stream
+);
+template void dequantizeBlockwiseNested<bnb_bfloat16, NF4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset,
+    bnb_bfloat16* out, int blocksize, const int n, bnb_stream_t stream
+);
+#endif
 
 #define MAKE_optimizer32bit(name, gtype)                                                                               \
     template void optimizer32bit<gtype, name>(                                                                         \

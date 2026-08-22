@@ -1049,13 +1049,47 @@ def dequantize_4bit(
     if quant_state.dtype not in (torch.bfloat16, torch.float16, torch.float32):
         raise ValueError(f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {quant_state.dtype}")
 
+    nested_out = None
     if quant_state.nested:
-        absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
-        absmax += quant_state.offset
-        if absmax.dtype != torch.float32:
-            absmax = absmax.float()
+        if A.is_cuda and not torch.compiler.is_compiling():
+            if out is not None:
+                torch.ops.bitsandbytes.dequantize_4bit_nested.out(
+                    A,
+                    quant_state.absmax,
+                    quant_state.state2.absmax,
+                    quant_state.state2.code,
+                    quant_state.offset,
+                    quant_state.blocksize,
+                    quant_state.state2.blocksize,
+                    quant_state.quant_type,
+                    quant_state.shape,
+                    quant_state.dtype,
+                    out=out,
+                )
+                nested_out = out
+            else:
+                nested_out = torch.ops.bitsandbytes.dequantize_4bit_nested.default(
+                    A,
+                    quant_state.absmax,
+                    quant_state.state2.absmax,
+                    quant_state.state2.code,
+                    quant_state.offset,
+                    quant_state.blocksize,
+                    quant_state.state2.blocksize,
+                    quant_state.quant_type,
+                    quant_state.shape,
+                    quant_state.dtype,
+                )
 
-    if out is not None:
+        if nested_out is None:
+            absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
+            absmax += quant_state.offset
+            if absmax.dtype != torch.float32:
+                absmax = absmax.float()
+
+    if nested_out is not None:
+        out = nested_out
+    elif out is not None:
         torch.ops.bitsandbytes.dequantize_4bit.out(
             A, absmax, quant_state.blocksize, quant_state.quant_type, quant_state.shape, quant_state.dtype, out=out
         )

@@ -573,6 +573,145 @@ class TestLLMInt8Functional:
 
 
 class TestQuantize4BitFunctional:
+    @staticmethod
+    def _legacy_nested_dequantize(packed, state, out=None):
+        absmax = F.dequantize_blockwise(state.absmax, state.state2)
+        absmax += state.offset
+        if absmax.dtype != torch.float32:
+            absmax = absmax.float()
+        if out is not None:
+            torch.ops.bitsandbytes.dequantize_4bit.out(
+                packed,
+                absmax,
+                state.blocksize,
+                state.quant_type,
+                state.shape,
+                state.dtype,
+                out=out,
+            )
+            return out
+        return torch.ops.bitsandbytes.dequantize_4bit.default(
+            packed,
+            absmax,
+            state.blocksize,
+            state.quant_type,
+            state.shape,
+            state.dtype,
+        )
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [32, 64, 4096], ids=id_formatter("blocksize"))
+    def test_nested_dequantize_sm103_matches_legacy(self, device, dtype, quant_type, blocksize, monkeypatch):
+        if device != "cuda":
+            pytest.skip("The nested CUDA specialization is only available on SM103")
+
+        from bitsandbytes.backends.cuda import ops as cuda_ops
+
+        if not cuda_ops._dequantize_4bit_nested_supported(torch.cuda.current_device()):
+            pytest.skip("The nested CUDA specialization is only selected on SM103")
+
+        calls = 0
+        nested_impl = cuda_ops._dequantize_4bit_nested_impl
+
+        def counted_nested_impl(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return nested_impl(*args, **kwargs)
+
+        monkeypatch.setattr(cuda_ops, "_dequantize_4bit_nested_impl", counted_nested_impl)
+
+        for shape in ((64, 64), (65, 63)):
+            source = torch.randn(shape, device=device, dtype=dtype)
+            packed, state = F.quantize_4bit(
+                source,
+                blocksize=blocksize,
+                compress_statistics=True,
+                quant_type=quant_type,
+            )
+            snapshots = tuple(
+                tensor.clone()
+                for tensor in (packed, state.absmax, state.state2.absmax, state.state2.code, state.offset)
+            )
+
+            reference = self._legacy_nested_dequantize(packed, state)
+            actual = F.dequantize_4bit(packed, state)
+            assert torch.equal(actual, reference)
+
+            out = torch.empty_like(reference)
+            returned = F.dequantize_4bit(packed, state, out=out)
+            assert returned.data_ptr() == out.data_ptr()
+            assert torch.equal(out, reference)
+
+            for current, snapshot in zip(
+                (packed, state.absmax, state.state2.absmax, state.state2.code, state.offset),
+                snapshots,
+                strict=True,
+            ):
+                assert torch.equal(current, snapshot)
+
+        assert calls == 4
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_nested_dequantize_sm103_rejects_invalid_out(self, device, monkeypatch):
+        if device != "cuda":
+            pytest.skip("The nested CUDA specialization is only available on SM103")
+
+        from bitsandbytes.backends.cuda import ops as cuda_ops
+
+        if not cuda_ops._dequantize_4bit_nested_supported(torch.cuda.current_device()):
+            pytest.skip("The nested CUDA specialization is only selected on SM103")
+
+        source = torch.randn((65, 63), device=device, dtype=torch.float16)
+        packed, state = F.quantize_4bit(source, compress_statistics=True, quant_type="nf4")
+
+        def unexpected_nested_impl(*_args, **_kwargs):
+            raise AssertionError("invalid output reached the nested CUDA kernel")
+
+        monkeypatch.setattr(cuda_ops, "_dequantize_4bit_nested_impl", unexpected_nested_impl)
+
+        with pytest.raises(ValueError, match=r"Expected out\.shape"):
+            F.dequantize_4bit(
+                packed,
+                state,
+                out=torch.empty((65, 64), device=device, dtype=state.dtype),
+            )
+
+        with pytest.raises(ValueError, match=r"Expected out\.dtype"):
+            F.dequantize_4bit(
+                packed,
+                state,
+                out=torch.empty(state.shape, device=device, dtype=torch.float32),
+            )
+
+        with pytest.raises(RuntimeError, match=r"device"):
+            F.dequantize_4bit(
+                packed,
+                state,
+                out=torch.empty(state.shape, device="cpu", dtype=state.dtype),
+            )
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_nested_dequantize_non_sm103_uses_legacy(self, device, monkeypatch):
+        if device != "cuda":
+            pytest.skip("CUDA dispatch guard test")
+
+        from bitsandbytes.backends.cuda import ops as cuda_ops
+
+        source = torch.randn((65, 63), device=device, dtype=torch.float16)
+        packed, state = F.quantize_4bit(source, compress_statistics=True, quant_type="nf4")
+        reference = self._legacy_nested_dequantize(packed, state)
+
+        monkeypatch.setattr(cuda_ops, "_gpu_dispatch_props", lambda _device_index: (148, 10, 0))
+
+        def unexpected_nested_impl(*_args, **_kwargs):
+            raise AssertionError("non-SM103 dispatch reached the nested CUDA kernel")
+
+        monkeypatch.setattr(cuda_ops, "_dequantize_4bit_nested_impl", unexpected_nested_impl)
+        actual = F.dequantize_4bit(packed, state)
+        assert torch.equal(actual, reference)
+
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
