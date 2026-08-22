@@ -266,7 +266,14 @@ class Test4bitBlockwiseQuantOps:
         absmax_8bit = torch.zeros(1, dtype=torch.uint8)
         nested_absmax = torch.ones(1, dtype=torch.float32)
         nested_code = torch.ones(256, dtype=torch.float32)
-        offset = torch.zeros((), dtype=torch.float32, device="meta")
+        offset = torch.zeros((), dtype=torch.float32)
+        args = (A, absmax_8bit, nested_absmax, nested_code, offset, 64, 256, "nf4", (4, 4), torch.float16)
+
+        with pytest.raises(RuntimeError, match=r"Expected out\.device"):
+            torch.ops.bitsandbytes.dequantize_4bit_nested.out(
+                *args,
+                out=torch.empty((4, 4), dtype=torch.float16, device="meta"),
+            )
 
         with pytest.raises(RuntimeError, match=r"Expected offset\.device"):
             torch.ops.bitsandbytes.dequantize_4bit_nested.default(
@@ -274,7 +281,7 @@ class Test4bitBlockwiseQuantOps:
                 absmax_8bit,
                 nested_absmax,
                 nested_code,
-                offset,
+                offset.to("meta"),
                 64,
                 256,
                 "nf4",
