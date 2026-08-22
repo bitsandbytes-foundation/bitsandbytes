@@ -685,6 +685,13 @@ class TestQuantize4BitFunctional:
                 out=torch.empty(state.shape, device=device, dtype=torch.float32),
             )
 
+        with pytest.raises(RuntimeError, match=r"device"):
+            F.dequantize_4bit(
+                packed,
+                state,
+                out=torch.empty(state.shape, device="cpu", dtype=state.dtype),
+            )
+
     @pytest.mark.parametrize("device", get_available_devices())
     def test_nested_dequantize_non_sm103_uses_legacy(self, device, monkeypatch):
         if device != "cuda":

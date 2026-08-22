@@ -9,7 +9,7 @@ import torch
 
 from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, get_ptr
 
-from ..._ops import register_kernel
+from ..._ops import _check_dequantize_4bit_nested, register_kernel
 from ...cextension import lib
 
 
@@ -516,6 +516,19 @@ def _dequantize_4bit_nested_impl(
     dtype: torch.dtype,
     out: torch.Tensor,
 ) -> None:
+    _check_dequantize_4bit_nested(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        256,
+        quant_type,
+        out.shape,
+        dtype,
+        out,
+    )
     A = A.contiguous()
     offset_f32 = offset.to(dtype=torch.float32)
 
@@ -543,7 +556,7 @@ def _dequantize_4bit_nested_impl(
         )
 
 
-def _dequantize_4bit_nested_if_supported(
+def _dequantize_4bit_nested_dispatch(
     A: torch.Tensor,
     absmax_8bit: torch.Tensor,
     nested_absmax: torch.Tensor,
@@ -554,29 +567,108 @@ def _dequantize_4bit_nested_if_supported(
     quant_type: str,
     shape: Sequence[int],
     dtype: torch.dtype,
-    out: Optional[torch.Tensor] = None,
-) -> Optional[torch.Tensor]:
-    if nested_blocksize != 256 or not _dequantize_4bit_nested_supported(A.device.index):
-        return None
-
-    if out is None:
-        out = torch.empty(shape, dtype=dtype, device=A.device)
-    elif out.shape != tuple(shape):
-        raise ValueError(f"Expected out.shape == {shape}, got {out.shape}")
-    elif out.dtype != dtype:
-        raise ValueError(f"Expected out.dtype == {dtype}, got {out.dtype}")
-    _dequantize_4bit_nested_impl(
+    out: torch.Tensor,
+) -> None:
+    _check_dequantize_4bit_nested(
         A,
         absmax_8bit,
         nested_absmax,
         nested_code,
         offset,
         blocksize,
+        nested_blocksize,
         quant_type,
+        shape,
+        dtype,
+        out,
+    )
+    if nested_blocksize == 256 and _dequantize_4bit_nested_supported(A.device.index):
+        _dequantize_4bit_nested_impl(
+            A,
+            absmax_8bit,
+            nested_absmax,
+            nested_code,
+            offset,
+            blocksize,
+            quant_type,
+            dtype,
+            out,
+        )
+        return
+
+    absmax = torch.empty_like(absmax_8bit, dtype=torch.float32)
+    _dequantize_blockwise_impl(
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        nested_blocksize,
+        torch.float32,
+        out=absmax,
+    )
+    _dequantize_4bit_impl(A, absmax + offset, blocksize, quant_type, dtype, out=out)
+
+
+@register_kernel("bitsandbytes::dequantize_4bit_nested", "cuda")
+def _(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    nested_blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    out = torch.empty(shape, dtype=dtype, device=A.device)
+    _dequantize_4bit_nested_dispatch(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        nested_blocksize,
+        quant_type,
+        shape,
         dtype,
         out,
     )
     return out
+
+
+@register_kernel("bitsandbytes::dequantize_4bit_nested.out", "cuda")
+def _(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    nested_blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    if out.shape != tuple(shape):
+        raise ValueError(f"Expected out.shape == {shape}, got {out.shape}")
+    if out.dtype != dtype:
+        raise ValueError(f"Expected out.dtype == {dtype}, got {out.dtype}")
+    _dequantize_4bit_nested_dispatch(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        nested_blocksize,
+        quant_type,
+        shape,
+        dtype,
+        out,
+    )
 
 
 @register_kernel("bitsandbytes::gemv_4bit", "cuda")

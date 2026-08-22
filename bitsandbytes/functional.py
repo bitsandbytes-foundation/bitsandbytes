@@ -1052,21 +1052,34 @@ def dequantize_4bit(
     nested_out = None
     if quant_state.nested:
         if A.is_cuda and not torch.compiler.is_compiling():
-            from bitsandbytes.backends.cuda.ops import _dequantize_4bit_nested_if_supported
-
-            nested_out = _dequantize_4bit_nested_if_supported(
-                A,
-                quant_state.absmax,
-                quant_state.state2.absmax,
-                quant_state.state2.code,
-                quant_state.offset,
-                quant_state.blocksize,
-                quant_state.state2.blocksize,
-                quant_state.quant_type,
-                quant_state.shape,
-                quant_state.dtype,
-                out,
-            )
+            if out is not None:
+                torch.ops.bitsandbytes.dequantize_4bit_nested.out(
+                    A,
+                    quant_state.absmax,
+                    quant_state.state2.absmax,
+                    quant_state.state2.code,
+                    quant_state.offset,
+                    quant_state.blocksize,
+                    quant_state.state2.blocksize,
+                    quant_state.quant_type,
+                    quant_state.shape,
+                    quant_state.dtype,
+                    out=out,
+                )
+                nested_out = out
+            else:
+                nested_out = torch.ops.bitsandbytes.dequantize_4bit_nested.default(
+                    A,
+                    quant_state.absmax,
+                    quant_state.state2.absmax,
+                    quant_state.state2.code,
+                    quant_state.offset,
+                    quant_state.blocksize,
+                    quant_state.state2.blocksize,
+                    quant_state.quant_type,
+                    quant_state.shape,
+                    quant_state.dtype,
+                )
 
         if nested_out is None:
             absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
