@@ -1,5 +1,18 @@
 # Benchmarking
 
+## Apple MPS
+
+Run the NF4 smoke benchmark on an Apple Silicon Mac with an MPS-enabled
+PyTorch build:
+
+```bash
+python benchmarking/mps/nf4_benchmark.py
+```
+
+The script reports NF4 quantization/dequantization latency and error, packed
+storage size, and `Linear4bit` latency compared with a dense fp16 linear layer.
+Use `--help` to adjust the tensor and layer sizes, warm-ups, and repetitions.
+
 ## Inference
 End-to-end inference benchmarking can be performed using the 🤗 [`optimum-benchmark`](https://github.com/huggingface/optimum-benchmark) library.
 
