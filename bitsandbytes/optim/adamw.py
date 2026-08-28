@@ -88,11 +88,14 @@ class AdamW8bit(Optimizer2State):
             weight_decay (`float`, defaults to 1e-2):
                 The weight decay value for the optimizer.
             amsgrad (`bool`, defaults to `False`):
-                Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
-                Note: This parameter is not supported in AdamW8bit and must be False.
+                .. deprecated::
+                    Not supported in AdamW8bit and must be False. This parameter exists only for
+                    signature compatibility with :class:`AdamW` and will be removed in a future version.
             optim_bits (`int`, defaults to 32):
-                The number of bits of the optimizer state.
-                Note: This parameter is not used in AdamW8bit as it always uses 8-bit optimization.
+                .. deprecated::
+                    Not used in AdamW8bit. This optimizer always uses 8-bit states regardless of this
+                    value. The parameter exists only for signature compatibility with :class:`AdamW`
+                    and will be removed in a future version.
             args (`object`, defaults to `None`):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
@@ -254,11 +257,14 @@ class PagedAdamW8bit(Optimizer2State):
             weight_decay (`float`, defaults to 1e-2):
                 The weight decay value for the optimizer.
             amsgrad (`bool`, defaults to `False`):
-                Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
-                Note: This parameter is not supported in PagedAdamW8bit and must be False.
+                .. deprecated::
+                    Not supported in PagedAdamW8bit and must be False. This parameter exists only for
+                    signature compatibility with :class:`AdamW` and will be removed in a future version.
             optim_bits (`int`, defaults to 32):
-                The number of bits of the optimizer state.
-                Note: This parameter is not used in PagedAdamW8bit as it always uses 8-bit optimization.
+                .. deprecated::
+                    Not used in PagedAdamW8bit. This optimizer always uses 8-bit states regardless of
+                    this value. The parameter exists only for signature compatibility with :class:`AdamW`
+                    and will be removed in a future version.
             args (`object`, defaults to `None`):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
