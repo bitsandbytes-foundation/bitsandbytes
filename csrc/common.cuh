@@ -4,11 +4,36 @@
 
 #include "compat.cuh"
 
+// AMD GPU architecture detection. Use explicit device macros rather than the
+// broad __GFX9__/__GFX11__/__GFX12__ macros, which span distinct architectures.
+#define IS_RDNA2                                                                                                       \
+    (defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__) || defined(__gfx1033__) ||                   \
+     defined(__gfx1034__) || defined(__gfx1035__) || defined(__gfx1036__))
+#define IS_RDNA3 (defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__))
+#define IS_RDNA3_5 (defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__) || defined(__gfx1153__))
+#define IS_RDNA4 (defined(__gfx1200__) || defined(__gfx1201__))
+#define IS_RDNA (IS_RDNA2 || IS_RDNA3 || IS_RDNA3_5 || IS_RDNA4)
+
+#define IS_CDNA1 (defined(__gfx908__))
+#define IS_CDNA2 (defined(__gfx90a__))
+#define IS_CDNA3 (defined(__gfx942__))
+#define IS_CDNA4 (defined(__gfx950__))
+#define IS_CDNA (IS_CDNA1 || IS_CDNA2 || IS_CDNA3 || IS_CDNA4)
+
+// CDNA5 (gfx1250, gfx1251). Unlike the Wave64 CDNA1-4, CDNA5
+// runs in Wave32 mode. It is deliberately kept OUT of IS_CDNA (which implies
+// Wave64) so the default warp size below already resolves to 32 for it, unchanged
+// from upstream. It is detected separately only so the 4-bit GEMM can opt into
+// the CDNA fp32-FMA math path -- CDNA5 has no SIMT v_dot2 instruction (no
+// dot12-insts).
+#define IS_CDNA5 (defined(__gfx1250__) || defined(__gfx1251__))
+
 // Warp size
 
 #if BNB_HIP
+// All of gfx9 is Wave64, including the GCN5 parts IS_CDNA omits.
 #if defined(__GFX9__)
-#define BNB_WARP_SIZE 64 // CDNA
+#define BNB_WARP_SIZE 64 // GCN5 / CDNA
 #else
 #define BNB_WARP_SIZE 32 // RDNA
 #endif

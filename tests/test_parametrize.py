@@ -431,3 +431,69 @@ def test_gradient_behavior(device, dtype):
     # The dequantized output should also not require gradients
     reconstructed = module.weight_2d
     assert not reconstructed.requires_grad, "Dequantized parameter should not require gradients"
+
+
+class TestParametrizationCacheCounterUnderCheckpointing:
+    """The cache-gate hooks must stay balanced under activation checkpointing.
+
+    ``use_reentrant=False`` checkpointing aborts its backward recompute mid-forward by
+    design (early stop) once the last needed activation is rematerialized. A plain
+    forward hook is skipped for the module holding that last save, so the global
+    ``parametrize._cache_enabled`` counter leaked +1 per checkpointed region per step,
+    the cache was never cleared again, and every dequantized parameter stayed resident
+    (4x the packed model bytes). ``always_call=True`` keeps the pair balanced.
+    """
+
+    def _reset(self):
+        import torch.nn.utils.parametrize as P
+
+        P._cache_enabled = 0
+        P._cache = {}
+
+    def test_counter_balanced_under_checkpoint_early_stop(self):
+        import torch.nn.utils.parametrize as P
+        from torch.utils.checkpoint import checkpoint
+
+        from bitsandbytes.nn.parametrize import _register_parametrization_hooks
+
+        self._reset()
+
+        class Chain(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(8, 8)
+                self.tail = nn.Linear(8, 8)
+
+            def forward(self, x):
+                return self.tail(self.a(x))
+
+        m = Chain()
+        # Register the real hook pair on the tail module — the one whose recompute
+        # holds the last save, where early stop aborts before the forward hook.
+        # (torch < 2.5 skips the state-dict hook inside; the cache pair is what we need.)
+        _register_parametrization_hooks(m.tail, "weight")
+
+        for _ in range(3):
+            x = torch.randn(2, 8, requires_grad=True)
+            checkpoint(m, x, use_reentrant=False).sum().backward()
+
+        assert P._cache_enabled == 0, (
+            f"parametrize cache counter leaked to {P._cache_enabled}; dequantized "
+            "parameters would be retained for the rest of training"
+        )
+        assert P._cache == {}
+        self._reset()
+
+    def test_counter_never_goes_negative(self):
+        import torch.nn.utils.parametrize as P
+
+        from bitsandbytes.nn.parametrize import _disable_parametrization_cache
+
+        self._reset()
+        P._cache[("k",)] = torch.zeros(1)
+        # always_call can fire the disable hook when an earlier pre-hook raised before
+        # enable ran; a negative counter is truthy and would stop cache clearing forever.
+        _disable_parametrization_cache(nn.Identity(), (), None)
+        assert P._cache_enabled == 0
+        assert P._cache == {}
+        self._reset()

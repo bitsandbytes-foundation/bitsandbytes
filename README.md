@@ -27,15 +27,14 @@ bitsandbytes has the following minimum requirements for all platforms:
 #### Accelerator support:
 
 <small>Note: this table reflects the status of the current development branch. For the latest stable release, see the
-[document in the 0.49.2 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.49.2/README.md#accelerator-support).
+[document in the 0.50.0 tag](https://github.com/bitsandbytes-foundation/bitsandbytes/blob/0.50.0/README.md#accelerator-support).
 </small>
 
 ##### Legend:
-
-🚧 = In Development,
-〰️ = Partially Supported,
-✅ = Supported,
-🐢 = Slow Implementation Supported,
+🚧 = Planned |
+〰️ = Partially Supported |
+✅ = Supported |
+🐢 = Slow Implementation Supported |
 ❌ = Not Supported
 
 <table>
@@ -73,8 +72,8 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td></td>
       <td>🟥 AMD GPU <br><code>cuda</code></td>
       <td>
-        CDNA: gfx90a, gfx942, gfx950<br>
-        RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
+        CDNA: gfx908, gfx90a, gfx942, gfx950, gfx1250<br>
+        RDNA: gfx101X, gfx103X, gfx110X, gfx115X, gfx120X
       </td>
       <td>✅</td>
       <td>✅</td>
@@ -104,7 +103,7 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td align="right">aarch64</td>
       <td>◻️ CPU</td>
       <td></td>
-      <td>✅</td>
+      <td>✅ *</td>
       <td>✅</td>
       <td>✅</td>
     </tr>
@@ -139,9 +138,8 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td></td>
       <td>🟥 AMD GPU <br><code>cuda</code></td>
       <td>
-        RDNA: gfx1100, gfx1101, gfx1102,<br>
-        gfx1150, gfx1151,<br>
-        gfx1200, gfx1201
+        CDNA: gfx908, gfx90a<br>
+        RDNA: gfx101X, gfx103X, gfx110X, gfx115X, gfx120X
       </td>
       <td>✅</td>
       <td>✅</td>
@@ -167,13 +165,21 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td>✅</td>
     </tr>
     <tr>
+      <td></td>
+      <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
+      <td>SM121</td>
+      <td>✅</td>
+      <td>✅</td>
+      <td>✅</td>
+    </tr>
+    <tr>
       <td colspan="6">🍎 <strong>macOS 14+</strong></td>
     </tr>
     <tr>
       <td align="right">arm64</td>
       <td>◻️ CPU</td>
       <td>Apple M1+</td>
-      <td>✅</td>
+      <td>✅ *</td>
       <td>✅</td>
       <td>✅</td>
     </tr>
@@ -181,12 +187,13 @@ bitsandbytes has the following minimum requirements for all platforms:
       <td></td>
       <td>⬜ Metal <br><code>mps</code></td>
       <td>Apple M1+</td>
-      <td>❌</td>
+      <td>✅ *</td>
       <td>✅ <sup>1</sup></td>
-      <td>❌</td>
+      <td>🚧</td>
     </tr>
   </tbody>
 </table>
+<sup>* While supported, these marked features may lack in performance optimizations.</sup>
 
 <small><sup>1</sup> On <code>mps</code>, 4-bit matmul runs on native Metal kernels: a fused gemv for
 inference (M=1) and an <code>MPSMatrixMultiplication</code>-backed GEMM for fp16/fp32 batches. bf16
@@ -206,8 +213,6 @@ GEMM performs on par with dequantize+matmul. Details:
 The continued maintenance and development of `bitsandbytes` is made possible thanks to the generous support of our sponsors. Their contributions help ensure that we can keep improving the project and delivering valuable updates to the community.
 
 <kbd><a href="https://hf.co" target="_blank"><img width="100" src="https://huggingface.co/datasets/huggingface/brand-assets/resolve/main/hf-logo.svg" alt="Hugging Face"></a></kbd>
-&nbsp;
-<kbd><a href="https://intel.com" target="_blank"><img width="100" src="https://avatars.githubusercontent.com/u/17888862?s=100&v=4" alt="Intel"></a></kbd>
 
 ## License
 

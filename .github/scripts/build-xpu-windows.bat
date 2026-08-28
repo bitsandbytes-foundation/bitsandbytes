@@ -1,4 +1,9 @@
-set INTEL_DLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/75d4eb97-914a-4a95-852c-7b9733d80f74/intel-deep-learning-essentials-2025.1.3.8_offline.exe
+if "%ONEAPI_VERSION%"=="2025" set INTEL_DLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/75d4eb97-914a-4a95-852c-7b9733d80f74/intel-deep-learning-essentials-2025.1.3.8_offline.exe
+if "%ONEAPI_VERSION%"=="2026" set INTEL_DLE_URL=https://registrationcenter-download.intel.com/akdlm/IRC_NAS/d2148e15-b3c4-4313-afa9-a2373318b0b5/intel-deep-learning-essentials-2026.0.0.613_offline.exe
+if "%INTEL_DLE_URL%"=="" (
+    echo Unsupported ONEAPI_VERSION: "%ONEAPI_VERSION%"
+    exit /b 1
+)
 set INTEL_DLE_TMP=%RUNNER_TEMP%\intel_dle
 set INTEL_DLE_LOG=%RUNNER_TEMP%\intel_dle_log.txt
 

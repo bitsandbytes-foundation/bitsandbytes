@@ -87,11 +87,12 @@ static void gemm_4bit(
     const bool undersubscribed =
         (M <= 8 && mma_blocks * 3 <= num_sms * 2) || (hbm_arch && M == 4 && mma_blocks <= num_sms);
 
-    // sm89 (>=60 SMs) and sm120 (>=48 SMs): at M<=6 with wide N, SIMT saturates
+    // sm89 (>=60 SMs) and sm120/sm121 (>=48 SMs): at M<=6 with wide N, SIMT saturates
     // bandwidth more efficiently than blocked MMA.
     const bool wide_n_simt =
         M <= 6 && mma_blocks >= num_sms &&
-        ((cc_maj == 8 && cc_min == 9 && num_sms >= 60) || (cc_maj == 12 && cc_min == 0 && num_sms >= 48));
+        ((cc_maj == 8 && cc_min == 9 && num_sms >= 60) || (cc_maj == 12 && cc_min == 0 && num_sms >= 48) ||
+         (cc_maj == 12 && cc_min == 1 && num_sms >= 48));
 
     // GDDR tall-K (K>N): K-loop too long relative to output tile at small M.
     const bool tall_k_simt = gddr_arch && K > N && M <= 17 && mma_blocks * 3 < num_sms;

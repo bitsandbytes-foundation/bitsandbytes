@@ -2,7 +2,7 @@
 
 Welcome to the installation guide for the `bitsandbytes` library! This document provides step-by-step instructions to install `bitsandbytes` across various platforms and hardware configurations.
 
-We provide official support for NVIDIA GPUs, CPUs, Intel XPUs, and Intel Gaudi. We also have experimental support for additional platforms such as AMD ROCm and Apple Silicon.
+We provide official support for NVIDIA GPUs, AMD GPUs, Intel XPUs, Apple Silicon, and Intel Gaudi.
 
 ## Table of Contents
 
@@ -10,6 +10,9 @@ We provide official support for NVIDIA GPUs, CPUs, Intel XPUs, and Intel Gaudi. 
 - [NVIDIA CUDA](#cuda)
   - [Installation via PyPI](#cuda-pip)
   - [Compile from Source](#cuda-compile)
+- [AMD ROCm](#rocm)
+  - [Installation via PyPI](#rocm-pip)
+  - [Compile from Source](#rocm-compile)
 - [Intel XPU](#xpu)
   - [Installation via PyPI](#xpu-pip)
 - [Intel Gaudi](#gaudi)
@@ -17,11 +20,6 @@ We provide official support for NVIDIA GPUs, CPUs, Intel XPUs, and Intel Gaudi. 
 - [CPU](#cpu)
   - [Installation via PyPI](#cpu-pip)
   - [Compile from Source](#cpu-compile)
-- [AMD ROCm (Preview)](#rocm)
-  - [Installation via PyPI](#rocm-pip)
-  - [Compile from Source](#rocm-compile)
-- [Apple Silicon / Metal (Preview)](#apple-silicon)
-  - [Compile from Source](#apple-silicon-compile)
 - [Preview Wheels](#preview-wheels)
 
 ## System Requirements[[requirements]]
@@ -55,13 +53,15 @@ The currently distributed `bitsandbytes` packages are built with the following c
 | **OS**             | **CUDA Toolkit** | **Host Compiler**    | **Targets**
 |--------------------|------------------|----------------------|--------------
 | **Linux x86-64**   | 11.8 - 12.6      | GCC 11.2             | sm60, sm70, sm75, sm80, sm86, sm89, sm90
-| **Linux x86-64**   | 12.8 - 12.9      | GCC 11.2             | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
-| **Linux x86-64**   | 13.0             | GCC 11.2             | sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Linux x86-64**   | 12.8             | GCC 11.2             | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Linux x86-64**   | 13.0 - 13.2      | GCC 11.2             | sm75, sm80, sm86, sm89, sm90, sm100, sm120
 | **Linux aarch64**  | 11.8 - 12.6      | GCC 11.2             | sm75, sm80, sm90
-| **Linux aarch64**  | 12.8 - 13.0      | GCC 11.2             | sm75, sm80, sm90, sm100, sm110, sm120, sm121
+| **Linux aarch64**  | 12.8             | GCC 11.2             | sm75, sm80, sm90, sm100, sm120
+| **Linux aarch64**  | 13.0 - 13.2      | GCC 11.2             | sm75, sm80, sm90, sm100, sm110, sm120, sm121
 | **Windows x86-64** | 11.8 - 12.6      | MSVC 19.43+ (VS2022) | sm50, sm60, sm75, sm80, sm86, sm89, sm90
-| **Windows x86-64** | 12.8 - 12.9      | MSVC 19.43+ (VS2022) | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
-| **Windows x86-64** | 13.0             | MSVC 19.43+ (VS2022) | sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Windows x86-64** | 12.8             | MSVC 19.43+ (VS2022) | sm70, sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Windows x86-64** | 13.0 - 13.2      | MSVC 19.43+ (VS2022) | sm75, sm80, sm86, sm89, sm90, sm100, sm120
+| **Windows arm64**  | 13.4             | MSVC 19.51+ (VS2026) | sm121
 
 The Linux build has a minimum glibc version of 2.24.
 
@@ -70,6 +70,22 @@ Use `pip` or `uv` to install the latest release:
 ```bash
 pip install bitsandbytes
 ```
+
+> [!NOTE]
+> **NVIDIA Spark (ARM64).** To install bitsandbytes with PyTorch on NVIDIA Spark devices (such as an RTX Spark laptop) running ARM64, install PyTorch from the NVIDIA PyPI index. These devices require NVIDIA's ARM64 builds of PyTorch, which are not available on the default PyPI index or the standard PyTorch wheel index.
+>
+> Run the command below to check if your system detects an NVIDIA GPU.
+>
+> ```bash
+> nvidia-smi
+> ```
+>
+> Install PyTorch from the NVIDIA PyPI index, then install bitsandbytes.
+>
+> ```bash
+> pip install torch --index-url https://pypi.nvidia.com
+> pip install bitsandbytes
+> ```
 
 > [!WARNING]
 > **NVIDIA Jetson (L4T / JetPack) — source build required.** The `Linux aarch64` wheels above are built on aarch64-sbsa runners (server-class ARM with the standard CUDA Toolkit). They are **not compatible** with the L4T runtime on Jetson devices (Orin Nano / NX / AGX, Xavier, Thor on CUDA 12), even though both are aarch64 and even though the cubins are binary-compatible with the device's compute capability (e.g., `sm_80` cubin runs on `sm_87` hardware via Ampere-family binary compat — see [NVIDIA's docs on binary compatibility](https://developer.nvidia.com/blog/understanding-ptx-the-assembly-language-of-cuda-gpu-computing/#binary_compatibility)). The mismatch is at the CUDA library / ABI layer (JetPack ships its own CUDA Toolkit and system libraries), and surfaces as a runtime symbol-resolution error like `Error named symbol not found in /src/csrc/ops.cu` on the first CUDA op.
@@ -116,6 +132,8 @@ Compilation from source on Windows systems require Visual Studio with C++ suppor
 
 To compile from source, you need CMake >= **3.22.1** and Python >= **3.10** installed. You should also install CUDA Toolkit by following the [CUDA Installation Guide for Windows](https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/index.html) guide from NVIDIA. The current minimum supported CUDA Toolkit version that we support is **11.8**.
 
+On Windows ARM64, the CUDA Toolkit is supported from version **13.4**, and Visual Studio must include the **ARM64 C++ build tools** component.
+
 ```bash
 git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
 cmake -DCOMPUTE_BACKEND=cuda -S .
@@ -128,6 +146,120 @@ Big thanks to [wkpark](https://github.com/wkpark), [Jamezo97](https://github.com
 </hfoption>
 </hfoptions>
 
+## AMD ROCm [[rocm]]
+
+* All features are supported for both consumer RDNA devices and Data Center CDNA products.
+* A compatible PyTorch version with AMD ROCm support is required. It is recommended to use the latest stable release. On Linux, see [PyTorch on ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/3rd-party/pytorch-install.html) for guidance. On Windows, ROCm-enabled PyTorch wheels are available from:
+  - [repo.radeon.com/rocm/windows/](https://repo.radeon.com/rocm/windows/) — official AMD releases
+  - [stable.repo.amd.com/rocm/whl-next/](https://stable.repo.amd.com/rocm/whl-next/) — current stable [TheRock](https://github.com/ROCm/TheRock) release builds
+  - [nightly.repo.amd.com/rocm/whl-next/](https://nightly.repo.amd.com/rocm/whl-next/) — current nightly TheRock builds
+
+### Installation from PyPI[[rocm-pip]]
+
+This is the most straightforward and recommended installation option.
+
+The currently distributed `bitsandbytes` are built with the following configurations:
+
+| **OS**             | **ROCm** | **Targets**
+|--------------------|----------|---------------------------------------------------------------------|
+| **Linux x86-64**   | 6.4.4    | CDNA: gfx908, gfx90a, gfx942 / RDNA: gfx1030, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
+| **Linux x86-64**   | 7.0.2    | CDNA: gfx908, gfx90a, gfx942, gfx950 / RDNA: gfx1030, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
+| **Linux x86-64**   | 7.1.1    | CDNA: gfx908, gfx90a, gfx942, gfx950 / RDNA: gfx1030, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
+| **Linux x86-64**   | 7.2.4    | CDNA: gfx908, gfx90a, gfx942, gfx950 / RDNA: gfx1030, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
+| **Linux x86-64**   | 7.14.0   | CDNA: gfx908, gfx90a, gfx942, gfx950, gfx1250 / RDNA: gfx1010, gfx1011, gfx1012, gfx1030, gfx1031, gfx1032, gfx1033, gfx1034, gfx1035, gfx1036, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
+| **Linux x86-64**   | 10.0.0   | CDNA: gfx908, gfx90a, gfx942, gfx950, gfx1250 / RDNA: gfx1010, gfx1011, gfx1012, gfx1030, gfx1031, gfx1032, gfx1033, gfx1034, gfx1035, gfx1036, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
+| **Windows x86-64** | 7.2.1    | RDNA: gfx1100, gfx1101, gfx1102, gfx1150, gfx1151, gfx1200, gfx1201
+| **Windows x86-64** | 7.14.0   | CDNA: gfx908, gfx90a / RDNA: gfx1010, gfx1011, gfx1012, gfx1030, gfx1031, gfx1032, gfx1033, gfx1034, gfx1035, gfx1036, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
+| **Windows x86-64** | 10.0.0   | CDNA: gfx908, gfx90a / RDNA: gfx1010, gfx1011, gfx1012, gfx1030, gfx1031, gfx1032, gfx1033, gfx1034, gfx1035, gfx1036, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
+
+Use `pip` or `uv` to install the latest release:
+
+```bash
+pip install bitsandbytes
+```
+
+### Compile from Source[[rocm-compile]]
+
+bitsandbytes can be compiled from ROCm 6.3 - ROCm 10.0.0. See the `CMakeLists.txt` for additional options.
+
+<hfoptions id="rocm-source">
+<hfoption id="Linux">
+
+To compile from source, you need CMake >= **3.31.6** and Python >= **3.10** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.).
+
+You should also have a ROCm installation (system-wide or via Docker). The current minimum supported version is **6.3**.
+
+```bash
+# Install bitsandbytes from source
+
+# Clone bitsandbytes repo
+git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
+
+# Compile & install
+apt-get install -y build-essential cmake  # install build tools dependencies, unless present
+cmake -DCOMPUTE_BACKEND=hip -S .  # Use -DBNB_ROCM_ARCH="gfx90a;gfx942" to target specific gpu arch
+make
+pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
+```
+
+</hfoption>
+<hfoption id="Windows">
+
+Compilation on Windows requires Visual Studio 2022 with C++ support, CMake, Ninja, and Python >= **3.10**.
+
+Instead of a system-wide ROCm installation, use the pip-installable ROCm SDK.
+
+For ROCm 10.0.0, install the current stable multi-architecture SDK from [stable.repo.amd.com](https://stable.repo.amd.com/rocm/whl-next/):
+
+```bash
+pip install ninja cmake
+# Replace gfx1100 with your GPU architecture. To support multiple GPU
+# architectures, add multiple device extras (for example, device-gfx1100,device-gfx1151).
+pip install --index-url https://stable.repo.amd.com/rocm/whl-next/ \
+    "rocm[libraries,devel,device-gfx1100]==10.0.0"
+```
+
+After installing the SDK, initialize it and build bitsandbytes:
+
+```bash
+# Expand the devel tarball and link the installed device files.
+rocm-sdk init
+
+# Set ROCM_PATH and activate Visual Studio environment, then build
+export ROCM_PATH="$(rocm-sdk path --root)"
+export PATH="${ROCM_PATH}/bin:${PATH}"
+git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
+# Use the same GPU architecture selected above. Separate multiple architectures with semicolons.
+cmake -G Ninja -DCOMPUTE_BACKEND=hip -DBNB_ROCM_ARCH="gfx1100" -DCMAKE_BUILD_TYPE=Release -DCMAKE_HIP_COMPILER_ROCM_ROOT="${ROCM_PATH}" -S .
+cmake --build . --config Release
+pip install .
+```
+
+For the legacy ROCm 7.2.1 SDK, use the direct wheels from [repo.radeon.com](https://repo.radeon.com/rocm/windows/):
+
+```bash
+pip install ninja cmake
+pip install \
+    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl \
+    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl \
+    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl \
+    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm-7.2.1.tar.gz
+
+# Expand the devel tarball
+rocm-sdk init
+
+# Set ROCM_PATH and activate Visual Studio environment, then build
+export ROCM_PATH="$(rocm-sdk path --root)"
+export PATH="${ROCM_PATH}/bin:${PATH}"
+git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
+cmake -G Ninja -DCOMPUTE_BACKEND=hip -DBNB_ROCM_ARCH="gfx1100" -DCMAKE_BUILD_TYPE=Release -S .
+cmake --build . --config Release
+pip install .
+```
+</hfoption>
+</hfoptions>
+
+
 ## Intel XPU[[xpu]]
 
 * A compatible PyTorch version with Intel XPU support is required. The current minimum is **PyTorch 2.6.0**. It is recommended to use the latest stable release. See [Getting Started on Intel GPU](https://docs.pytorch.org/docs/stable/notes/get_start_xpu.html) for guidance.
@@ -139,9 +271,9 @@ This is the most straightforward and recommended installation option.
 The currently distributed `bitsandbytes` packages are built with the following configurations:
 
 | **OS**             | **oneAPI Toolkit** | **Kernel Implementation** |
-|--------------------|------------------|----------------------|
-| **Linux x86-64**   | 2025.1.3         | SYCL + Triton        |
-| **Windows x86-64** | 2025.1.3         | SYCL + Triton        |
+|--------------------|--------------------|----------------------|
+| **Linux x86-64**   | 2025.1.3, 2026.0.0 | SYCL + Triton        |
+| **Windows x86-64** | 2025.1.3, 2026.0.0 | SYCL + Triton        |
 
 The Linux build has a minimum glibc version of 2.34.
 
@@ -221,134 +353,10 @@ pip install -e .
 ```
 
 > [!NOTE]
-> The build system will detect the ARM64 architecture automatically via CMake. Only the CPU backend is supported on Windows ARM64 at this time (no CUDA).
+> The build system will detect the ARM64 architecture automatically via CMake. For a CUDA build on Windows ARM64, see [Compile from Source](#cuda-compile) in the CUDA section; CUDA Toolkit 13.4 or newer is required.
 
 </hfoption>
 </hfoptions>
-
-## AMD ROCm (Preview)[[rocm]]
-
-* Support for AMD GPUs is currently in a preview state.
-* All features are supported for both consumer RDNA devices and Data Center CDNA products.
-* A compatible PyTorch version with AMD ROCm support is required. It is recommended to use the latest stable release. On Linux, see [PyTorch on ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/3rd-party/pytorch-install.html) for guidance. On Windows, ROCm-enabled PyTorch wheels are available from:
-  - [repo.radeon.com/rocm/windows/](https://repo.radeon.com/rocm/windows/) — official AMD releases
-  - [repo.amd.com/rocm/whl/](https://repo.amd.com/rocm/whl/) — [TheRock](https://github.com/ROCm/TheRock) release builds
-  - [rocm.nightlies.amd.com/v2](https://rocm.nightlies.amd.com/v2) — TheRock nightly builds
-
-### Installation from PyPI[[rocm-pip]]
-
-This is the most straightforward and recommended installation option.
-
-The currently distributed `bitsandbytes` are built with the following configurations:
-
-| **OS**             | **ROCm** | **Targets**
-|--------------------|----------|---------------------------------------------------------------------|
-| **Linux x86-64**   | 6.2.4    | CDNA: gfx90a, gfx942 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103
-| **Linux x86-64**   | 6.3.4    | CDNA: gfx90a, gfx942 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103
-| **Linux x86-64**   | 6.4.4    | CDNA: gfx90a, gfx942 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
-| **Linux x86-64**   | 7.0.2    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
-| **Linux x86-64**   | 7.1.1    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
-| **Linux x86-64**   | 7.2.4    | CDNA: gfx90a, gfx942, gfx950 / RDNA: gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201
-| **Windows x86-64** | 7.2.1    | RDNA: gfx1100, gfx1101, gfx1102, gfx1150, gfx1151, gfx1200, gfx1201
-
-Use `pip` or `uv` to install the latest release:
-
-```bash
-pip install bitsandbytes
-```
-
-### Compile from Source[[rocm-compile]]
-
-bitsandbytes can be compiled from ROCm 6.2 - ROCm 7.2.4. See the `CMakeLists.txt` for additional options.
-
-<hfoptions id="rocm-source">
-<hfoption id="Linux">
-
-To compile from source, you need CMake >= **3.31.6** and Python >= **3.10** installed. Make sure you have a compiler installed to compile C++ (`gcc`, `make`, headers, etc.).
-
-You should also have a ROCm installation (system-wide or via Docker). The current minimum supported version is **6.2**.
-
-```bash
-# Install bitsandbytes from source
-
-# Clone bitsandbytes repo
-git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
-
-# Compile & install
-apt-get install -y build-essential cmake  # install build tools dependencies, unless present
-cmake -DCOMPUTE_BACKEND=hip -S .  # Use -DBNB_ROCM_ARCH="gfx90a;gfx942" to target specific gpu arch
-make
-pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
-```
-
-</hfoption>
-<hfoption id="Windows">
-
-Compilation on Windows requires Visual Studio 2022 with C++ support, CMake, Ninja, and Python >= **3.10**.
-
-Instead of a system-wide ROCm installation, you can use the pip-installable ROCm SDK wheels from [repo.radeon.com](https://repo.radeon.com/rocm/windows/):
-
-```bash
-# Install ROCm SDK wheels (adjust version as needed)
-pip install ninja cmake
-pip install \
-    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl \
-    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl \
-    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl \
-    https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm-7.2.1.tar.gz
-
-# Expand the devel tarball
-rocm-sdk init
-
-# Set ROCM_PATH and activate Visual Studio environment, then build
-export ROCM_PATH="$(rocm-sdk path --root)"
-export PATH="${ROCM_PATH}/bin:${PATH}"
-git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
-cmake -G Ninja -DCOMPUTE_BACKEND=hip -DBNB_ROCM_ARCH="gfx1100" -DCMAKE_BUILD_TYPE=Release -S .
-cmake --build . --config Release
-pip install .
-```
-</hfoption>
-</hfoptions>
-
-## Apple Silicon / Metal (Preview)[[apple-silicon]]
-
-* Support for Apple Silicon GPUs (the PyTorch `mps` backend) is currently in a preview state.
-* The native backend provides hand-written Metal kernels for **4-bit (NF4/FP4) and 8-bit blockwise quantization and dequantization**, each verified bit-exact against the CPU reference.
-* **4-bit (QLoRA-style) inference works end to end**, but the 4-bit matmul is **not yet fused**: the quantized weights are dequantized through a Metal kernel and the matmul then runs via `torch.nn.functional.linear`. This is correct but not yet performance-optimized.
-* **Not supported on `mps`:** LLM.int8() and the 8-bit optimizers. These raise `NotImplementedError` (or fall through to slow generic paths) and are not part of the current backend.
-* When the native library is not present, the `mps` backend transparently falls back to a pure-PyTorch implementation, so nothing hard-crashes on an unbuilt install.
-
-### Requirements
-
-* macOS 14 (Sonoma) or newer.
-* An Apple Silicon Mac (M1 or newer).
-* A recent PyTorch build with MPS support (PyTorch >= 2.4). Verify with:
-
-```py
-import torch
-print(torch.backends.mps.is_available())  # should print True
-```
-
-### Compile from Source[[apple-silicon-compile]]
-
-Native MPS support is included in the built wheel, so a standard `pip install bitsandbytes` will use the Metal kernels when they are packaged for your platform. To build from source (for development, or a platform without a prebuilt wheel), you need CMake >= **3.31.6**, Python >= **3.10**, and the Xcode command line tools (which provide `xcrun metal` / `xcrun metallib` and an Objective-C++ compiler).
-
-```bash
-# Clone bitsandbytes repo
-git clone https://github.com/bitsandbytes-foundation/bitsandbytes.git && cd bitsandbytes/
-
-# Configure and build the Metal backend (produces libbitsandbytes_mps.dylib
-# and bitsandbytes.metallib inside the bitsandbytes/ package directory)
-cmake -DCOMPUTE_BACKEND=mps -S .
-cmake --build . --config Release
-
-# Install
-pip install -e .   # `-e` for "editable" install, when developing BNB (otherwise leave that out)
-```
-
-> [!TIP]
-> Configure in-source (`cmake -S .`, i.e. with the build directory at the repository root) so the compiled `bitsandbytes.metallib` lands next to `libbitsandbytes_mps.dylib` inside the `bitsandbytes/` package directory, where the loader expects it.
 
 ## Preview Wheels[[preview-wheels]]
 

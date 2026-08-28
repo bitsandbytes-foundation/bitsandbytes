@@ -278,7 +278,7 @@ elseif(BUILD_HIP)
     elseif(AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
       set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
     elseif(NOT CMAKE_HIP_ARCHITECTURES)
-      set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+      set(CMAKE_HIP_ARCHITECTURES "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
     endif()
 
     enable_language(HIP)
@@ -331,12 +331,28 @@ elseif(BUILD_MPS)
     add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
 elseif(BUILD_XPU)
     list(APPEND SRC_FILES ${XPU_FILES})
-    string(APPEND BNB_OUTPUT_NAME "_xpu")
     add_compile_definitions(BUILD_XPU)
     set(CMAKE_C_COMPILER icx)
     set(CMAKE_CXX_COMPILER icpx)
     if(WIN32)
         set(CMAKE_CXX_COMPILER icx)
+    endif()
+
+    # Get the oneAPI year (2025, 2026, ...) so we can name the library with it.
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} --version
+        OUTPUT_VARIABLE _XPU_COMPILER_VERSION_OUTPUT
+        ERROR_VARIABLE _XPU_COMPILER_VERSION_OUTPUT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    string(REGEX MATCH "20[0-9][0-9]" XPU_VERSION "${_XPU_COMPILER_VERSION_OUTPUT}")
+
+    if(XPU_VERSION)
+        message(STATUS "XPU oneAPI Version: ${XPU_VERSION}")
+        string(APPEND BNB_OUTPUT_NAME "_xpu${XPU_VERSION}")
+    else()
+        message(WARNING "Could not detect oneAPI version from icpx; building unversioned libbitsandbytes_xpu.")
+        string(APPEND BNB_OUTPUT_NAME "_xpu")
     endif()
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
@@ -352,12 +368,18 @@ if(WIN32)
 endif()
 
 if(MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast")
+
+    # Only real cl.exe needs (and accepts) the conformant preprocessor switch;
+    # clang-cl / icx are already conformant and warn on it.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor")
+    endif()
+
     # /arch:AVX2 is only valid for x86/x64 targets, not ARM64
     string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _msvc_arch)
     if(_msvc_arch MATCHES "x86|x64|amd64")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2 /fp:fast")
-    else()
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2")
     endif()
 endif()
 
