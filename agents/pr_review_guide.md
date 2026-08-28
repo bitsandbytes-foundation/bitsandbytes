@@ -44,16 +44,16 @@ Before performing any PR review, you must have read and internalized the followi
 Each one provides reference knowledge that this guide will tell you to consult at specific
 steps. Do not skip any of them.
 
-| Document | What it provides | When you need it |
-|---|---|---|
-| `agents/architecture_guide.md` | Full codebase architecture: layer stack, module organization, backend dispatch, CUDA kernel structure, build system | Understanding what code does, where things belong, whether changes follow existing patterns |
-| `agents/code_standards.md` | Naming conventions, error handling patterns, test patterns, docstring style, type annotation expectations, backend registration patterns | Evaluating code quality, spotting pattern violations, assessing whether code matches project style |
-| `agents/api_surface.md` | Complete catalog of every public API: classes, functions, parameters, return types, module-level attributes | Detecting API changes, verifying backward compatibility, checking if new code matches existing signatures |
-| `agents/downstream_integrations.md` | How Transformers, PEFT, Accelerate, TGI, and vLLM use bitsandbytes: exact API calls, attribute access, isinstance checks, serialization formats, breaking-change risk tables | Assessing downstream impact of any change that touches public APIs, parameter classes, or serialization |
-| `agents/kbit_gemm_context.md` | Design context for kbit quantization and GEMM kernels: bit-plane format, codebook design, E4M4 absmax, CUDA kernel architecture | Reviewing CUDA kernel changes, quantization changes, or anything touching the kbit subsystem |
-| `agents/linting_guide.md` | Pre-commit hooks, ruff configuration, clang-format for C/CUDA, common agent mistakes | Verifying the PR will pass CI lint checks |
-| `agents/testing_guide.md` | Test suite characteristics, parallelization, known architecture-specific failures, build prerequisites | Assessing test adequacy, understanding test failures |
-| `agents/security_guide.md` | Trust model for contributors, supply chain risk assessment, security review checklist for external PRs, dependency vetting | Evaluating external contributions, assessing new dependencies, reviewing build system changes that affect the supply chain |
+| Document                            | What it provides                                                                                                                                                             | When you need it                                                                                                           |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `agents/architecture_guide.md`      | Full codebase architecture: layer stack, module organization, backend dispatch, CUDA kernel structure, build system                                                          | Understanding what code does, where things belong, whether changes follow existing patterns                                |
+| `agents/code_standards.md`          | Naming conventions, error handling patterns, test patterns, docstring style, type annotation expectations, backend registration patterns                                     | Evaluating code quality, spotting pattern violations, assessing whether code matches project style                         |
+| `agents/api_surface.md`             | Complete catalog of every public API: classes, functions, parameters, return types, module-level attributes                                                                  | Detecting API changes, verifying backward compatibility, checking if new code matches existing signatures                  |
+| `agents/downstream_integrations.md` | How Transformers, PEFT, Accelerate, TGI, and vLLM use bitsandbytes: exact API calls, attribute access, isinstance checks, serialization formats, breaking-change risk tables | Assessing downstream impact of any change that touches public APIs, parameter classes, or serialization                    |
+| `agents/kbit_gemm_context.md`       | Design context for kbit quantization and GEMM kernels: bit-plane format, codebook design, E4M4 absmax, CUDA kernel architecture                                              | Reviewing CUDA kernel changes, quantization changes, or anything touching the kbit subsystem                               |
+| `agents/linting_guide.md`           | Pre-commit hooks, ruff configuration, clang-format for C/CUDA, common agent mistakes                                                                                         | Verifying the PR will pass CI lint checks                                                                                  |
+| `agents/testing_guide.md`           | Test suite characteristics, parallelization, known architecture-specific failures, build prerequisites                                                                       | Assessing test adequacy, understanding test failures                                                                       |
+| `agents/security_guide.md`          | Trust model for contributors, supply chain risk assessment, security review checklist for external PRs, dependency vetting                                                   | Evaluating external contributions, assessing new dependencies, reviewing build system changes that affect the supply chain |
 
 You do not need to re-read these documents for every review. But you must have read them at
 least once, and you must consult the relevant ones during each review as directed by the
@@ -171,13 +171,13 @@ This check prevents wasted effort reviewing PRs that are already waiting on the 
 
 Use the PR size to calibrate your review depth:
 
-| Size | Lines changed | Expected review depth |
-|---|---|---|
-| Trivial | < 20 lines, 1-2 files | Quick scan, verify correctness |
-| Small | 20-100 lines, 1-4 files | Careful line-by-line review |
-| Medium | 100-500 lines, 3-10 files | Full review with all checklists |
-| Large | 500-2000 lines, 5-20 files | Full review, may need multiple passes |
-| Very large | > 2000 lines | Consider whether the PR should be split |
+| Size       | Lines changed              | Expected review depth                   |
+| ---------- | -------------------------- | --------------------------------------- |
+| Trivial    | < 20 lines, 1-2 files      | Quick scan, verify correctness          |
+| Small      | 20-100 lines, 1-4 files    | Careful line-by-line review             |
+| Medium     | 100-500 lines, 3-10 files  | Full review with all checklists         |
+| Large      | 500-2000 lines, 5-20 files | Full review, may need multiple passes   |
+| Very large | > 2000 lines               | Consider whether the PR should be split |
 
 Very large PRs (> 2000 lines) are a yellow flag. Unless the PR is a new feature with
 mostly new files (which is acceptable), suggest splitting it into smaller, independently
@@ -286,14 +286,14 @@ The CI matrix runs:
 
 ### 5.2 CI Status Decision Table
 
-| CI Status | Action |
-|---|---|
-| All checks pass | Proceed with review |
-| Lint fails | Note in review. PR cannot merge until lint passes. Check if the failure is in the PR's code or pre-existing. |
-| Build fails | Note in review. Read the build log to determine if the failure is caused by the PR or is a pre-existing/infrastructure issue. |
-| Tests fail | Read the failure log. Determine: (a) is the failure caused by the PR, (b) is it a known architecture-specific failure (see `testing_guide.md` Known Issues), or (c) is it a flaky test? |
-| CI not triggered | Common for external contributor PRs from forks. Note this in your review — CI must run before merge. A maintainer may need to approve the workflow run. |
-| Some checks pass, some pending | Wait for completion if possible. If checks have been pending for an unreasonable period, proceed with review but note the incomplete CI. |
+| CI Status                      | Action                                                                                                                                                                                  |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| All checks pass                | Proceed with review                                                                                                                                                                     |
+| Lint fails                     | Note in review. PR cannot merge until lint passes. Check if the failure is in the PR's code or pre-existing.                                                                            |
+| Build fails                    | Note in review. Read the build log to determine if the failure is caused by the PR or is a pre-existing/infrastructure issue.                                                           |
+| Tests fail                     | Read the failure log. Determine: (a) is the failure caused by the PR, (b) is it a known architecture-specific failure (see `testing_guide.md` Known Issues), or (c) is it a flaky test? |
+| CI not triggered               | Common for external contributor PRs from forks. Note this in your review — CI must run before merge. A maintainer may need to approve the workflow run.                                 |
+| Some checks pass, some pending | Wait for completion if possible. If checks have been pending for an unreasonable period, proceed with review but note the incomplete CI.                                                |
 
 ### 5.3 Pre-existing CI Failures
 
@@ -325,12 +325,14 @@ pre-merge requirement.
 ### 6.1 Find the Issue
 
 Look for issue references in:
+
 - The PR body ("Fixes #NNN", "Closes #NNN", "Resolves #NNN")
 - The PR title (e.g., "Fix: ... (#NNN)")
 - The branch name (e.g., `fix/issue-1234`)
 - Commit messages
 
 If there is no linked issue, that is acceptable for:
+
 - Documentation PRs
 - Style/lint PRs
 - CI/build improvements
@@ -432,18 +434,21 @@ gh pr diff <NUMBER> --name-only  # get list of changed files
 These checks apply to every PR regardless of classification:
 
 **Correctness:**
+
 - Does the code do what the PR description says it does?
 - Are there off-by-one errors, wrong variable names, or logic inversions?
 - Are edge cases handled (empty inputs, None values, zero-length tensors)?
 - Are error messages accurate and helpful?
 
 **Style and patterns (consult `code_standards.md`):**
+
 - Does the code follow the naming conventions in `code_standards.md`?
 - Does it use the same error handling patterns as surrounding code?
 - Are imports organized correctly (stdlib, third-party, local)?
 - Is the code appropriately commented? (Not over-commented, not under-commented)
 
 **Safety:**
+
 - No hardcoded file paths, credentials, or secrets
 - No unbounded memory allocation
 - No infinite loops or recursion without bounds
@@ -465,40 +470,40 @@ correct and complete.
 #### 8.1.1 Root Cause Analysis
 
 - [ ] **Identify the root cause.** Read the issue (Step 4) and the code change. Can you
-  explain, in one sentence, what was wrong and why? If you can't, the fix may be
-  incomplete or addressing a symptom.
+      explain, in one sentence, what was wrong and why? If you can't, the fix may be
+      incomplete or addressing a symptom.
 
 - [ ] **Verify the fix targets the root cause.** A common mistake is fixing the symptom
-  (e.g., catching an exception) rather than the cause (e.g., the data that triggered the
-  exception). If the fix adds a try/except, ask: why does the exception occur? Should it
-  be prevented instead of caught?
+      (e.g., catching an exception) rather than the cause (e.g., the data that triggered the
+      exception). If the fix adds a try/except, ask: why does the exception occur? Should it
+      be prevented instead of caught?
 
 - [ ] **Check for related code paths.** If the bug was in function A, are there similar
-  functions B and C that have the same bug? The fix should address all instances, not just
-  the one that was reported.
+      functions B and C that have the same bug? The fix should address all instances, not just
+      the one that was reported.
 
 #### 8.1.2 Regression Risk
 
 - [ ] **Could the fix break existing behavior?** For example, if the fix changes a
-  default value, what happens to code that relied on the old default?
+      default value, what happens to code that relied on the old default?
 
 - [ ] **Does the fix change the function's contract?** If a function previously accepted
-  a certain input and now rejects it (or vice versa), that's a behavior change, not just
-  a bug fix.
+      a certain input and now rejects it (or vice versa), that's a behavior change, not just
+      a bug fix.
 
 - [ ] **Is the fix backward compatible?** Users may have workarounds for the bug. Does
-  the fix invalidate those workarounds in a harmful way?
+      the fix invalidate those workarounds in a harmful way?
 
 #### 8.1.3 Test Coverage
 
 - [ ] **Does the PR include a test that reproduces the bug?** A bug fix without a
-  regression test is incomplete. The test should fail without the fix and pass with it.
+      regression test is incomplete. The test should fail without the fix and pass with it.
 
 - [ ] **Does the test cover the exact scenario from the issue?** If the issue has a
-  reproducer, the test should be equivalent to that reproducer.
+      reproducer, the test should be equivalent to that reproducer.
 
 - [ ] **Are edge cases tested?** The bug may have been triggered by a specific input. Are
-  related edge cases (boundary values, different dtypes, different devices) also tested?
+      related edge cases (boundary values, different dtypes, different devices) also tested?
 
 ### 8.2 New Features
 
@@ -509,44 +514,44 @@ patterns that future code will follow.
 #### 8.2.1 Design Assessment
 
 - [ ] **Is this the right approach?** Consider whether the feature could be implemented
-  more simply, or whether it duplicates existing functionality.
+      more simply, or whether it duplicates existing functionality.
 
 - [ ] **Does it follow existing patterns?** Consult `architecture_guide.md` for the
-  codebase's layering (functional.py → _ops.py → backends → C/CUDA). New features should
-  follow the same layer structure.
+      codebase's layering (functional.py → \_ops.py → backends → C/CUDA). New features should
+      follow the same layer structure.
 
 - [ ] **Is the API surface appropriate?** Consult `api_surface.md`. Does the new API
-  follow the naming and parameter conventions of existing APIs? Is it at the right
-  abstraction level?
+      follow the naming and parameter conventions of existing APIs? Is it at the right
+      abstraction level?
 
 - [ ] **Is the scope appropriate?** Does the PR implement exactly what's needed, or does
-  it over-engineer with unnecessary configuration, abstraction layers, or speculative
-  future-proofing?
+      it over-engineer with unnecessary configuration, abstraction layers, or speculative
+      future-proofing?
 
 #### 8.2.2 API Design
 
 - [ ] **Parameter names and defaults.** Do they follow existing conventions? Are defaults
-  sensible?
+      sensible?
 
 - [ ] **Return types.** Are they consistent with similar functions?
 
 - [ ] **Error handling.** What happens with invalid inputs? Are error messages clear?
 
 - [ ] **Documentation.** New public APIs need docstrings. Check that they explain what the
-  function does, what each parameter means, and what it returns.
+      function does, what each parameter means, and what it returns.
 
 #### 8.2.3 Backend Registration
 
 If the feature adds a new op or modifies an existing one:
 
 - [ ] **`_ops.py` registration.** Is the op registered with `torch.library`? Does it have
-  a fake tensor implementation for `torch.compile`?
+      a fake tensor implementation for `torch.compile`?
 
 - [ ] **Backend dispatch.** Does the CUDA backend implement the op? What about the CPU
-  backend? If the op is CUDA-only, does the CPU path raise a clear error?
+      backend? If the op is CUDA-only, does the CPU path raise a clear error?
 
 - [ ] **C/CUDA interface.** Does `csrc/pythonInterface.cpp` have the correct extern "C"
-  wrapper? Does it match the Python binding?
+      wrapper? Does it match the Python binding?
 
 Consult `architecture_guide.md` Sections on the op registration pipeline and backend
 dispatch for the expected patterns.
@@ -556,22 +561,22 @@ dispatch for the expected patterns.
 If the feature includes new CUDA kernels, perform a thorough kernel review:
 
 - [ ] **Launch configuration.** Are grid and block dimensions correct? Are they bounded
-  for large inputs?
+      for large inputs?
 
 - [ ] **Memory access patterns.** Are global memory accesses coalesced? Are shared memory
-  accesses free of bank conflicts?
+      accesses free of bank conflicts?
 
 - [ ] **Boundary handling.** What happens when the input size is not a multiple of the
-  block size? Are there proper bounds checks?
+      block size? Are there proper bounds checks?
 
 - [ ] **Numeric precision.** Is the accumulation dtype appropriate? Are there potential
-  overflow or underflow issues?
+      overflow or underflow issues?
 
 - [ ] **Error handling.** Does the kernel check for CUDA errors after launch? Are
-  assertions and bounds checks present in debug builds?
+      assertions and bounds checks present in debug builds?
 
 - [ ] **Template instantiation.** Are all necessary template variants instantiated? The
-  common pattern is dtype (fp16, bf16, fp32) x feature-specific parameters.
+      common pattern is dtype (fp16, bf16, fp32) x feature-specific parameters.
 
 Consult `kbit_gemm_context.md` for reference on the project's CUDA kernel patterns,
 including the warp-level programming style, bit-plane format, and E4M4 absmax handling.
@@ -581,18 +586,18 @@ including the warp-level programming style, bit-plane format, and E4M4 absmax ha
 - [ ] **Happy path tests.** Do tests cover the primary use case?
 
 - [ ] **Edge cases.** Empty inputs, single-element inputs, maximum-size inputs, boundary
-  values for parameters.
+      values for parameters.
 
 - [ ] **Dtype coverage.** Tests should cover at least fp16, bf16, and fp32 where
-  applicable.
+      applicable.
 
 - [ ] **Device coverage.** Tests should cover CUDA (and CPU if the feature supports it).
 
 - [ ] **Error path tests.** Do tests verify that invalid inputs produce clear error
-  messages?
+      messages?
 
 - [ ] **Round-trip tests.** For quantization features: quantize → dequantize should
-  produce results within expected error bounds.
+      produce results within expected error bounds.
 
 ### 8.3 Deprecation and Removal
 
@@ -602,35 +607,35 @@ they directly break downstream consumers.
 #### 8.3.1 Removal Safety
 
 - [ ] **Is the removed API still used by downstream projects?** Consult
-  `downstream_integrations.md` Section 6 (Consolidated API Surface) and the per-project
-  sections. Cross-reference every removed class, function, parameter, and attribute
-  against the downstream usage tables.
+      `downstream_integrations.md` Section 6 (Consolidated API Surface) and the per-project
+      sections. Cross-reference every removed class, function, parameter, and attribute
+      against the downstream usage tables.
 
 - [ ] **Was the API previously deprecated with a warning?** Best practice is to deprecate
-  first (with a `DeprecationWarning`), then remove in a later release. If the PR removes
-  without prior deprecation, this is a concern.
+      first (with a `DeprecationWarning`), then remove in a later release. If the PR removes
+      without prior deprecation, this is a concern.
 
 - [ ] **Is there a migration path?** Users of the removed API should have a clear
-  alternative. The PR description or deprecation warning should explain what to use
-  instead.
+      alternative. The PR description or deprecation warning should explain what to use
+      instead.
 
 - [ ] **Does the removal affect the serialization format?** If removed code was involved
-  in state dict serialization or deserialization, removing it could break existing
-  checkpoints. This is a critical concern.
+      in state dict serialization or deserialization, removing it could break existing
+      checkpoints. This is a critical concern.
 
 #### 8.3.2 Scope Verification
 
 - [ ] **Are all references removed?** If a function is deleted, are all call sites also
-  updated? Search for the function name across the entire codebase.
+      updated? Search for the function name across the entire codebase.
 
 - [ ] **Are tests updated?** Tests for removed functionality should also be removed or
-  updated. Leftover tests that reference deleted code will fail.
+      updated. Leftover tests that reference deleted code will fail.
 
 - [ ] **Are imports cleaned up?** Removed modules should be removed from `__init__.py`
-  exports.
+      exports.
 
 - [ ] **Is documentation updated?** References to removed APIs in docs, docstrings, and
-  comments should be cleaned up.
+      comments should be cleaned up.
 
 ### 8.4 Refactoring
 
@@ -640,25 +645,25 @@ restructuring inadvertently changes behavior.
 #### 8.4.1 Behavior Preservation
 
 - [ ] **Does the refactored code produce identical output for identical input?** For
-  numerical code, this means bit-identical results. For non-numerical code, it means
-  the same observable behavior.
+      numerical code, this means bit-identical results. For non-numerical code, it means
+      the same observable behavior.
 
 - [ ] **Are all callers updated?** If a function's signature changes, all call sites must
-  be updated.
+      be updated.
 
 - [ ] **Is the public API preserved?** Refactoring should not change the public API
-  unless that's explicitly part of the PR's goal. Check `api_surface.md` for what's
-  public.
+      unless that's explicitly part of the PR's goal. Check `api_surface.md` for what's
+      public.
 
 #### 8.4.2 Justification
 
 - [ ] **Is the refactoring motivated?** The PR should explain why the restructuring is
-  needed. "Cleaner code" is weak justification; "enables X feature" or "fixes Y
-  maintenance problem" is strong justification.
+      needed. "Cleaner code" is weak justification; "enables X feature" or "fixes Y
+      maintenance problem" is strong justification.
 
 - [ ] **Is the scope appropriate?** Refactoring PRs that touch many files are hard to
-  review and risky. If the PR touches more than ~10 files, consider whether it should
-  be split.
+      review and risky. If the PR touches more than ~10 files, consider whether it should
+      be split.
 
 ### 8.5 Documentation
 
@@ -667,33 +672,33 @@ Documentation PRs change docs, docstrings, comments, or markdown files.
 #### 8.5.1 Accuracy
 
 - [ ] **Are code examples correct?** Run them mentally (or actually run them) to verify
-  they work. Check that:
+      they work. Check that:
   - Import paths are correct
   - Function names match the actual API (consult `api_surface.md`)
   - Parameter names and types are correct
   - The example produces the described output
 
 - [ ] **Are API references current?** If the docs reference specific functions, classes,
-  or parameters, verify they still exist and have the described behavior.
+      or parameters, verify they still exist and have the described behavior.
 
 - [ ] **Are version-specific claims correct?** If the docs say "available since v0.43.0"
-  or "requires PyTorch >= 2.0", verify these claims.
+      or "requires PyTorch >= 2.0", verify these claims.
 
 #### 8.5.2 Completeness
 
 - [ ] **Does the documentation cover the right scope?** Not too narrow (missing important
-  details) and not too broad (including irrelevant information).
+      details) and not too broad (including irrelevant information).
 
 - [ ] **Are prerequisites stated?** If the documented feature requires specific hardware,
-  software versions, or configuration, are these stated?
+      software versions, or configuration, are these stated?
 
 #### 8.5.3 Style
 
 - [ ] **Consistent with existing docs.** Check the tone, formatting, and structure of
-  nearby documentation. New docs should match.
+      nearby documentation. New docs should match.
 
 - [ ] **No stale references.** If the docs reference other files or URLs, verify they
-  exist and are current.
+      exist and are current.
 
 ### 8.6 Build System and CI
 
@@ -703,32 +708,32 @@ workflows, or pre-commit configuration.
 #### 8.6.1 Build System Changes
 
 - [ ] **Does the change break any existing build configuration?** CMake changes that work
-  for one platform may break another. Check that CUDA, ROCm, CPU, and any platform-specific
-  configurations are all still valid.
+      for one platform may break another. Check that CUDA, ROCm, CPU, and any platform-specific
+      configurations are all still valid.
 
 - [ ] **Are new dependencies justified?** Adding a build dependency increases the
-  maintenance burden. Is it necessary?
+      maintenance burden. Is it necessary?
 
 - [ ] **Is the change backward compatible with supported toolchains?** Check the minimum
-  supported CMake version, compiler versions, and CUDA toolkit versions.
+      supported CMake version, compiler versions, and CUDA toolkit versions.
 
 - [ ] **Does pyproject.toml maintain correct metadata?** Version constraints, extras,
-  entry points, etc.
+      entry points, etc.
 
 #### 8.6.2 CI Changes
 
 - [ ] **Do workflow changes maintain the existing test matrix?** Removing a test
-  configuration is a significant change that should be explicitly justified.
+      configuration is a significant change that should be explicitly justified.
 
 - [ ] **Are action versions pinned to SHAs?** Using `@v4` is less secure than
-  `@abc123def`. If the PR upgrades actions, verify the new SHAs are from the correct
-  repositories.
+      `@abc123def`. If the PR upgrades actions, verify the new SHAs are from the correct
+      repositories.
 
 - [ ] **Do new workflow steps have appropriate timeouts?** CI jobs without timeouts can
-  run indefinitely and block the queue.
+      run indefinitely and block the queue.
 
 - [ ] **Are secrets handled correctly?** Workflow changes should not expose secrets or
-  change who can trigger workflows with access to secrets.
+      change who can trigger workflows with access to secrets.
 
 ### 8.7 Test Changes
 
@@ -737,33 +742,33 @@ PRs that only change test files (no implementation changes).
 #### 8.7.1 Test Quality
 
 - [ ] **Do new tests test the right thing?** A test that always passes regardless of
-  the implementation is useless. Verify the test would fail if the implementation had
-  the bug or missing feature.
+      the implementation is useless. Verify the test would fail if the implementation had
+      the bug or missing feature.
 
 - [ ] **Are assertions specific enough?** Testing `assert result is not None` is rarely
-  useful. Tests should check specific values, shapes, dtypes, and error conditions.
+      useful. Tests should check specific values, shapes, dtypes, and error conditions.
 
 - [ ] **Are thresholds justified?** For numerical tests with tolerance thresholds, are
-  the thresholds derived from analysis (e.g., quantization error bounds) or just picked
-  to make the test pass? Consult `code_standards.md` for the project's approach to
-  precision thresholds.
+      the thresholds derived from analysis (e.g., quantization error bounds) or just picked
+      to make the test pass? Consult `code_standards.md` for the project's approach to
+      precision thresholds.
 
 - [ ] **Do tests clean up after themselves?** Tests that allocate GPU memory, create
-  temporary files, or modify global state should clean up. Leftover state can cause
-  interference with other tests under parallel execution.
+      temporary files, or modify global state should clean up. Leftover state can cause
+      interference with other tests under parallel execution.
 
 #### 8.7.2 Test Infrastructure
 
 - [ ] **Are new test dependencies needed?** If the tests require packages not in the
-  existing test dependencies, they must be added to `pyproject.toml`.
+      existing test dependencies, they must be added to `pyproject.toml`.
 
 - [ ] **Are tests parametrized appropriately?** The bitsandbytes test suite uses
-  extensive parametrization. New tests should follow the same pattern unless there's
-  a good reason not to.
+      extensive parametrization. New tests should follow the same pattern unless there's
+      a good reason not to.
 
 - [ ] **Will the tests work in CI?** CI may have limited GPU memory, specific CUDA
-  versions, or architecture-specific behavior. Tests should not assume a specific GPU
-  model.
+      versions, or architecture-specific behavior. Tests should not assume a specific GPU
+      model.
 
 ---
 
@@ -805,20 +810,20 @@ For each changed function, class, method, or attribute:
 
 3. **Classify the risk level:**
 
-   | Change type | Risk | Example |
-   |---|---|---|
-   | Function removed | CRITICAL | Removing `dequantize_4bit()` |
-   | Constructor parameter removed | CRITICAL | Removing `quant_type` from `Linear4bit()` |
-   | Constructor parameter renamed | HIGH | `compress_statistics` → `double_quant` |
-   | Constructor parameter reordered | HIGH | Positional args in different order |
-   | New required constructor parameter | HIGH | Adding `device` as non-optional |
-   | Attribute removed or renamed | HIGH | `Params4bit.quant_state` → `Params4bit.qstate` |
-   | Return type changed | HIGH | Function returning Tensor now returns tuple |
-   | Behavior changed for existing inputs | MEDIUM-HIGH | `quantize_4bit` now normalizes input |
-   | New optional parameter with default | LOW | Adding `blocksize=64` with default 64 |
-   | New function or class | LOW | Adding `Linear3bit` alongside `Linear4bit` |
-   | Bug fix that makes behavior match docs | LOW | Fixing `out` parameter to actually work |
-   | Internal implementation change, same API | MINIMAL | Rewriting kernel for speed |
+   | Change type                              | Risk        | Example                                        |
+   | ---------------------------------------- | ----------- | ---------------------------------------------- |
+   | Function removed                         | CRITICAL    | Removing `dequantize_4bit()`                   |
+   | Constructor parameter removed            | CRITICAL    | Removing `quant_type` from `Linear4bit()`      |
+   | Constructor parameter renamed            | HIGH        | `compress_statistics` → `double_quant`         |
+   | Constructor parameter reordered          | HIGH        | Positional args in different order             |
+   | New required constructor parameter       | HIGH        | Adding `device` as non-optional                |
+   | Attribute removed or renamed             | HIGH        | `Params4bit.quant_state` → `Params4bit.qstate` |
+   | Return type changed                      | HIGH        | Function returning Tensor now returns tuple    |
+   | Behavior changed for existing inputs     | MEDIUM-HIGH | `quantize_4bit` now normalizes input           |
+   | New optional parameter with default      | LOW         | Adding `blocksize=64` with default 64          |
+   | New function or class                    | LOW         | Adding `Linear3bit` alongside `Linear4bit`     |
+   | Bug fix that makes behavior match docs   | LOW         | Fixing `out` parameter to actually work        |
+   | Internal implementation change, same API | MINIMAL     | Rewriting kernel for speed                     |
 
 4. **For HIGH or CRITICAL risk, list the specific downstream breakage:**
 
@@ -937,6 +942,7 @@ done
 automatically, but the result may not be semantically correct.
 
 **Semantic conflicts**: Two PRs modify different files but interact logically. Examples:
+
 - PR A adds a new function that PR B's removal would delete
 - PR A changes a default value that PR B's test depends on
 - PR A adds a new optimizer variant that PR B's deprecation sweep would remove
@@ -977,39 +983,43 @@ If there are no conflicts, state: "No cross-PR conflicts detected."
 
 Every non-trivial code change should have tests. Evaluate the PR's test coverage:
 
-| PR Type | Test Expectation |
-|---|---|
-| Bug fix | Must have a regression test that fails without the fix |
-| New feature | Must have tests covering happy path, edge cases, and error paths |
-| Deprecation/removal | Must update or remove tests for deleted code |
-| Refactoring | Existing tests should still pass; no new tests needed unless behavior is meant to change |
-| Documentation | No tests needed |
-| Build/CI | Build/CI tests may run as part of CI itself |
-| Test-only | N/A (the PR IS the tests) |
+| PR Type             | Test Expectation                                                                         |
+| ------------------- | ---------------------------------------------------------------------------------------- |
+| Bug fix             | Must have a regression test that fails without the fix                                   |
+| New feature         | Must have tests covering happy path, edge cases, and error paths                         |
+| Deprecation/removal | Must update or remove tests for deleted code                                             |
+| Refactoring         | Existing tests should still pass; no new tests needed unless behavior is meant to change |
+| Documentation       | No tests needed                                                                          |
+| Build/CI            | Build/CI tests may run as part of CI itself                                              |
+| Test-only           | N/A (the PR IS the tests)                                                                |
 
 ### 11.2 Test Quality Assessment
 
 For each test in the PR, evaluate:
 
 **Does it test the right thing?**
+
 - The test should verify the behavior described in the PR, not just that the code runs
   without errors.
 - A test that calls the function and checks `isinstance(result, torch.Tensor)` is too
   weak. It should check values, shapes, dtypes, and device.
 
 **Is it deterministic?**
+
 - Tests that depend on random data should either set a seed or use tolerances that
   account for random variation.
-- The bitsandbytes project uses statistical thresholds (mean + N*std) for precision
+- The bitsandbytes project uses statistical thresholds (mean + N\*std) for precision
   tests. New precision tests should follow this pattern (see `code_standards.md`).
 
 **Is it isolated?**
+
 - Tests should not depend on other tests having run first.
 - Tests should not depend on specific GPU models or CUDA versions unless explicitly
   marked as architecture-specific.
 - Tests should clean up GPU memory and temporary state.
 
 **Does it match the project's test style?**
+
 - Consult `code_standards.md` for test patterns.
 - Tests should use `pytest.mark.parametrize` for multi-configuration coverage.
 - Tests should use `pytest.mark.skipif` for hardware/software-specific tests.
@@ -1026,6 +1036,7 @@ Look for scenarios that the PR's tests do NOT cover but should:
 - **Error paths**: What happens with invalid inputs? Are the error messages tested?
 
 Note coverage gaps in your review, but distinguish between:
+
 - **Blocking gaps**: Missing tests for the primary functionality (must fix before merge)
 - **Non-blocking gaps**: Missing edge case tests (nice to have, can be added later)
 
@@ -1034,15 +1045,15 @@ Note coverage gaps in your review, but distinguish between:
 For tests that compare quantized/dequantized values against reference values:
 
 - [ ] **Are thresholds derived from analysis, not just empirical tuning?** The threshold
-  should be explainable in terms of the quantization error model (e.g., codebook gap
-  plus absmax encoding error plus accumulation error).
+      should be explainable in terms of the quantization error model (e.g., codebook gap
+      plus absmax encoding error plus accumulation error).
 
 - [ ] **Do thresholds use the (mean, std) pattern?** The project standard is
-  `threshold = mean + N*std` where N >= 7. See `code_standards.md` for details.
+      `threshold = mean + N*std` where N >= 7. See `code_standards.md` for details.
 
 - [ ] **Are thresholds platform-independent?** A threshold that passes on RTX 4090 but
-  fails on T4 or Blackwell is not robust. The (mean, std) pattern with sufficient sigma
-  headroom handles this.
+      fails on T4 or Blackwell is not robust. The (mean, std) pattern with sufficient sigma
+      headroom handles this.
 
 ---
 
@@ -1074,22 +1085,26 @@ Changes to these paths deserve careful performance scrutiny.
 ### 12.3 Common Performance Concerns
 
 **New `.contiguous()` calls:**
+
 - `.contiguous()` is a no-op for already-contiguous tensors (just returns `self`)
 - For non-contiguous tensors, it allocates a new tensor and copies data
 - Adding `.contiguous()` at the top of a function is generally safe (the common case
   pays no cost), but verify that it's not called in a tight loop
 
 **New `.clone()` calls:**
+
 - `.clone()` always allocates and copies, even for contiguous tensors
 - In the hot path, an unnecessary `.clone()` adds measurable overhead for large tensors
 - If the clone is needed for correctness (e.g., preventing mutation of user data), it's
   justified. Note the tradeoff in your review.
 
 **New Python-level conditionals:**
+
 - Adding `if` statements to the forward path is generally fine (branch prediction)
 - But adding Python-level loops or list comprehensions in the hot path is a concern
 
 **Changed kernel launch parameters:**
+
 - Changing grid size or block size affects occupancy and may cause performance
   regressions on some GPU architectures
 - Changing shared memory usage affects the number of concurrent blocks per SM
@@ -1138,6 +1153,7 @@ def _(input_tensor, ...):
 ```
 
 Check:
+
 - [ ] Does the fake implementation return the correct shape?
 - [ ] Does the fake implementation return the correct dtype?
 - [ ] Does the fake implementation handle all parameter combinations?
@@ -1149,7 +1165,7 @@ The project uses `torch.library.opcheck` to verify op correctness. If the PR add
 modifies ops, verify that:
 
 - [ ] The op has an opcheck test (typically in the same test file as the op's
-  functionality tests)
+      functionality tests)
 - [ ] The opcheck test passes with all standard opcheck test utilities
 
 ### 13.4 Graph Breaks
@@ -1190,6 +1206,7 @@ Check serialization compatibility when the PR changes:
 The current checkpoint format uses these keys per weight tensor:
 
 **4-bit:**
+
 ```
 model.layer.weight                           # packed quantized data
 model.layer.weight.absmax                    # absmax scales
@@ -1200,6 +1217,7 @@ model.layer.weight.quant_state.bitsandbytes__nf4  # or __fp4
 ```
 
 **8-bit:**
+
 ```
 model.layer.weight                           # int8 data
 model.layer.SCB                              # scale column-wise absmax
@@ -1212,33 +1230,34 @@ change** that affects every downstream consumer and every existing checkpoint.
 ### 14.4 Serialization Compatibility Checklist
 
 - [ ] **Are state dict keys unchanged?** Compare the keys produced by `state_dict()`
-  before and after the change.
+      before and after the change.
 
 - [ ] **Can old checkpoints still be loaded?** The new code must be able to load
-  checkpoints saved by the previous version.
+      checkpoints saved by the previous version.
 
 - [ ] **Can new checkpoints be loaded by old code?** If the new code changes what's
-  saved, it should either be backward compatible or the PR must bump the version and
-  include migration documentation.
+      saved, it should either be backward compatible or the PR must bump the version and
+      include migration documentation.
 
 - [ ] **Is QuantState.from_dict() still compatible?** vLLM uses this to reconstruct
-  QuantState from checkpoint keys. Verify the dict format is unchanged.
+      QuantState from checkpoint keys. Verify the dict format is unchanged.
 
 - [ ] **Is the packed data format unchanged?** The bit-plane layout, blocksize, and
-  E4M4 encoding must be the same, or existing quantized weights will decode incorrectly.
+      E4M4 encoding must be the same, or existing quantized weights will decode incorrectly.
 
 ### 14.5 Serialization Impact Rating
 
-| Change | Impact |
-|---|---|
-| Adding a new optional key to state dict | LOW (old code ignores it) |
-| Renaming a key | CRITICAL (all checkpoints break) |
-| Removing a key | CRITICAL (old code expecting it crashes) |
-| Changing the data format behind a key | CRITICAL (silent corruption) |
-| Changing QuantState.as_dict() output | HIGH (vLLM checkpoint loading breaks) |
+| Change                                            | Impact                                     |
+| ------------------------------------------------- | ------------------------------------------ |
+| Adding a new optional key to state dict           | LOW (old code ignores it)                  |
+| Renaming a key                                    | CRITICAL (all checkpoints break)           |
+| Removing a key                                    | CRITICAL (old code expecting it crashes)   |
+| Changing the data format behind a key             | CRITICAL (silent corruption)               |
+| Changing QuantState.as_dict() output              | HIGH (vLLM checkpoint loading breaks)      |
 | Changing Params4bit.from_prequantized() signature | HIGH (Transformers deserialization breaks) |
 
 If the PR has CRITICAL serialization impact, it **must not merge** without:
+
 1. Explicit maintainer approval
 2. A migration plan for existing checkpoints
 3. Coordinated releases with affected downstream projects
@@ -1262,37 +1281,37 @@ Apply this section when the PR changes:
 
 bitsandbytes supports:
 
-| Platform | GPU Backend | Build System | Status |
-|---|---|---|---|
-| Linux x86_64 | CUDA | CMake | Primary, fully tested |
-| Linux x86_64 | ROCm (HIP) | CMake | Supported |
-| Linux aarch64 | CUDA | CMake | Supported |
-| Windows x86_64 | CUDA | CMake | Supported |
-| Windows x86_64 | ROCm | CMake | Experimental |
-| macOS (any) | CPU only | CMake | Supported |
-| macOS (Apple Silicon) | MPS | CMake | Experimental |
-| Any | CPU only | CMake | Supported |
+| Platform              | GPU Backend | Build System | Status                |
+| --------------------- | ----------- | ------------ | --------------------- |
+| Linux x86_64          | CUDA        | CMake        | Primary, fully tested |
+| Linux x86_64          | ROCm (HIP)  | CMake        | Supported             |
+| Linux aarch64         | CUDA        | CMake        | Supported             |
+| Windows x86_64        | CUDA        | CMake        | Supported             |
+| Windows x86_64        | ROCm        | CMake        | Experimental          |
+| macOS (any)           | CPU only    | CMake        | Supported             |
+| macOS (Apple Silicon) | MPS         | CMake        | Experimental          |
+| Any                   | CPU only    | CMake        | Supported             |
 
 ### 15.3 Platform-Specific Review Checklist
 
 - [ ] **Does the change break other platforms?** A Windows fix should not break Linux.
-  Check for platform-specific `#ifdef` guards, `platform.system()` checks, and
-  conditional imports.
+      Check for platform-specific `#ifdef` guards, `platform.system()` checks, and
+      conditional imports.
 
 - [ ] **Is the platform detection robust?** Does it use `platform.system()` (reliable)
-  or `os.name` (less reliable)? Does it handle edge cases (WSL, Cygwin, etc.)?
+      or `os.name` (less reliable)? Does it handle edge cases (WSL, Cygwin, etc.)?
 
 - [ ] **Are path separators correct?** Windows uses `\`, Unix uses `/`. Use
-  `os.path.join()` or `pathlib.Path` instead of hardcoded separators.
+      `os.path.join()` or `pathlib.Path` instead of hardcoded separators.
 
 - [ ] **Are subprocess calls cross-platform?** Commands like `rocminfo` may not exist
-  on all platforms. Are they wrapped in try/except with appropriate fallbacks?
+      on all platforms. Are they wrapped in try/except with appropriate fallbacks?
 
 - [ ] **Are C/C++ includes portable?** `#include <unistd.h>` does not exist on Windows.
-  Platform-specific includes need `#ifdef` guards.
+      Platform-specific includes need `#ifdef` guards.
 
 - [ ] **Does the CMake change work with all supported generators?** Ninja, Make, and
-  Visual Studio generators have different requirements.
+      Visual Studio generators have different requirements.
 
 ### 15.4 ROCm-Specific Concerns
 
@@ -1320,16 +1339,16 @@ bitsandbytes supports:
 Evaluate the PR's commit history:
 
 - [ ] **Are commits logically organized?** Each commit should represent one logical
-  change. A commit that mixes a bug fix with an unrelated formatting change is messy.
+      change. A commit that mixes a bug fix with an unrelated formatting change is messy.
 
 - [ ] **Are commit messages descriptive?** Messages like "fix" or "update" are
-  uninformative. Good messages explain what was changed and why.
+      uninformative. Good messages explain what was changed and why.
 
 - [ ] **Are there unrelated commits?** Sometimes PRs include commits from other branches
-  (e.g., a formatting fix that was cherry-picked across multiple PRs). Flag these.
+      (e.g., a formatting fix that was cherry-picked across multiple PRs). Flag these.
 
 - [ ] **Is the commit count reasonable?** A 3-line bug fix with 15 commits (fix, fix
-  again, oops, format, lint, ...) should be squash-merged.
+      again, oops, format, lint, ...) should be squash-merged.
 
 ### 16.2 Unrelated Changes
 
@@ -1350,12 +1369,12 @@ If the PR contains changes unrelated to its stated purpose:
 
 Based on the commit structure, recommend a merge strategy:
 
-| Situation | Recommendation |
-|---|---|
-| Single well-structured commit | Regular merge or rebase |
-| Multiple well-structured commits telling a clear story | Regular merge or rebase |
-| Multiple commits with messy history | Squash merge |
-| Unrelated commits mixed in | Request cleanup before merge |
+| Situation                                              | Recommendation               |
+| ------------------------------------------------------ | ---------------------------- |
+| Single well-structured commit                          | Regular merge or rebase      |
+| Multiple well-structured commits telling a clear story | Regular merge or rebase      |
+| Multiple commits with messy history                    | Squash merge                 |
+| Unrelated commits mixed in                             | Request cleanup before merge |
 
 ---
 
@@ -1491,13 +1510,13 @@ review body.
 
 **Verdict-to-action mapping:**
 
-| Verdict | GitHub action | Rationale |
-|---|---|---|
-| Approve | `--comment` | Positive signal, but human must formally approve |
-| Approve with minor changes | `--comment` | Same — positive, not a formal gate |
-| Request changes (non-security) | `--comment` | States blocking issues; human decides whether to enforce |
-| Request changes (security) | `--request-changes` | Formally blocks merge until resolved |
-| Needs discussion | `--comment` | Raises questions, not blocking |
+| Verdict                        | GitHub action       | Rationale                                                |
+| ------------------------------ | ------------------- | -------------------------------------------------------- |
+| Approve                        | `--comment`         | Positive signal, but human must formally approve         |
+| Approve with minor changes     | `--comment`         | Same — positive, not a formal gate                       |
+| Request changes (non-security) | `--comment`         | States blocking issues; human decides whether to enforce |
+| Request changes (security)     | `--request-changes` | Formally blocks merge until resolved                     |
+| Needs discussion               | `--comment`         | Raises questions, not blocking                           |
 
 **Posting command (when you have no inline comments):**
 
@@ -1576,15 +1595,15 @@ For security-blocking reviews, change `"event": "COMMENT"` to
 
 **JSON field reference:**
 
-| Field | Type | Description |
-|---|---|---|
-| `body` | string | The full review body text. Use `\n` for newlines. |
-| `event` | string | `COMMENT` for standard reviews, `REQUEST_CHANGES` for security blocks. Never use `APPROVE`. |
-| `comments` | array | Inline comments to attach. Optional — omit or pass `[]` if none. |
-| `comments[].path` | string | File path relative to repo root (e.g., `bitsandbytes/nn/modules.py`). |
+| Field             | Type    | Description                                                                                                                                                                                                                                           |
+| ----------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `body`            | string  | The full review body text. Use `\n` for newlines.                                                                                                                                                                                                     |
+| `event`           | string  | `COMMENT` for standard reviews, `REQUEST_CHANGES` for security blocks. Never use `APPROVE`.                                                                                                                                                           |
+| `comments`        | array   | Inline comments to attach. Optional — omit or pass `[]` if none.                                                                                                                                                                                      |
+| `comments[].path` | string  | File path relative to repo root (e.g., `bitsandbytes/nn/modules.py`).                                                                                                                                                                                 |
 | `comments[].line` | integer | Line number in the file that appears in the diff. For `RIGHT`, this is the line number in the new version. The line must be visible in `gh pr diff` output (a changed line or a context line around a change). The API rejects lines not in the diff. |
-| `comments[].side` | string | `RIGHT` for lines in the new version (most common). `LEFT` for deleted lines only visible in the old version. |
-| `comments[].body` | string | The inline comment text. Use `\n` for newlines. |
+| `comments[].side` | string  | `RIGHT` for lines in the new version (most common). `LEFT` for deleted lines only visible in the old version.                                                                                                                                         |
+| `comments[].body` | string  | The inline comment text. Use `\n` for newlines.                                                                                                                                                                                                       |
 
 **Inline comment guidelines:**
 
@@ -1613,6 +1632,7 @@ When the PR author pushes changes in response to a review, submit a new review �
 not edit or delete the previous one. The previous review stays as history.
 
 The re-review should:
+
 - State which previous blocking issues are resolved and which remain
 - Identify any new issues introduced by the changes
 - Update the checklist accordingly
@@ -1626,6 +1646,7 @@ brief "No blocking issues" review.
 When classifying issues as blocking vs non-blocking, use these guidelines:
 
 **Always blocking:**
+
 - Correctness bugs in the implementation
 - Missing tests for new functionality or bug fixes
 - Breaking changes to public API without justification
@@ -1636,6 +1657,7 @@ When classifying issues as blocking vs non-blocking, use these guidelines:
 - CI lint failures caused by the PR
 
 **Usually blocking (use judgment):**
+
 - Missing error handling for likely error cases
 - Performance regressions in the hot path
 - Incomplete implementations (TODO/FIXME left in code)
@@ -1643,6 +1665,7 @@ When classifying issues as blocking vs non-blocking, use these guidelines:
 - torch.compile incompatibilities
 
 **Usually non-blocking:**
+
 - Code style issues beyond what linters catch
 - Missing tests for unlikely edge cases
 - Documentation improvements
@@ -1660,32 +1683,32 @@ merge prerequisites:
 ### 18.1 Pre-Merge Checks
 
 - [ ] **CI is green.** All required checks pass. If CI hasn't run (fork PR), note that
-  a maintainer must approve the workflow run first.
+      a maintainer must approve the workflow run first.
 
 - [ ] **No merge conflicts.** The PR cleanly merges into the base branch. If there are
-  conflicts, the author must rebase.
+      conflicts, the author must rebase.
 
 - [ ] **All review comments are resolved.** If there were previous review rounds, verify
-  that all requested changes have been addressed.
+      that all requested changes have been addressed.
 
 - [ ] **Approval from maintainer.** The PR has approval from at least one maintainer
-  (not just this automated review).
+      (not just this automated review).
 
 ### 18.2 Changelog Considerations
 
 Determine whether the PR warrants a changelog entry:
 
-| PR Type | Changelog? |
-|---|---|
-| Bug fix affecting users | Yes |
-| New user-facing feature | Yes |
-| API deprecation or removal | Yes |
-| Performance improvement | Yes, if significant |
-| Internal refactoring | No |
-| Documentation only | No |
-| Test only | No |
-| CI/build only | No, unless it affects user build process |
-| Style/lint only | No |
+| PR Type                    | Changelog?                               |
+| -------------------------- | ---------------------------------------- |
+| Bug fix affecting users    | Yes                                      |
+| New user-facing feature    | Yes                                      |
+| API deprecation or removal | Yes                                      |
+| Performance improvement    | Yes, if significant                      |
+| Internal refactoring       | No                                       |
+| Documentation only         | No                                       |
+| Test only                  | No                                       |
+| CI/build only              | No, unless it affects user build process |
+| Style/lint only            | No                                       |
 
 If a changelog entry is needed and the PR doesn't include one, note it as a non-blocking
 suggestion.
@@ -1784,53 +1807,53 @@ general checklist.
 
 ### 20.1 Python Source Files
 
-| File/Pattern | Primary Concern | Secondary Concerns |
-|---|---|---|
-| `bitsandbytes/__init__.py` | Public API exports | Downstream isinstance checks, import paths |
-| `bitsandbytes/nn/__init__.py` | Module type exports | PEFT/Transformers isinstance checks |
-| `bitsandbytes/nn/modules.py` | Linear4bit, Linear8bitLt, Params4bit, Int8Params | **ALL downstream projects**, serialization, `__dict__` round-trip, FSDP, torch.compile |
-| `bitsandbytes/functional.py` | Quantization functions, QuantState | Downstream dequantize calls, checkpoint format, matmul semantics |
-| `bitsandbytes/_ops.py` | Op registration | torch.compile fake implementations, backend dispatch |
-| `bitsandbytes/autograd/_functions.py` | Autograd wrappers | Backward pass correctness, gradient computation |
-| `bitsandbytes/optim/*.py` | Optimizer classes | Transformers trainer integration, state dict format |
-| `bitsandbytes/optim/optimizer.py` | Base optimizer, GlobalOptimManager | Transformers' `manager.register_module_override()` |
-| `bitsandbytes/backends/cuda/ops.py` | CUDA backend dispatch | Kernel launch parameters, dtype handling |
-| `bitsandbytes/backends/cpu/ops.py` | CPU backend | CPU fallback behavior |
-| `bitsandbytes/cuda_specs.py` | GPU detection, CUDA version | Platform-specific behavior, ROCm compatibility |
-| `bitsandbytes/_utils.py` | Utility functions | Platform detection, path handling |
+| File/Pattern                          | Primary Concern                                  | Secondary Concerns                                                                     |
+| ------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------- |
+| `bitsandbytes/__init__.py`            | Public API exports                               | Downstream isinstance checks, import paths                                             |
+| `bitsandbytes/nn/__init__.py`         | Module type exports                              | PEFT/Transformers isinstance checks                                                    |
+| `bitsandbytes/nn/modules.py`          | Linear4bit, Linear8bitLt, Params4bit, Int8Params | **ALL downstream projects**, serialization, `__dict__` round-trip, FSDP, torch.compile |
+| `bitsandbytes/functional.py`          | Quantization functions, QuantState               | Downstream dequantize calls, checkpoint format, matmul semantics                       |
+| `bitsandbytes/_ops.py`                | Op registration                                  | torch.compile fake implementations, backend dispatch                                   |
+| `bitsandbytes/autograd/_functions.py` | Autograd wrappers                                | Backward pass correctness, gradient computation                                        |
+| `bitsandbytes/optim/*.py`             | Optimizer classes                                | Transformers trainer integration, state dict format                                    |
+| `bitsandbytes/optim/optimizer.py`     | Base optimizer, GlobalOptimManager               | Transformers' `manager.register_module_override()`                                     |
+| `bitsandbytes/backends/cuda/ops.py`   | CUDA backend dispatch                            | Kernel launch parameters, dtype handling                                               |
+| `bitsandbytes/backends/cpu/ops.py`    | CPU backend                                      | CPU fallback behavior                                                                  |
+| `bitsandbytes/cuda_specs.py`          | GPU detection, CUDA version                      | Platform-specific behavior, ROCm compatibility                                         |
+| `bitsandbytes/_utils.py`              | Utility functions                                | Platform detection, path handling                                                      |
 
 ### 20.2 C/CUDA Source Files
 
-| File/Pattern | Primary Concern | Secondary Concerns |
-|---|---|---|
-| `csrc/kernels.cu` | CUDA kernel correctness | Memory safety, precision, launch config, template instantiation |
-| `csrc/kernels.cuh` | Kernel declarations | Must match `kernels.cu` |
-| `csrc/ops.cu` | C++ launch wrappers | Dtype dispatch, grid/block calculation, error handling |
-| `csrc/ops.cuh` | Op declarations | Must match `ops.cu` |
-| `csrc/pythonInterface.cpp` | Python bindings | Must match Python op registrations in `_ops.py` |
-| `csrc/common.h` | Shared constants and types | Affects all CUDA code |
-| `CMakeLists.txt` | Build configuration | Platform compatibility, CUDA architectures, dependencies |
+| File/Pattern               | Primary Concern            | Secondary Concerns                                              |
+| -------------------------- | -------------------------- | --------------------------------------------------------------- |
+| `csrc/kernels.cu`          | CUDA kernel correctness    | Memory safety, precision, launch config, template instantiation |
+| `csrc/kernels.cuh`         | Kernel declarations        | Must match `kernels.cu`                                         |
+| `csrc/ops.cu`              | C++ launch wrappers        | Dtype dispatch, grid/block calculation, error handling          |
+| `csrc/ops.cuh`             | Op declarations            | Must match `ops.cu`                                             |
+| `csrc/pythonInterface.cpp` | Python bindings            | Must match Python op registrations in `_ops.py`                 |
+| `csrc/common.h`            | Shared constants and types | Affects all CUDA code                                           |
+| `CMakeLists.txt`           | Build configuration        | Platform compatibility, CUDA architectures, dependencies        |
 
 ### 20.3 Test Files
 
-| File/Pattern | Primary Concern | Secondary Concerns |
-|---|---|---|
-| `tests/test_functional.py` | Core quantization and matmul tests | Precision thresholds, parametrization coverage |
-| `tests/test_linear4bit.py` | Linear4bit module tests | Serialization round-trip, device movement |
-| `tests/test_linear8bitlt.py` | Linear8bitLt module tests | Threshold behavior, mixed precision |
-| `tests/test_optim.py` | Optimizer tests | State dict round-trip, convergence, all variants |
-| `tests/test_autograd.py` | Autograd tests | Gradient correctness, graph capture |
-| `tests/test_nn.py` | Neural network module tests | Forward/backward, parameter handling |
-| `tests/test_parametrize.py` | Parameter/module interaction tests | Precision, shapes, devices |
+| File/Pattern                 | Primary Concern                    | Secondary Concerns                               |
+| ---------------------------- | ---------------------------------- | ------------------------------------------------ |
+| `tests/test_functional.py`   | Core quantization and matmul tests | Precision thresholds, parametrization coverage   |
+| `tests/test_linear4bit.py`   | Linear4bit module tests            | Serialization round-trip, device movement        |
+| `tests/test_linear8bitlt.py` | Linear8bitLt module tests          | Threshold behavior, mixed precision              |
+| `tests/test_optim.py`        | Optimizer tests                    | State dict round-trip, convergence, all variants |
+| `tests/test_autograd.py`     | Autograd tests                     | Gradient correctness, graph capture              |
+| `tests/test_nn.py`           | Neural network module tests        | Forward/backward, parameter handling             |
+| `tests/test_parametrize.py`  | Parameter/module interaction tests | Precision, shapes, devices                       |
 
 ### 20.4 Configuration Files
 
-| File/Pattern | Primary Concern | Secondary Concerns |
-|---|---|---|
-| `pyproject.toml` | Build metadata, dependencies | Version constraints, extras, ruff config |
-| `.pre-commit-config.yaml` | Lint hooks | Hook versions, configurations |
-| `.github/workflows/*.yml` | CI pipelines | Test matrix, action versions, secrets |
-| `_typos.toml` | Spell-check exceptions | False positive allowlist |
+| File/Pattern              | Primary Concern              | Secondary Concerns                       |
+| ------------------------- | ---------------------------- | ---------------------------------------- |
+| `pyproject.toml`          | Build metadata, dependencies | Version constraints, extras, ruff config |
+| `.pre-commit-config.yaml` | Lint hooks                   | Hook versions, configurations            |
+| `.github/workflows/*.yml` | CI pipelines                 | Test matrix, action versions, secrets    |
+| `_typos.toml`             | Spell-check exceptions       | False positive allowlist                 |
 
 ---
 
@@ -1843,65 +1866,65 @@ Use it for quick lookups during review. For full details, consult the source doc
 
 Changing any of these breaks the most downstream consumers:
 
-| API | Projects using it |
-|---|---|
-| `bnb.nn.Linear4bit` (class) | Transformers, PEFT, Accelerate, (TGI reimplements) |
-| `bnb.nn.Linear8bitLt` (class) | Transformers, PEFT, Accelerate, (TGI reimplements) |
-| `bnb.nn.Params4bit` (class) | Transformers, PEFT, Accelerate, TGI |
-| `bnb.nn.Int8Params` (class) | Transformers, PEFT, Accelerate, TGI, vLLM |
-| `Params4bit.quant_state` (attribute) | Transformers, PEFT, Accelerate, TGI |
-| `Int8Params.SCB` (attribute) | Transformers, PEFT, Accelerate, TGI |
-| `functional.dequantize_4bit()` | Transformers, PEFT, vLLM |
-| `bnb.matmul()` | TGI, vLLM |
-| `bnb.matmul_4bit()` | TGI, vLLM |
-| `bnb.MatmulLtState` | TGI, vLLM |
+| API                                  | Projects using it                                  |
+| ------------------------------------ | -------------------------------------------------- |
+| `bnb.nn.Linear4bit` (class)          | Transformers, PEFT, Accelerate, (TGI reimplements) |
+| `bnb.nn.Linear8bitLt` (class)        | Transformers, PEFT, Accelerate, (TGI reimplements) |
+| `bnb.nn.Params4bit` (class)          | Transformers, PEFT, Accelerate, TGI                |
+| `bnb.nn.Int8Params` (class)          | Transformers, PEFT, Accelerate, TGI, vLLM          |
+| `Params4bit.quant_state` (attribute) | Transformers, PEFT, Accelerate, TGI                |
+| `Int8Params.SCB` (attribute)         | Transformers, PEFT, Accelerate, TGI                |
+| `functional.dequantize_4bit()`       | Transformers, PEFT, vLLM                           |
+| `bnb.matmul()`                       | TGI, vLLM                                          |
+| `bnb.matmul_4bit()`                  | TGI, vLLM                                          |
+| `bnb.MatmulLtState`                  | TGI, vLLM                                          |
 
 ### 21.2 High-Risk Attribute Access
 
 These attributes are accessed directly by downstream projects (not through methods):
 
-| Attribute | Accessed by |
-|---|---|
-| `Params4bit.__dict__` (full round-trip) | PEFT, Accelerate |
-| `Params4bit.compress_statistics` | Transformers, PEFT |
-| `Params4bit.quant_type` | Transformers, PEFT |
-| `Params4bit.bnb_quantized` | PEFT |
-| `Params4bit.quant_storage` | Transformers, PEFT |
-| `Linear4bit.compute_dtype` | Transformers, PEFT |
-| `Linear8bitLt.state` | Transformers, PEFT |
-| `MatmulLtState.CB` | TGI, vLLM |
-| `MatmulLtState.SCB` | TGI, vLLM |
-| `MatmulLtState.CxB` | TGI, vLLM |
-| `MatmulLtState.threshold` | PEFT, TGI, vLLM |
-| `MatmulLtState.has_fp16_weights` | PEFT, TGI, vLLM |
+| Attribute                               | Accessed by        |
+| --------------------------------------- | ------------------ |
+| `Params4bit.__dict__` (full round-trip) | PEFT, Accelerate   |
+| `Params4bit.compress_statistics`        | Transformers, PEFT |
+| `Params4bit.quant_type`                 | Transformers, PEFT |
+| `Params4bit.bnb_quantized`              | PEFT               |
+| `Params4bit.quant_storage`              | Transformers, PEFT |
+| `Linear4bit.compute_dtype`              | Transformers, PEFT |
+| `Linear8bitLt.state`                    | Transformers, PEFT |
+| `MatmulLtState.CB`                      | TGI, vLLM          |
+| `MatmulLtState.SCB`                     | TGI, vLLM          |
+| `MatmulLtState.CxB`                     | TGI, vLLM          |
+| `MatmulLtState.threshold`               | PEFT, TGI, vLLM    |
+| `MatmulLtState.has_fp16_weights`        | PEFT, TGI, vLLM    |
 
 ### 21.3 String-Based Class Name Checks
 
 These class names are checked by string comparison (not isinstance) in downstream code.
 Renaming them breaks downstream even though the functionality is unchanged:
 
-| Class name | Checked by |
-|---|---|
-| `"Int8Params"` | Accelerate (`set_module_tensor_to_device`) |
-| `"Params4bit"` | Accelerate (`set_module_tensor_to_device`, `fsdp_utils.py`), PEFT (`peft_model.py`) |
-| `"FP4Params"` | Accelerate (`set_module_tensor_to_device`) — legacy |
-| `"Linear8bitLt"` | Accelerate (`set_module_tensor_to_device`) |
-| `"Linear4bit"` | Accelerate (`set_module_tensor_to_device`) |
+| Class name       | Checked by                                                                          |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| `"Int8Params"`   | Accelerate (`set_module_tensor_to_device`)                                          |
+| `"Params4bit"`   | Accelerate (`set_module_tensor_to_device`, `fsdp_utils.py`), PEFT (`peft_model.py`) |
+| `"FP4Params"`    | Accelerate (`set_module_tensor_to_device`) — legacy                                 |
+| `"Linear8bitLt"` | Accelerate (`set_module_tensor_to_device`)                                          |
+| `"Linear4bit"`   | Accelerate (`set_module_tensor_to_device`)                                          |
 
 ### 21.4 Serialization Keys
 
 These checkpoint key patterns are used by downstream loaders. Changing them breaks every
 pre-quantized checkpoint:
 
-| Key pattern | Used by |
-|---|---|
-| `weight.absmax` | Transformers, vLLM |
-| `weight.quant_map` | Transformers, vLLM |
-| `weight.nested_absmax` | Transformers, vLLM |
-| `weight.nested_quant_map` | Transformers, vLLM |
-| `weight.quant_state.bitsandbytes__nf4` | Transformers, vLLM |
-| `weight.quant_state.bitsandbytes__fp4` | Transformers, vLLM |
-| `weight.SCB` (8-bit) | Transformers, Accelerate |
+| Key pattern                            | Used by                  |
+| -------------------------------------- | ------------------------ |
+| `weight.absmax`                        | Transformers, vLLM       |
+| `weight.quant_map`                     | Transformers, vLLM       |
+| `weight.nested_absmax`                 | Transformers, vLLM       |
+| `weight.nested_quant_map`              | Transformers, vLLM       |
+| `weight.quant_state.bitsandbytes__nf4` | Transformers, vLLM       |
+| `weight.quant_state.bitsandbytes__fp4` | Transformers, vLLM       |
+| `weight.SCB` (8-bit)                   | Transformers, Accelerate |
 
 ---
 
@@ -1910,23 +1933,24 @@ pre-quantized checkpoint:
 This table summarizes which review steps require deep analysis vs a quick check for each
 PR classification.
 
-| Step | Bug Fix | Feature | Deprecation | Refactor | Docs | Build/CI | Test |
-|---|---|---|---|---|---|---|---|
-| CI Status | Quick | Quick | Quick | Quick | Quick | Deep | Quick |
-| Issue Linkage | Deep | Deep | Deep | Quick | Skip | Skip | Quick |
-| Code Review | Deep | Deep | Deep | Deep | Quick | Deep | Deep |
-| Downstream Impact | Deep | Deep | **Critical** | Medium | Skip | Skip | Skip |
-| Cross-PR Conflicts | Quick | Quick | Deep | Quick | Skip | Quick | Skip |
-| Test Assessment | Deep | Deep | Medium | Quick | Skip | Skip | N/A |
-| Performance Impact | Medium | Deep | Skip | Quick | Skip | Skip | Skip |
-| torch.compile | Quick | Deep | Quick | Quick | Skip | Skip | Skip |
-| Serialization | Medium | Deep | **Critical** | Medium | Skip | Skip | Skip |
-| Platform Review | Skip* | Skip* | Skip | Skip | Skip | Deep | Skip |
-| Commit Hygiene | Quick | Medium | Quick | Quick | Quick | Quick | Quick |
+| Step               | Bug Fix | Feature | Deprecation  | Refactor | Docs  | Build/CI | Test  |
+| ------------------ | ------- | ------- | ------------ | -------- | ----- | -------- | ----- |
+| CI Status          | Quick   | Quick   | Quick        | Quick    | Quick | Deep     | Quick |
+| Issue Linkage      | Deep    | Deep    | Deep         | Quick    | Skip  | Skip     | Quick |
+| Code Review        | Deep    | Deep    | Deep         | Deep     | Quick | Deep     | Deep  |
+| Downstream Impact  | Deep    | Deep    | **Critical** | Medium   | Skip  | Skip     | Skip  |
+| Cross-PR Conflicts | Quick   | Quick   | Deep         | Quick    | Skip  | Quick    | Skip  |
+| Test Assessment    | Deep    | Deep    | Medium       | Quick    | Skip  | Skip     | N/A   |
+| Performance Impact | Medium  | Deep    | Skip         | Quick    | Skip  | Skip     | Skip  |
+| torch.compile      | Quick   | Deep    | Quick        | Quick    | Skip  | Skip     | Skip  |
+| Serialization      | Medium  | Deep    | **Critical** | Medium   | Skip  | Skip     | Skip  |
+| Platform Review    | Skip\*  | Skip\*  | Skip         | Skip     | Skip  | Deep     | Skip  |
+| Commit Hygiene     | Quick   | Medium  | Quick        | Quick    | Quick | Quick    | Quick |
 
 \* Unless the bug fix or feature is platform-specific.
 
 **Legend:**
+
 - **Critical**: Must be done thoroughly. Blocking issues are likely.
 - **Deep**: Full analysis required. Spend significant time.
 - **Medium**: Check carefully but don't expect to find problems often.

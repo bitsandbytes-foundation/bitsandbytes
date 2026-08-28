@@ -43,6 +43,7 @@ For each issue, determine if it matches a known pattern from `agents/issue_patte
 ### Old version issues
 
 Check the bitsandbytes version in the report. Key version boundaries:
+
 - **< 0.43.0**: Old `cuda_setup/main.py` system (replaced). No official Windows support. Fragile CUDA detection.
 - **< 0.45.0**: Before improved C library error messaging (PR #1615).
 
@@ -51,6 +52,7 @@ If the issue was clearly caused by old-version behavior that's been fixed, close
 ### Pattern matching
 
 Read the issue body and tracebacks. Compare against the patterns in `agents/issue_patterns.md`:
+
 - Legacy CUDA setup errors
 - Windows pre-support issues
 - Missing shared library mismatches
@@ -63,6 +65,7 @@ Read the issue body and tracebacks. Compare against the patterns in `agents/issu
 ### Stale issues
 
 Issues with no activity for 6+ months, no maintainer engagement, and insufficient information to reproduce. Especially:
+
 - No bitsandbytes version specified
 - No traceback or only screenshots
 - Reporter never responded to requests for info
@@ -84,6 +87,7 @@ python3 agents/query_issues.py related <NUMBER> --state closed -v
 ```
 
 Before closing a duplicate, verify:
+
 1. The canonical issue is still open (or was resolved with a fix that covers this too).
 2. The duplicate doesn't contain unique information that should be preserved — if it does, add a comment on the canonical issue referencing the useful info before closing.
 
@@ -99,6 +103,7 @@ Before closing a duplicate, verify:
 Use the closing templates from `agents/issue_patterns.md` as a starting point, but tailor them to the specific issue. Mention the actual version the user was on if known, reference the specific fix if one exists.
 
 Every proposed closing comment should:
+
 1. **Explain why** it's being closed (not just "closing as stale").
 2. **Point to the fix or canonical issue** if applicable.
 3. **Invite reopening** if the problem persists on the latest version.
@@ -122,6 +127,7 @@ gh issue close <NUMBER> --comment "Closing as duplicate of #XXXX." --reason "not
 ## Step 6: Report Results
 
 After a triage session, output a final summary:
+
 - How many issues were closed (after developer approval)
 - Breakdown by category/pattern
 - Any new patterns discovered that should be added to `issue_patterns.md`

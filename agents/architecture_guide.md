@@ -160,6 +160,7 @@ The codebase is organized into **five distinct layers**, from lowest to highest:
 ```
 
 **Important**: Not all paths go through all layers. For example:
+
 - Optimizers: `optim/*.py` → `functional.py` → `torch.ops.bitsandbytes.*` → backend kernel
 - Direct quantization: User calls `bnb.functional.quantize_4bit()` → same path but no nn.Module
 
@@ -169,6 +170,7 @@ The codebase is organized into **five distinct layers**, from lowest to highest:
 
 This is the central contract layer. Every operation in bitsandbytes is defined here as a
 `torch.library` op, which enables:
+
 - **torch.compile** compatibility (via `register_fake` providing shape/dtype metadata)
 - **Multi-backend dispatch** (each backend registers its kernel for the same op name)
 - **Consistent API** across CUDA, CPU, Triton, etc.
@@ -211,12 +213,14 @@ device-specific kernel is registered for the given device type.
 All ops are defined with the namespace `bitsandbytes::`:
 
 **Quantization ops:**
+
 - `quantize_blockwise` — 8-bit blockwise quantization (codebook-based)
 - `dequantize_blockwise` / `dequantize_blockwise.out` — inverse
 - `quantize_4bit` — 4-bit quantization (NF4 or FP4)
 - `dequantize_4bit` / `dequantize_4bit.out` — inverse
 
 **Int8 matmul ops:**
+
 - `int8_linear_matmul` / `int8_linear_matmul.out` — int8 x int8 → int32 via cuBLASLt
 - `int8_mm_dequant` — dequantize int32 matmul result to fp16/bf16
 - `int8_scaled_mm` — fused int8 matmul + dequant (composes the above two)
@@ -226,9 +230,11 @@ All ops are defined with the namespace `bitsandbytes::`:
 - `int8_mixed_scaled_mm` — int8 matmul with outlier decomposition (mixed-precision)
 
 **4-bit inference ops:**
+
 - `gemv_4bit` / `gemv_4bit.out` — fused 4-bit dequant + matmul (single-batch inference)
 
 **Optimizer ops:**
+
 - `optimizer_update_32bit` — 32-bit optimizer step (Adam, Lion, SGD, etc.)
 - `optimizer_update_8bit_blockwise` — 8-bit blockwise optimizer step
 
@@ -247,6 +253,7 @@ When Python imports `bitsandbytes`, the following happens:
    at module level, registering implementations for their device type
 
 The import chain in `functional.py`:
+
 ```python
 import bitsandbytes.backends.default.ops      # Always loaded — pure PyTorch fallback
 import bitsandbytes.backends.cuda.ops         # Loaded only if CUDA available
@@ -264,20 +271,21 @@ When you call `torch.ops.bitsandbytes.quantize_4bit(tensor_on_cuda, ...)`:
 3. If not → fall back to `"default"` kernel (pure PyTorch implementation)
 
 This means:
+
 - CUDA tensors use CUDA kernels (fast, ctypes → native CUDA)
 - CPU tensors use CPU kernels if registered, otherwise default (pure PyTorch)
 - Any new device automatically gets the `default` fallback
 
 ### Backend capabilities matrix
 
-| Op Category | CUDA | CPU | Default | Triton | XPU | HPU | MPS |
-|---|---|---|---|---|---|---|---|
-| 8-bit quantize/dequant | ctypes | C++/partial | PyTorch | Triton kernels | SYCL | partial | partial |
-| 4-bit quantize/dequant | ctypes | partial | PyTorch | Triton kernels | SYCL | partial | — |
-| int8 matmul (cuBLASLt) | ctypes | torch._int_mm | PyTorch fp32 fallback | — | — | — | — |
-| gemv_4bit (fused) | ctypes | — | PyTorch | — | — | — | — |
-| Optimizer 32-bit | ctypes | — | torch.compile | Triton | — | — | — |
-| Optimizer 8-bit blockwise | ctypes | — | — | Triton | — | — | — |
+| Op Category               | CUDA   | CPU            | Default               | Triton         | XPU  | HPU     | MPS     |
+| ------------------------- | ------ | -------------- | --------------------- | -------------- | ---- | ------- | ------- |
+| 8-bit quantize/dequant    | ctypes | C++/partial    | PyTorch               | Triton kernels | SYCL | partial | partial |
+| 4-bit quantize/dequant    | ctypes | partial        | PyTorch               | Triton kernels | SYCL | partial | —       |
+| int8 matmul (cuBLASLt)    | ctypes | torch.\_int_mm | PyTorch fp32 fallback | —              | —    | —       | —       |
+| gemv_4bit (fused)         | ctypes | —              | PyTorch               | —              | —    | —       | —       |
+| Optimizer 32-bit          | ctypes | —              | torch.compile         | Triton         | —    | —       | —       |
+| Optimizer 8-bit blockwise | ctypes | —              | —                     | Triton         | —    | —       | —       |
 
 ---
 
@@ -308,6 +316,7 @@ lib = get_native_library()  # This is the global used everywhere
 ```
 
 All CUDA backend ops access native code through this `lib` object:
+
 ```python
 from ...cextension import lib
 
@@ -325,7 +334,7 @@ GPU-specific functions are actually invoked.
 ### Environment variables
 
 - `BNB_CUDA_VERSION` — Override the auto-detected CUDA version for library selection
-    - `BNB_ROCM_VERSION` is the ROCm equivalent
+  - `BNB_ROCM_VERSION` is the ROCm equivalent
 - Standard CUDA env vars (`CUDA_HOME`, `LD_LIBRARY_PATH`) affect library discovery
 
 ---
@@ -371,6 +380,7 @@ and optionally a nested quantization state for the absmax values themselves ("do
 ### Key functions
 
 **4-bit quantization (the QLoRA path):**
+
 ```python
 def quantize_4bit(A, blocksize=64, compress_statistics=True, quant_type="fp4", quant_storage=torch.uint8):
     """Quantizes tensor A to 4-bit. Returns (packed_4bit_tensor, QuantState)."""
@@ -385,6 +395,7 @@ def dequantize_4bit(A, quant_state, absmax=None, out=None, blocksize=64, quant_t
 ```
 
 **8-bit quantization:**
+
 ```python
 def int8_vectorwise_quant(A, threshold=0.0):
     """Row-wise int8 quantization. Returns (quantized, row_stats, outlier_cols)."""
@@ -398,6 +409,7 @@ def int8_double_quant(A, threshold=0.0):
 ```
 
 **Blockwise 8-bit quantization (for optimizers):**
+
 ```python
 def quantize_blockwise(A, code=None, absmax=None, out=None, blocksize=4096):
     """Blockwise quantization using a 256-entry codebook."""
@@ -409,6 +421,7 @@ def dequantize_blockwise(A, quant_state=None, absmax=None, code=None, out=None, 
 ```
 
 **Optimizers:**
+
 ```python
 def optimizer_update_32bit(optimizer_name, grad, param, state1, beta1, eps, step, lr, state2=None, ...):
     """Dispatches 32-bit optimizer update to the appropriate backend kernel."""
@@ -420,6 +433,7 @@ def optimizer_update_8bit_blockwise(optimizer_name, grad, param, state1, state2,
 ```
 
 **Inference (4-bit GEMV):**
+
 ```python
 def gemv_4bit(A, B, out=None, transposed_A=False, transposed_B=False, state=None):
     """Fused 4-bit dequantize + matrix-vector multiply."""
@@ -466,6 +480,7 @@ standard normal distribution N(0,1). This makes it optimal for normally-distribu
 (which neural network weights approximately are).
 
 The 16 NF4 values (normalized to [-1, 1]):
+
 ```
 -1.0, -0.6962, -0.5251, -0.3949, -0.2844, -0.1848, -0.0911, 0.0,
  0.0796,  0.1609,  0.2461,  0.3379,  0.4407,  0.5626,  0.7230, 1.0
@@ -477,6 +492,7 @@ the representable values.
 ### FP4 (Float Point 4-bit)
 
 FP4 uses a 1-bit sign + 3-bit magnitude with a custom encoding:
+
 ```
 Sign bit + 3-bit value:
 0b000 = 0.0
@@ -492,6 +508,7 @@ Sign bit + 3-bit value:
 ### 4-bit packing
 
 Two 4-bit values are packed per byte:
+
 ```
 packed_byte = (high_nibble << 4) | low_nibble
 ```
@@ -504,6 +521,7 @@ When `quant_storage` is not `uint8`, the packed bytes are viewed as the storage 
 QuantState can serialize/deserialize for checkpointing via `as_dict(packed=True)` and
 `from_dict()`. When saved to a state dict (e.g., in `Linear4bit._save_to_state_dict`), the
 quant state components are stored alongside the weight with keys like:
+
 ```
 weight.quant_state.bitsandbytes__nf4
 weight.absmax
@@ -530,6 +548,7 @@ The nested quant state is stored inside `QuantState.state2`.
 The core 8-bit matmul with custom forward and backward.
 
 **Forward path:**
+
 1. Quantize activations A to int8 (row-wise) via `int8_vectorwise_quant` or `int8_double_quant`
 2. Quantize weights B to int8 (row-wise) if not already cached
 3. If `threshold > 0`: identify outlier columns, use mixed-precision decomposition
@@ -539,10 +558,12 @@ The core 8-bit matmul with custom forward and backward.
 5. Save quantized states for backward
 
 **Backward path:**
+
 - `grad_B`: Uses int8 matmul of grad_output^T × A^T (both quantized) + outlier correction
 - `grad_A`: Dequantizes weights and does fp16 matmul: grad_output × W_dequant
 
 **Key state object — `MatmulLtState`:**
+
 ```python
 @dataclass
 class MatmulLtState:
@@ -557,6 +578,7 @@ class MatmulLtState:
 ### MatMul8bitFp
 
 A simpler 8-bit matmul for CPU/XPU that avoids the expensive int8 backward path:
+
 - Forward: Dequantize weights to float, then `torch.nn.functional.linear`
 - Backward: Standard fp16/fp32 matmul (no int8 in backward)
 - ~3x faster on CPU/XPU because int8 quant/dequant kernels are slow on those platforms
@@ -566,11 +588,13 @@ A simpler 8-bit matmul for CPU/XPU that avoids the expensive int8 backward path:
 The 4-bit matmul autograd function.
 
 **Forward path:**
+
 1. Dequantize 4-bit weights B using `dequantize_4bit(B, quant_state)`
 2. Cast to activation dtype
 3. Standard `torch.nn.functional.linear(A, B_dequant, bias)`
 
 **Backward path:**
+
 - `grad_A`: Dequantize weights again, matmul with grad_output
 - `grad_B`: **Not supported** (4-bit weights are frozen; this is by design for QLoRA)
 
@@ -593,6 +617,7 @@ def matmul_4bit(A, B, quant_state, ...):
 ### GlobalOutlierPooler
 
 A singleton that tracks outlier dimensions across layers:
+
 ```python
 class GlobalOutlierPooler:
     """Pools outlier dimensions across layers for small models."""
@@ -621,6 +646,7 @@ class Linear4bit(nn.Linear):
 `Params4bit.to()` detects the device move and calls `_quantize()`.
 
 **Forward pass:**
+
 1. Fix quant state if lost (FSDP compatibility)
 2. Auto-detect compute dtype from input if not set
 3. Cast input to compute_dtype
@@ -645,6 +671,7 @@ class Params4bit(torch.nn.Parameter):
 ```
 
 Key behaviors:
+
 - `to(device)`: If not yet quantized and moving to a non-meta device → quantize
 - `__torch_function__`: Handles `torch.chunk` and `torch.split` to preserve quant metadata
 - `from_prequantized()`: Class method for loading already-quantized weights
@@ -663,15 +690,18 @@ class Linear8bitLt(nn.Linear):
 ```
 
 **`has_fp16_weights` modes:**
+
 - `True` (default): Keeps fp16 weights, quantizes on every forward pass (training mode)
 - `False`: Quantizes weights once on `.to(device)`, stores int8 permanently (inference mode)
 
 **`threshold` parameter:**
+
 - `0.0`: No outlier decomposition, pure int8 matmul
 - `> 0.0` (e.g., 6.0): Mixed-precision decomposition — columns with activations exceeding
   threshold are computed in fp16
 
 **State dict handling:**
+
 - Saves `weight` (int8 data) + `SCB` (row statistics) + `weight_format` (always "row")
 - Custom `_load_from_state_dict` to handle SCB restoration
 - `_register_load_state_dict_pre_hook(maybe_rearrange_weight)` for format migration
@@ -748,6 +778,7 @@ def update_step(self, group, p, gindex, pindex):
 ### Optimizer state initialization
 
 In `init_state()`:
+
 - If parameter numel < `min_8bit_size` (default 4096): always use 32-bit state (too small for
   quantization to help)
 - 32-bit state: `state1 = zeros_like(p, dtype=float32)`
@@ -803,15 +834,15 @@ shapes than the parameter tensors, which would cause gather failures).
 
 ### File organization
 
-| File | Purpose |
-|---|---|
-| `kernels.cu` | `__global__` CUDA kernel functions (kQuantizeBlockwise, kOptimizer*, etc.) |
-| `ops.cu` | Host-side dispatch functions that launch kernels with grid/block configs |
-| `pythonInterface.cpp` | C-linkage wrappers for ctypes: unmangled function names, macro-expanded per dtype |
-| `ops.cuh` | Declarations for ops.cu functions + cuBLAS/cuSPARSE context classes |
-| `kernels.cuh` | Declarations for kernel functions |
-| `common.cuh` | Compute capability macros and constants |
-| `cpu_ops.cpp` / `cpu_ops.h` | CPU-native implementations (blockwise quant, etc.) |
+| File                        | Purpose                                                                           |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| `kernels.cu`                | `__global__` CUDA kernel functions (kQuantizeBlockwise, kOptimizer\*, etc.)       |
+| `ops.cu`                    | Host-side dispatch functions that launch kernels with grid/block configs          |
+| `pythonInterface.cpp`       | C-linkage wrappers for ctypes: unmangled function names, macro-expanded per dtype |
+| `ops.cuh`                   | Declarations for ops.cu functions + cuBLAS/cuSPARSE context classes               |
+| `kernels.cuh`               | Declarations for kernel functions                                                 |
+| `common.cuh`                | Compute capability macros and constants                                           |
+| `cpu_ops.cpp` / `cpu_ops.h` | CPU-native implementations (blockwise quant, etc.)                                |
 
 ### The call chain: Python → C
 
@@ -844,6 +875,7 @@ Functions are generated via macros to cover all dtype combinations:
 ```
 
 Similarly for optimizers:
+
 ```cpp
 MAKE_FUNC32(cadam, ADAM, float, fp32)
 MAKE_FUNC32(cadam, ADAM, half, fp16)
@@ -852,6 +884,7 @@ MAKE_FUNC32(cadam, ADAM, __nv_bfloat16, bf16)
 ```
 
 4-bit functions use a separate naming pattern:
+
 ```cpp
 // void cquantize_blockwise_fp16_nf4(...)  ← 4-bit NF4 with fp16 input
 // void cquantize_blockwise_bf16_fp4(...)  ← 4-bit FP4 with bf16 input
@@ -895,6 +928,7 @@ __global__ void kOptimizer32bit1State(...) {
 ### Compute capability handling
 
 From `common.cuh`:
+
 ```cpp
 #define BNB_CC_VOLTA 700
 #define BNB_CC_TURING 750
@@ -910,6 +944,7 @@ From `common.cuh`:
 ```
 
 Thread/block limits per architecture:
+
 ```cpp
 // Turing (sm_75): 1024 max threads per SM
 // Ampere (sm_80): 2048 max threads per SM
@@ -948,6 +983,7 @@ the smallest blocksize (32) by processing 2 quantization blocks per warp.
 ROCm uses separate source files (`ops.hip`, `kernels.hip`, etc.) that mirror the CUDA versions
 with HIP API translations. Key difference: ROCm uses warp size 64 on some architectures
 (vs CUDA's 32), tracked by `ROCM_WARP_SIZE_64`. This affects allowed blocksizes:
+
 - CUDA: blocksizes 32, 64, 128, 256, 512, 1024, 2048, 4096
 - ROCm (warp 64): blocksizes 64, 128, 256, 512, 1024, 2048, 4096 (no 32)
 
@@ -959,13 +995,13 @@ with HIP API translations. Key difference: ROCm uses warp size 64 on some archit
 
 The `COMPUTE_BACKEND` CMake variable selects the target:
 
-| Backend | Library name | Languages | Dependencies |
-|---|---|---|---|
-| `cpu` | `libbitsandbytes_cpu.so` | C++17 | OpenMP (optional) |
-| `cuda` | `libbitsandbytes_cuda{VER}.so` | C++17 + CUDA | cudart, cublas, cublasLt |
-| `hip` | `libbitsandbytes_rocm{VER}.so` | C++17 + HIP | hipblas, hiprand |
-| `mps` | `libbitsandbytes_mps.dylib` | C++17 + ObjC++ | Metal framework |
-| `xpu` | `libbitsandbytes_xpu.so` | C++20 + SYCL | Intel oneAPI |
+| Backend | Library name                   | Languages      | Dependencies             |
+| ------- | ------------------------------ | -------------- | ------------------------ |
+| `cpu`   | `libbitsandbytes_cpu.so`       | C++17          | OpenMP (optional)        |
+| `cuda`  | `libbitsandbytes_cuda{VER}.so` | C++17 + CUDA   | cudart, cublas, cublasLt |
+| `hip`   | `libbitsandbytes_rocm{VER}.so` | C++17 + HIP    | hipblas, hiprand         |
+| `mps`   | `libbitsandbytes_mps.dylib`    | C++17 + ObjC++ | Metal framework          |
+| `xpu`   | `libbitsandbytes_xpu.so`       | C++20 + SYCL   | Intel oneAPI             |
 
 ### CUDA architecture targeting
 
@@ -984,6 +1020,7 @@ The build generates native cubin for all selected architectures, plus PTX for th
 ### CPU-specific flags
 
 For x86_64:
+
 ```cmake
 -mavx512f -mavx512dq -mavx512bw -mavx512vl    # AVX-512 if supported
 -mavx512bf16                                     # BF16 instructions if supported
@@ -1132,6 +1169,7 @@ For each Linear4bit module:
 ### Pattern 1: torch.library for multi-backend ops
 
 Every new operation must follow this pattern:
+
 ```python
 # 1. Define schema in _ops.py
 torch.library.define("bitsandbytes::my_op", "(Tensor A, int param) -> Tensor")
@@ -1157,6 +1195,7 @@ def _(A, param):
 ### Pattern 2: Input validation with `torch._check`
 
 Backend ops use `torch._check()` (not `assert`) for input validation:
+
 ```python
 torch._check(A.dtype == torch.int8, lambda: f"A must be int8, got {A.dtype}")
 torch._check_is_size(blocksize)
@@ -1167,6 +1206,7 @@ This ensures validation works correctly under `torch.compile` (assertions are no
 ### Pattern 3: Lazy quantization on device transfer
 
 Both `Params4bit` and `Int8Params` override `.to()` to trigger quantization:
+
 ```python
 def to(self, *args, **kwargs):
     device, dtype, ... = torch._C._nn._parse_to(*args, **kwargs)
@@ -1192,6 +1232,7 @@ with _cuda_device_of(A):          # Set correct CUDA device
 ### Pattern 5: Optimizer naming convention
 
 Every optimizer follows a strict naming pattern:
+
 ```python
 class {Name}(Optimizer{1,2}State):     # Default: 32-bit, switches to 8-bit if optim_bits=8
 class {Name}8bit(Optimizer{1,2}State): # Always 8-bit (hardcoded optim_bits=8)
@@ -1207,6 +1248,7 @@ up the correct C function in the `str2optimizer*` dictionaries.
 ### Pattern 6: `.out` variants for ops
 
 Many ops have both a returning variant and an `.out` variant:
+
 ```python
 # _ops.py:
 torch.library.define("bitsandbytes::dequantize_4bit",     "(...) -> Tensor")
@@ -1231,6 +1273,7 @@ def _(A, absmax, blocksize, quant_type, shape, dtype, out):
 ### torch.compile compatibility
 
 The codebase has extensive `torch.compile` support:
+
 - All ops registered via `torch.library` with `register_fake` for tracing
 - Input validation uses `torch._check` instead of Python `assert`
 - The `default` backend implementations use `@_try_torch_compile` decorator for automatic
@@ -1241,6 +1284,7 @@ The codebase has extensive `torch.compile` support:
 ### FSDP / distributed training compatibility
 
 Several components have FSDP-specific handling:
+
 - `Params4bit.module` back-reference enables quant_state recovery after FSDP parameter flattening
 - `fix_4bit_weight_quant_state_from_module()` restores lost quant_state
 - `Optimizer8bit.state_dict()` wraps quantization tensors to prevent FSDP gather failures
@@ -1258,6 +1302,7 @@ Several components have FSDP-specific handling:
 Backend ops must NOT mutate user-provided input tensors. This was a historical bug source
 (see issue #1587 where `int8_vectorwise_quant` mutated the input's absmax values). The
 pattern to follow:
+
 ```python
 # WRONG: Mutates user tensor
 A[outliers] = 0
@@ -1269,6 +1314,7 @@ A = A.masked_fill(outlier_mask, 0.0)
 ### Error handling in native code
 
 CUDA errors are checked via macros:
+
 ```cpp
 #define CUDA_CHECK_RETURN(value) {
     cudaError_t _m_cudaStat = value;
@@ -1288,20 +1334,20 @@ return error codes that are propagated back to Python as exceptions.
 
 ### Test files and what they cover
 
-| File | Tests |
-|---|---|
-| `test_functional.py` | Quantize/dequantize correctness, codebook generation, percentile clipping, optimizer updates |
-| `test_ops.py` | `torch.ops.bitsandbytes.*` dispatch, multi-backend, torch.compile tracing |
-| `test_linear4bit.py` | Linear4bit module: forward, serialization, FSDP, compute dtype, quant types |
-| `test_linear8bitlt.py` | Linear8bitLt: forward, backward, outlier threshold, state dict |
-| `test_modules.py` | Embedding modules, StableEmbedding, general nn.Module behavior |
-| `test_autograd.py` | Gradient correctness for quantized matmul |
-| `test_optim.py` | All optimizers: convergence, state dict save/load, paged variants, 8-bit vs 32-bit |
-| `test_triton.py` | Triton kernel equivalence with CUDA kernels |
-| `test_deprecated.py` | Deprecation warnings fire correctly |
-| `test_parametrize.py` | Weight parametrization with quantized modules |
-| `test_generation.py` | End-to-end text generation with quantized models |
-| `test_cuda_setup_evaluator.py` | CUDA detection and library loading |
+| File                           | Tests                                                                                        |
+| ------------------------------ | -------------------------------------------------------------------------------------------- |
+| `test_functional.py`           | Quantize/dequantize correctness, codebook generation, percentile clipping, optimizer updates |
+| `test_ops.py`                  | `torch.ops.bitsandbytes.*` dispatch, multi-backend, torch.compile tracing                    |
+| `test_linear4bit.py`           | Linear4bit module: forward, serialization, FSDP, compute dtype, quant types                  |
+| `test_linear8bitlt.py`         | Linear8bitLt: forward, backward, outlier threshold, state dict                               |
+| `test_modules.py`              | Embedding modules, StableEmbedding, general nn.Module behavior                               |
+| `test_autograd.py`             | Gradient correctness for quantized matmul                                                    |
+| `test_optim.py`                | All optimizers: convergence, state dict save/load, paged variants, 8-bit vs 32-bit           |
+| `test_triton.py`               | Triton kernel equivalence with CUDA kernels                                                  |
+| `test_deprecated.py`           | Deprecation warnings fire correctly                                                          |
+| `test_parametrize.py`          | Weight parametrization with quantized modules                                                |
+| `test_generation.py`           | End-to-end text generation with quantized models                                             |
+| `test_cuda_setup_evaluator.py` | CUDA detection and library loading                                                           |
 
 ### Common test patterns
 

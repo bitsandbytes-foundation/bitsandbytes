@@ -6,12 +6,12 @@ For general worktree concepts, setup, and the worktree registry, see `~/git/lab_
 
 Worktree directories for bitsandbytes use the short prefix `bnb-`:
 
-| Purpose | Directory | Branch |
-|---|---|---|
-| Issue fix | `~/git/bnb-fix-<NUMBER>` | `fix/issue-<NUMBER>` |
-| Feature | `~/git/bitsandbytes-<name>` | `feature/<name>` |
-| Experiment | `~/git/bnb-kbit-gemm` | `feature/kbit-gemv-v8` |
-| Deprecation | `~/git/bnb-deprecation` | `deprecation` |
+| Purpose     | Directory                   | Branch                 |
+| ----------- | --------------------------- | ---------------------- |
+| Issue fix   | `~/git/bnb-fix-<NUMBER>`    | `fix/issue-<NUMBER>`   |
+| Feature     | `~/git/bitsandbytes-<name>` | `feature/<name>`       |
+| Experiment  | `~/git/bnb-kbit-gemm`       | `feature/kbit-gemv-v8` |
+| Deprecation | `~/git/bnb-deprecation`     | `deprecation`          |
 
 For issue-related work, always include the issue number. The dispatch workflow generates worktrees with this pattern automatically.
 

@@ -19,6 +19,7 @@ most time-consuming step if done manually, but an agent can read 150+
 issues and classify them in minutes.
 
 What the agent does:
+
 - Fetches issue data with `fetch_issues.py`
 - Queries by label (`Duplicate`, `Proposing to Close`, `Waiting for Info`, etc.)
 - Reads every issue with `show --brief` in batches of 10-15
@@ -26,6 +27,7 @@ What the agent does:
   or theme
 
 What the agent produces:
+
 - A grouped table of issues, organized by pattern
 - For each group: issue numbers, titles, and a short rationale for why
   they're closeable
@@ -51,7 +53,7 @@ This is the core loop. It works in rounds:
      "say we're working on it but no ETA")
 
 3. **Agent executes** — closes issues with tailored comments, using `gh
-   issue close --comment`. The agent adapts the comment to each issue's
+issue close --comment`. The agent adapts the comment to each issue's
    specific context (version, platform, error message) rather than
    copy-pasting a template.
 
@@ -139,6 +141,7 @@ questions that aren't bugs. Give me an overview before closing anything."
 ### Pacing
 
 Don't try to close everything at once. Work in groups:
+
 1. Start with the lowest-hanging fruit (already labeled Duplicate, Proposing
    to Close)
 2. Move to pattern clusters (CUDA setup, Windows pre-support, etc.)
@@ -150,6 +153,7 @@ Don't try to close everything at once. Work in groups:
 The agent will occasionally recommend closing something that shouldn't be
 closed. This is expected and fine — that's why the human reviews before
 execution. Common false positives:
+
 - Issues that look stale but are actually waiting on a specific release
 - Feature requests that look like questions but represent real community
   demand

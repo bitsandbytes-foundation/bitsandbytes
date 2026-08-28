@@ -20,18 +20,18 @@ If any hook makes changes, **stage and commit those changes** before pushing.
 
 The Lint workflow (`.github/workflows/lint.yml`) runs all hooks defined in `.pre-commit-config.yaml`:
 
-| Hook | What it does |
-|---|---|
-| **ruff** (linter) | Checks for pyflakes, pycodestyle, isort, bugbear, implicit string concat, pyupgrade, and ruff-specific rules |
-| **ruff format** | Enforces consistent code formatting (line wrapping, spacing, trailing commas, etc.) |
-| **check-merge-conflict** | Ensures no merge conflict markers are left in files |
-| **check-yaml** | Validates YAML file syntax |
-| **end-of-file-fixer** | Ensures files end with a single newline |
-| **fix-byte-order-marker** | Removes UTF-8 BOM |
-| **trailing-whitespace** | Removes trailing whitespace from lines |
-| **mixed-line-ending** | Enforces LF line endings (except `.bat` files) |
-| **typos** | Spell-checks code and documentation |
-| **clang-format** | Formats C/C++/CUDA files under `csrc/` |
+| Hook                      | What it does                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **ruff** (linter)         | Checks for pyflakes, pycodestyle, isort, bugbear, implicit string concat, pyupgrade, and ruff-specific rules |
+| **ruff format**           | Enforces consistent code formatting (line wrapping, spacing, trailing commas, etc.)                          |
+| **check-merge-conflict**  | Ensures no merge conflict markers are left in files                                                          |
+| **check-yaml**            | Validates YAML file syntax                                                                                   |
+| **end-of-file-fixer**     | Ensures files end with a single newline                                                                      |
+| **fix-byte-order-marker** | Removes UTF-8 BOM                                                                                            |
+| **trailing-whitespace**   | Removes trailing whitespace from lines                                                                       |
+| **mixed-line-ending**     | Enforces LF line endings (except `.bat` files)                                                               |
+| **typos**                 | Spell-checks code and documentation                                                                          |
+| **clang-format**          | Formats C/C++/CUDA files under `csrc/`                                                                       |
 
 ## Ruff Configuration
 
@@ -43,16 +43,16 @@ Configuration lives in `pyproject.toml` under `[tool.ruff]`. Key settings:
 
 ### Enabled lint rule sets
 
-| Code | Rules |
-|---|---|
-| `B` | flake8-bugbear (security / correctness warnings) |
-| `E` | pycodestyle errors |
-| `W` | pycodestyle warnings |
-| `F` | pyflakes |
-| `I` | isort (import ordering) |
-| `ISC` | implicit string concatenation |
-| `UP` | pyupgrade (modern Python syntax) |
-| `RUF` | ruff-specific rules |
+| Code  | Rules                                            |
+| ----- | ------------------------------------------------ |
+| `B`   | flake8-bugbear (security / correctness warnings) |
+| `E`   | pycodestyle errors                               |
+| `W`   | pycodestyle warnings                             |
+| `F`   | pyflakes                                         |
+| `I`   | isort (import ordering)                          |
+| `ISC` | implicit string concatenation                    |
+| `UP`  | pyupgrade (modern Python syntax)                 |
+| `RUF` | ruff-specific rules                              |
 
 ### Notable ignored rules
 

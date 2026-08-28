@@ -19,21 +19,21 @@ Benchmarks across two machines with very different hardware show that `-n 4` is 
 **Machine A:** AMD Threadripper 1900X (8 cores / 16 threads), RTX 4090 (24 GB), CUDA 12.4
 
 | Workers | Wall Time | Speedup vs n=1 | Avg CPU | Avg GPU | Failures |
-|---------|-----------|-----------------|---------|---------|----------|
-| 1       | 1319s     | 1.00x           | 32.5%   | 3.4%    | 0        |
-| **4**   | **565s**  | **2.33x**       | 70.5%   | 12.9%   | 0        |
-| 6       | 588s      | 2.24x           | 74.8%   | 10.9%   | 7 (OOM)  |
-| 8       | 570s      | 2.31x           | 87.9%   | 12.5%   | 7 (OOM)  |
+| ------- | --------- | -------------- | ------- | ------- | -------- |
+| 1       | 1319s     | 1.00x          | 32.5%   | 3.4%    | 0        |
+| **4**   | **565s**  | **2.33x**      | 70.5%   | 12.9%   | 0        |
+| 6       | 588s      | 2.24x          | 74.8%   | 10.9%   | 7 (OOM)  |
+| 8       | 570s      | 2.31x          | 87.9%   | 12.5%   | 7 (OOM)  |
 
 **Machine B:** AMD Threadripper PRO 9975WX (32 cores / 64 threads), RTX PRO 6000 Blackwell (98 GB), CUDA 13.0
 
 | Workers | Wall Time | Speedup vs n=1 | Avg CPU | Avg GPU | Failures |
-|---------|-----------|-----------------|---------|---------|----------|
-| 1       | 428s      | 1.00x           | 13.4%   | 3.1%    | 25*      |
-| **4**   | **322s**  | **1.33x**       | 75.3%   | 5.7%    | 25*      |
-| 8       | 578s      | 0.74x (slower)  | 91.9%   | 3.5%    | 25*      |
-| 16      | 566s      | 0.76x (slower)  | 97.0%   | 6.2%    | 25*      |
-| 24      | 560s      | 0.76x (slower)  | 97.2%   | 6.2%    | 40       |
+| ------- | --------- | -------------- | ------- | ------- | -------- |
+| 1       | 428s      | 1.00x          | 13.4%   | 3.1%    | 25\*     |
+| **4**   | **322s**  | **1.33x**      | 75.3%   | 5.7%    | 25\*     |
+| 8       | 578s      | 0.74x (slower) | 91.9%   | 3.5%    | 25\*     |
+| 16      | 566s      | 0.76x (slower) | 97.0%   | 6.2%    | 25\*     |
+| 24      | 560s      | 0.76x (slower) | 97.2%   | 6.2%    | 40       |
 
 \* Blackwell-specific failures unrelated to worker count (see Known Issues below).
 
@@ -47,13 +47,13 @@ Benchmarks across two machines with very different hardware show that `-n 4` is 
 
 ### What About More/Fewer Workers?
 
-| Situation | Recommendation |
-|-----------|---------------|
-| Default | `-n 4` |
+| Situation                   | Recommendation      |
+| --------------------------- | ------------------- |
+| Default                     | `-n 4`              |
 | Low GPU memory (<8 GB free) | `-n 2` to avoid OOM |
-| Running a subset of tests | `-n 4` still fine |
-| Single specific test | No `-n` flag needed |
-| CI environment | `-n 4` |
+| Running a subset of tests   | `-n 4` still fine   |
+| Single specific test        | No `-n` flag needed |
+| CI environment              | `-n 4`              |
 
 ## Useful pytest Options
 

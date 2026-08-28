@@ -108,11 +108,13 @@ def quantize_4bit(
 ### 1.4 Naming Conventions
 
 **Functions**:
+
 - Public API functions in `functional.py`: `snake_case` — `quantize_4bit`, `dequantize_blockwise`
 - Internal helpers: prefix with `_` — `_dequantize_4bit_impl`, `_get_col_absmax`
 - ctypes C function wrappers start with `c`: `lib.cquantize_blockwise_fp16`
 
 **Variables**:
+
 - Tensor variables use short uppercase names by convention: `A`, `B`, `CB`, `SCB`, `SCA`
 - This is a deliberate style choice reflecting the mathematical notation in the papers
 - Statistics tensors: `row_stats`, `col_stats`, `absmax`
@@ -120,12 +122,14 @@ def quantize_4bit(
 - Shape-related: `shapeA`, `shapeB`, `shapeC`
 
 **Classes**:
+
 - `PascalCase`: `QuantState`, `MatmulLtState`, `Params4bit`, `Int8Params`
 - Singletons use the pattern: private `__init__` that raises, classmethod `get_instance()`
 - Module classes: `Linear4bit`, `Linear8bitLt`, `Embedding4bit`, `Embedding8bit`
 - Optimizer classes: `Adam`, `Adam8bit`, `Adam32bit`, `PagedAdam`, `PagedAdam8bit`
 
 **Constants**:
+
 - `UPPER_SNAKE_CASE`: `FIRST_CUDA_DEVICE`, `ROCM_WARP_SIZE_64`, `HIP_ENVIRONMENT`
 - Compute capability constants in C: `BNB_CC_VOLTA`, `BNB_CC_AMPERE`, etc.
 
@@ -173,6 +177,7 @@ torch.library.define(
 ```
 
 Schema rules:
+
 - The namespace is always `bitsandbytes::`
 - Use PyTorch schema syntax: `Tensor`, `Tensor?` (optional), `int`, `float`, `str`,
   `bool`, `ScalarType`, `int[]`, `Tensor!` (mutated in-place)
@@ -194,6 +199,7 @@ def _(A: torch.Tensor, B: torch.Tensor, blocksize: int, quant_type: str) -> torc
 ```
 
 The fake implementation is critical for `torch.compile` and `torch.export`. It must:
+
 - Validate all input constraints using `torch._check` (see Section 7)
 - Return tensors with the **exact** correct shape, dtype, and device
 - Never perform actual computation
@@ -267,6 +273,7 @@ def _(A: torch.Tensor, B: torch.Tensor, blocksize: int, quant_type: str) -> torc
 ```
 
 The dispatch key strings are:
+
 - `"cuda"` — NVIDIA CUDA and AMD ROCm
 - `"cpu"` — CPU
 - `"default"` — PyTorch-native fallback (works on any device)
@@ -366,6 +373,7 @@ def quantize_blockwise(
 ```
 
 Conventions:
+
 - First argument is always the input tensor `A`
 - Optional output tensors (`out`, `absmax`) come after required args
 - Configuration parameters (`blocksize`, `quant_type`) come last
@@ -477,6 +485,7 @@ class Params4bit(torch.nn.Parameter):
 ```
 
 Key rules:
+
 - Quantization happens lazily, on first `.to(device)` call
 - The `module` back-reference keeps `module.quant_state` in sync
 - `__getstate__`/`__setstate__`/`__deepcopy__` must be implemented for pickling
@@ -485,6 +494,7 @@ Key rules:
 ### 5.3 Forward Method Pattern
 
 The forward method in quantized modules should:
+
 1. Fix up quant_state if needed (FSDP recovery)
 2. Cast bias to match input dtype
 3. Dispatch to the appropriate matmul function
@@ -638,6 +648,7 @@ when GPU functionality is actually used.
 ### 8.3 Warning Conventions
 
 Use `warnings.warn()` for non-fatal issues. The codebase uses this for:
+
 - Performance warnings (wrong dtype for inference speed)
 - Deprecation warnings
 - Configuration suggestions
@@ -650,6 +661,7 @@ warnings.warn(
 ```
 
 After issuing a one-time warning, filter subsequent occurrences:
+
 ```python
 warnings.filterwarnings("ignore", message=".*inference.")
 ```
@@ -678,6 +690,7 @@ A[outliers] = outlier_backup  # restore
 ```
 
 The `default` backend's `int8_vectorwise_quant` shows the correct pattern:
+
 ```python
 # Backup outliers, zero them, quantize, then restore
 outlier_restore = A[outliers].clone()
@@ -701,6 +714,7 @@ return `None`:
 ### 9.3 Output Tensor Handling
 
 When an `out` parameter is provided:
+
 ```python
 # Copy result to pre-allocated output
 out = out.copy_(_result) if out is not None else _result
@@ -737,6 +751,7 @@ lib.cquantize_blockwise_fp16(
 ```
 
 Type mapping:
+
 - `ct.c_void_p` — pointers
 - `ct.c_int32` — int32_t (use for blocksize, dimensions)
 - `ct.c_int` — int (use for element counts)
@@ -761,6 +776,7 @@ else:
 ```
 
 For 4-bit ops, the naming includes both dtype and quant_type:
+
 ```python
 lib.cquantize_blockwise_bf16_nf4(...)
 lib.cdequantize_blockwise_fp16_fp4(...)
@@ -909,6 +925,7 @@ is in `.clang-format` at the repo root. Run `pre-commit run --all-files` to auto
 ### 13.1 Test File Organization
 
 Tests are organized by module:
+
 - `test_ops.py` — Tests for `torch.ops.bitsandbytes.*` operations
 - `test_functional.py` — Tests for `bitsandbytes.functional` API
 - `test_linear4bit.py` — Tests for `nn.Linear4bit` and related modules
@@ -932,6 +949,7 @@ def test_quantize_blockwise(device, dtype, blocksize, quant_type, nested):
 ```
 
 Conventions:
+
 - Always parametrize by `device` using `get_available_devices()`
 - Use `get_available_devices(no_cpu=True)` for GPU-only tests
 - Use `TRUE_FALSE` from `tests.helpers` for boolean parameters
@@ -985,6 +1003,7 @@ opcheck(torch.ops.bitsandbytes.int8_linear_matmul.default, (A, B))
 ```
 
 This verifies:
+
 - The fake implementation produces correct shapes/dtypes
 - The op works with autograd
 - The op works with torch.compile tracing
@@ -1081,6 +1100,7 @@ def some_function(A, old_param=None, new_param=None):
 ### 15.1 Public API Surface
 
 Public API consists of:
+
 - Functions in `bitsandbytes.functional` — `quantize_4bit`, `dequantize_4bit`, etc.
 - Classes in `bitsandbytes.nn` — `Linear4bit`, `Linear8bitLt`, `Params4bit`, etc.
 - Classes in `bitsandbytes.optim` — `Adam`, `Adam8bit`, etc.
@@ -1092,6 +1112,7 @@ torch.compile integration) but changes to it affect the fake implementations.
 ### 15.2 New Public Functions
 
 When adding a new public function:
+
 1. Add the op schema to `_ops.py`
 2. Add fake implementation with full validation
 3. Add at least a `default` backend implementation
@@ -1103,6 +1124,7 @@ When adding a new public function:
 
 Any change that modifies the behavior of existing public API is a breaking change.
 Breaking changes require:
+
 - A deprecation period (see Section 14)
 - Mention in the changelog
 - Consideration of downstream impact (transformers, PEFT, accelerate)
@@ -1114,6 +1136,7 @@ Breaking changes require:
 ### 16.1 Core Dependencies
 
 The only runtime dependencies are (from `pyproject.toml`):
+
 - `torch>=2.3,<3`
 - `numpy>=1.17`
 - `packaging>=20.9`
@@ -1131,6 +1154,7 @@ widely-used library and every dependency adds installation burden, version confl
 and supply chain surface.
 
 For optional functionality:
+
 ```python
 try:
     from scipy.stats import norm
@@ -1314,6 +1338,7 @@ def quantize_4bit(
 ```
 
 Conventions:
+
 - Type annotations use backtick format in docstrings: `` `torch.Tensor` ``
 - Optional parameters are marked: `*optional*`
 - Default values are documented in the description
@@ -1329,11 +1354,12 @@ Conventions:
 ### 19.3 Module-Level Documentation
 
 Module classes (`Linear4bit`, `Linear8bitLt`) should have class docstrings with:
+
 1. Brief description
 2. Link to the relevant paper
 3. Usage example
 
-```python
+````python
 class Linear4bit(nn.Linear):
     """
     This class is the base module for the 4-bit quantization algorithm presented in
@@ -1347,7 +1373,7 @@ class Linear4bit(nn.Linear):
     linear_q = linear_q.to("cuda")  # Quantization happens here
     ```
     """
-```
+````
 
 ---
 

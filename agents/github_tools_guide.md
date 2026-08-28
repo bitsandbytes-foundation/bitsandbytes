@@ -129,19 +129,19 @@ An issue is likely NOT actionable by an agent when it:
 
 ## Label Reference
 
-| Label | Meaning |
-|---|---|
-| Bug | Confirmed or suspected bug |
-| Enhancement | Improvement to existing feature |
-| Feature Request | New functionality |
-| Question | User asking for help, not reporting a bug |
-| Duplicate | Already covered by another issue |
-| Proposing to Close | Maintainer thinks this can be closed |
-| Waiting for Info | Blocked on info from the reporter |
-| Contributions Welcome | Maintainer would accept a PR for this |
-| High/Medium/Low Priority | Maintainer-assigned priority |
-| CUDA Setup | CUDA detection/loading issues |
-| Build | Build/compile issues |
-| Optimizers | Optimizer-related |
-| FSDP | FSDP integration |
-| ROCm / Ascend NPU / Intel / Windows / macOS / aarch64 | Platform-specific |
+| Label                                                 | Meaning                                   |
+| ----------------------------------------------------- | ----------------------------------------- |
+| Bug                                                   | Confirmed or suspected bug                |
+| Enhancement                                           | Improvement to existing feature           |
+| Feature Request                                       | New functionality                         |
+| Question                                              | User asking for help, not reporting a bug |
+| Duplicate                                             | Already covered by another issue          |
+| Proposing to Close                                    | Maintainer thinks this can be closed      |
+| Waiting for Info                                      | Blocked on info from the reporter         |
+| Contributions Welcome                                 | Maintainer would accept a PR for this     |
+| High/Medium/Low Priority                              | Maintainer-assigned priority              |
+| CUDA Setup                                            | CUDA detection/loading issues             |
+| Build                                                 | Build/compile issues                      |
+| Optimizers                                            | Optimizer-related                         |
+| FSDP                                                  | FSDP integration                          |
+| ROCm / Ascend NPU / Intel / Windows / macOS / aarch64 | Platform-specific                         |

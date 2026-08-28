@@ -33,24 +33,24 @@ These are available directly as `import bitsandbytes as bnb; bnb.<symbol>`.
 
 ### Re-exported from submodules
 
-| Symbol | Origin | Type | Notes |
-|--------|--------|------|-------|
+| Symbol              | Origin                | Type      | Notes                            |
+| ------------------- | --------------------- | --------- | -------------------------------- |
 | `bnb.MatmulLtState` | `autograd._functions` | dataclass | State container for 8-bit matmul |
-| `bnb.matmul` | `autograd._functions` | function | 8-bit matrix multiplication |
-| `bnb.matmul_4bit` | `autograd._functions` | function | 4-bit matrix multiplication |
-| `bnb.modules` | `nn.modules` | module | nn module namespace |
-| `bnb.adam` | `optim.adam` | module | Adam optimizer namespace |
-| `bnb.research` | `research` | module | Research/experimental namespace |
-| `bnb.utils` | `utils` | module | Utilities namespace |
+| `bnb.matmul`        | `autograd._functions` | function  | 8-bit matrix multiplication      |
+| `bnb.matmul_4bit`   | `autograd._functions` | function  | 4-bit matrix multiplication      |
+| `bnb.modules`       | `nn.modules`          | module    | nn module namespace              |
+| `bnb.adam`          | `optim.adam`          | module    | Adam optimizer namespace         |
+| `bnb.research`      | `research`            | module    | Research/experimental namespace  |
+| `bnb.utils`         | `utils`               | module    | Utilities namespace              |
 
 ### Module-level attributes
 
-| Symbol | Type | Value/Description |
-|--------|------|-------------------|
-| `bnb.__version__` | `str` | `"0.49.2.dev0"` |
-| `bnb.features` | `set` | `{"multi_backend"}` — Integration signal for transformers/diffusers |
-| `bnb.supported_torch_devices` | `set` | `{"cpu", "cuda", "xpu", "hpu", "npu", "mps"}` |
-| `bnb.__pdoc__` | `dict` | Controls pdoc visibility for internal classes |
+| Symbol                        | Type   | Value/Description                                                   |
+| ----------------------------- | ------ | ------------------------------------------------------------------- |
+| `bnb.__version__`             | `str`  | `"0.49.2.dev0"`                                                     |
+| `bnb.features`                | `set`  | `{"multi_backend"}` — Integration signal for transformers/diffusers |
+| `bnb.supported_torch_devices` | `set`  | `{"cpu", "cuda", "xpu", "hpu", "npu", "mps"}`                       |
+| `bnb.__pdoc__`                | `dict` | Controls pdoc visibility for internal classes                       |
 
 ### Backend auto-loading
 
@@ -93,6 +93,7 @@ bitsandbytes.nn.Linear4bit(
 **Parent:** `torch.nn.Linear`
 **Stability:** Stable — Core API, used extensively by transformers and PEFT.
 **Behavior:**
+
 - Weights are stored as `Params4bit` (quantized on `.to(device)`)
 - Forward: dequantizes, computes matmul via `bnb.matmul_4bit`
 - `compute_dtype` controls the dtype used for the matmul computation
@@ -145,6 +146,7 @@ bitsandbytes.nn.Linear8bitLt(
 **Parent:** `torch.nn.Linear`
 **Stability:** Stable — Core API for LLM.int8().
 **Behavior:**
+
 - Weights stored as `Int8Params` (quantized on `.to(device)` if `has_fp16_weights=False`)
 - `has_fp16_weights=True`: weights stay in fp16, quantized on-the-fly each forward pass
 - `has_fp16_weights=False`: weights quantized once on `.to(device)`, stored as int8
@@ -316,6 +318,7 @@ bitsandbytes.nn.Params4bit(
 **Parent:** `torch.nn.Parameter`
 **Stability:** Stable — essential for 4-bit workflows.
 **Key behaviors:**
+
 - `.to(device)` triggers quantization on first move to non-meta device
 - `_quantize(device)` calls `bnb.functional.quantize_4bit`
 - Custom `__torch_function__` for `torch.chunk` and `torch.split` to preserve quant state
@@ -338,6 +341,7 @@ bitsandbytes.nn.Int8Params(
 **Parent:** `torch.nn.Parameter`
 **Stability:** Stable — essential for 8-bit workflows.
 **Key behaviors:**
+
 - `.to(device)` triggers quantization if moving from CPU to non-meta device and not already quantized
 - `_quantize(device)` calls `bnb.functional.int8_vectorwise_quant`
 - `.CB` stores the int8 quantized data
@@ -363,6 +367,7 @@ bitsandbytes.optim.GlobalOptimManager.get_instance()
 ```
 
 **Methods:**
+
 - `register_parameters(params)` — Register parameters for config lookup
 - `override_config(parameters, key=None, value=None, key_value_dict=None)` — Override optimizer hyperparams per parameter
 - `register_module_override(module, param_name, config)` — Register module-level overrides
@@ -378,6 +383,7 @@ bitsandbytes.optim.optimizer.Optimizer8bit(params, defaults, optim_bits=32, is_p
 **Parent:** `torch.optim.Optimizer`
 **Stability:** Semi-public — users don't instantiate directly.
 **Key features:**
+
 - Custom `state_dict()` / `load_state_dict()` for FSDP compatibility
   (wraps quant state tensors in nested dict to prevent FSDP gather failures)
 - `non_castable_tensor_keys`: set of state keys that should not be dtype-cast during load
@@ -419,106 +425,106 @@ All follow the naming pattern: `Name` (configurable bits), `Name8bit` (fixed 8-b
 
 #### Adam Family (2-state, `optimizer_name="adam"`)
 
-| Class | Parent | `optim_bits` | `is_paged` |
-|-------|--------|-------------|------------|
-| `Adam` | `Optimizer2State` | configurable (default 32) | `False` |
-| `Adam8bit` | `Optimizer2State` | 8 (hardcoded) | `False` |
-| `Adam32bit` | `Optimizer2State` | 32 (hardcoded) | `False` |
-| `PagedAdam` | `Optimizer2State` | configurable (default 32) | `True` |
-| `PagedAdam8bit` | `Optimizer2State` | 8 (hardcoded) | `True` |
-| `PagedAdam32bit` | `Optimizer2State` | 32 (hardcoded) | `True` |
+| Class            | Parent            | `optim_bits`              | `is_paged` |
+| ---------------- | ----------------- | ------------------------- | ---------- |
+| `Adam`           | `Optimizer2State` | configurable (default 32) | `False`    |
+| `Adam8bit`       | `Optimizer2State` | 8 (hardcoded)             | `False`    |
+| `Adam32bit`      | `Optimizer2State` | 32 (hardcoded)            | `False`    |
+| `PagedAdam`      | `Optimizer2State` | configurable (default 32) | `True`     |
+| `PagedAdam8bit`  | `Optimizer2State` | 8 (hardcoded)             | `True`     |
+| `PagedAdam32bit` | `Optimizer2State` | 32 (hardcoded)            | `True`     |
 
 **Stability:** Stable.
 
 #### AdamW Family (2-state, `optimizer_name="adam"`, decoupled weight decay)
 
-| Class | Parent | `optim_bits` | `is_paged` |
-|-------|--------|-------------|------------|
-| `AdamW` | `Optimizer2State` | configurable | `False` |
-| `AdamW8bit` | `Optimizer2State` | 8 | `False` |
-| `AdamW32bit` | `Optimizer2State` | 32 | `False` |
-| `PagedAdamW` | `Optimizer2State` | configurable | `True` |
-| `PagedAdamW8bit` | `Optimizer2State` | 8 | `True` |
-| `PagedAdamW32bit` | `Optimizer2State` | 32 | `True` |
+| Class             | Parent            | `optim_bits` | `is_paged` |
+| ----------------- | ----------------- | ------------ | ---------- |
+| `AdamW`           | `Optimizer2State` | configurable | `False`    |
+| `AdamW8bit`       | `Optimizer2State` | 8            | `False`    |
+| `AdamW32bit`      | `Optimizer2State` | 32           | `False`    |
+| `PagedAdamW`      | `Optimizer2State` | configurable | `True`     |
+| `PagedAdamW8bit`  | `Optimizer2State` | 8            | `True`     |
+| `PagedAdamW32bit` | `Optimizer2State` | 32           | `True`     |
 
 **Stability:** Stable.
 
 #### AdEMAMix Family (2-state, `optimizer_name="ademamix"`)
 
-| Class | Parent | `optim_bits` | `is_paged` |
-|-------|--------|-------------|------------|
-| `AdEMAMix` | `Optimizer2State` | configurable | `False` |
-| `AdEMAMix8bit` | `AdEMAMix` | 8 | `False` |
-| `AdEMAMix32bit` | `Optimizer2State` | 32 | `False` |
-| `PagedAdEMAMix` | `AdEMAMix` | configurable | `True` |
-| `PagedAdEMAMix8bit` | `AdEMAMix8bit` | 8 | `True` |
-| `PagedAdEMAMix32bit` | `AdEMAMix32bit` | 32 | `True` |
+| Class                | Parent            | `optim_bits` | `is_paged` |
+| -------------------- | ----------------- | ------------ | ---------- |
+| `AdEMAMix`           | `Optimizer2State` | configurable | `False`    |
+| `AdEMAMix8bit`       | `AdEMAMix`        | 8            | `False`    |
+| `AdEMAMix32bit`      | `Optimizer2State` | 32           | `False`    |
+| `PagedAdEMAMix`      | `AdEMAMix`        | configurable | `True`     |
+| `PagedAdEMAMix8bit`  | `AdEMAMix8bit`    | 8            | `True`     |
+| `PagedAdEMAMix32bit` | `AdEMAMix32bit`   | 32           | `True`     |
 
 **Stability:** Stable.
 **Notes:** Takes additional `betas=(beta1, beta2, beta3)`, `alpha`, `t_alpha`, `t_beta3` params.
 
 #### LAMB Family (2-state, `optimizer_name="lamb"`)
 
-| Class | Parent | `optim_bits` | `is_paged` |
-|-------|--------|-------------|------------|
-| `LAMB` | `Optimizer2State` | configurable | `False` |
-| `LAMB8bit` | `Optimizer2State` | 8 | `False` |
-| `LAMB32bit` | `Optimizer2State` | 32 | `False` |
+| Class       | Parent            | `optim_bits` | `is_paged` |
+| ----------- | ----------------- | ------------ | ---------- |
+| `LAMB`      | `Optimizer2State` | configurable | `False`    |
+| `LAMB8bit`  | `Optimizer2State` | 8            | `False`    |
+| `LAMB32bit` | `Optimizer2State` | 32           | `False`    |
 
 **Stability:** Stable.
 
 #### SGD Family (1-state, `optimizer_name="momentum"`)
 
-| Class | Parent | `optim_bits` | `is_paged` |
-|-------|--------|-------------|------------|
-| `SGD` | `Optimizer1State` | configurable | `False` |
-| `SGD8bit` | `Optimizer1State` | 8 | `False` |
-| `SGD32bit` | `Optimizer1State` | 32 | `False` |
+| Class      | Parent            | `optim_bits` | `is_paged` |
+| ---------- | ----------------- | ------------ | ---------- |
+| `SGD`      | `Optimizer1State` | configurable | `False`    |
+| `SGD8bit`  | `Optimizer1State` | 8            | `False`    |
+| `SGD32bit` | `Optimizer1State` | 32           | `False`    |
 
 **Stability:** Stable.
 
 #### Adagrad Family (1-state, `optimizer_name="adagrad"`)
 
-| Class | Parent | `optim_bits` | `is_paged` |
-|-------|--------|-------------|------------|
-| `Adagrad` | `Optimizer1State` | configurable | `False` |
-| `Adagrad8bit` | `Optimizer1State` | 8 | `False` |
-| `Adagrad32bit` | `Optimizer1State` | 32 | `False` |
+| Class          | Parent            | `optim_bits` | `is_paged` |
+| -------------- | ----------------- | ------------ | ---------- |
+| `Adagrad`      | `Optimizer1State` | configurable | `False`    |
+| `Adagrad8bit`  | `Optimizer1State` | 8            | `False`    |
+| `Adagrad32bit` | `Optimizer1State` | 32           | `False`    |
 
 **Stability:** Stable.
 
 #### RMSprop Family (1-state, `optimizer_name="rmsprop"`)
 
-| Class | Parent | `optim_bits` | `is_paged` |
-|-------|--------|-------------|------------|
-| `RMSprop` | `Optimizer1State` | configurable | `False` |
-| `RMSprop8bit` | `Optimizer1State` | 8 | `False` |
-| `RMSprop32bit` | `Optimizer1State` | 32 | `False` |
+| Class          | Parent            | `optim_bits` | `is_paged` |
+| -------------- | ----------------- | ------------ | ---------- |
+| `RMSprop`      | `Optimizer1State` | configurable | `False`    |
+| `RMSprop8bit`  | `Optimizer1State` | 8            | `False`    |
+| `RMSprop32bit` | `Optimizer1State` | 32           | `False`    |
 
 **Stability:** Stable.
 
 #### LARS Family (1-state, `optimizer_name="lars"`)
 
-| Class | Parent | `optim_bits` | `is_paged` |
-|-------|--------|-------------|------------|
-| `LARS` | `Optimizer1State` | configurable | `False` |
-| `LARS8bit` | `Optimizer1State` | 8 | `False` |
-| `LARS32bit` | `Optimizer1State` | 32 | `False` |
-| `PytorchLARS` | `torch.optim.Optimizer` | N/A | N/A |
+| Class         | Parent                  | `optim_bits` | `is_paged` |
+| ------------- | ----------------------- | ------------ | ---------- |
+| `LARS`        | `Optimizer1State`       | configurable | `False`    |
+| `LARS8bit`    | `Optimizer1State`       | 8            | `False`    |
+| `LARS32bit`   | `Optimizer1State`       | 32           | `False`    |
+| `PytorchLARS` | `torch.optim.Optimizer` | N/A          | N/A        |
 
 **Stability:** Stable.
 **Notes:** `PytorchLARS` is a pure-PyTorch reference implementation (not quantized).
 
 #### Lion Family (1-state, `optimizer_name="lion"`)
 
-| Class | Parent | `optim_bits` | `is_paged` |
-|-------|--------|-------------|------------|
-| `Lion` | `Optimizer1State` | configurable | `False` |
-| `Lion8bit` | `Optimizer1State` | 8 | `False` |
-| `Lion32bit` | `Optimizer1State` | 32 | `False` |
-| `PagedLion` | `Optimizer1State` | configurable | `True` |
-| `PagedLion8bit` | `Optimizer1State` | 8 | `True` |
-| `PagedLion32bit` | `Optimizer1State` | 32 | `True` |
+| Class            | Parent            | `optim_bits` | `is_paged` |
+| ---------------- | ----------------- | ------------ | ---------- |
+| `Lion`           | `Optimizer1State` | configurable | `False`    |
+| `Lion8bit`       | `Optimizer1State` | 8            | `False`    |
+| `Lion32bit`      | `Optimizer1State` | 32           | `False`    |
+| `PagedLion`      | `Optimizer1State` | configurable | `True`     |
+| `PagedLion8bit`  | `Optimizer1State` | 8            | `True`     |
+| `PagedLion32bit` | `Optimizer1State` | 32           | `True`     |
 
 **Stability:** Stable.
 
@@ -526,13 +532,13 @@ All follow the naming pattern: `Name` (configurable bits), `Name8bit` (fixed 8-b
 
 All bnb optimizers share these parameters beyond the standard PyTorch ones:
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `optim_bits` | `int` | 32 | 32 for full precision state, 8 for quantized state |
-| `min_8bit_size` | `int` | 4096 | Parameters smaller than this use 32-bit state even in 8-bit mode |
-| `max_unorm` | `float` | 0.0 | Maximum update norm relative to weight norm. 0 = disabled |
-| `skip_zeros` | `bool` | `False` | Skip zero gradients in sparse models |
-| `is_paged` | `bool` | `False` | Use CUDA managed memory for state offloading |
+| Parameter       | Type    | Default | Description                                                      |
+| --------------- | ------- | ------- | ---------------------------------------------------------------- |
+| `optim_bits`    | `int`   | 32      | 32 for full precision state, 8 for quantized state               |
+| `min_8bit_size` | `int`   | 4096    | Parameters smaller than this use 32-bit state even in 8-bit mode |
+| `max_unorm`     | `float` | 0.0     | Maximum update norm relative to weight norm. 0 = disabled        |
+| `skip_zeros`    | `bool`  | `False` | Skip zero gradients in sparse models                             |
+| `is_paged`      | `bool`  | `False` | Use CUDA managed memory for state offloading                     |
 
 ---
 
@@ -724,6 +730,7 @@ class F.QuantState:
 
 **Stability:** Stable — essential for serialization of quantized weights.
 **Key attributes:**
+
 - `absmax` — Per-block scaling factors
 - `shape` — Original tensor shape
 - `code` — Quantization codebook (16 values for 4-bit)
@@ -977,6 +984,7 @@ class MatmulLtState:
 
 **Stability:** Stable.
 **Key fields:**
+
 - `CB` / `SCB` — Quantized weight and scale columns
 - `threshold` — Outlier threshold for mixed-precision decomposition
 - `has_fp16_weights` — Whether weights are stored in fp16 or int8
@@ -997,6 +1005,7 @@ bnb.matmul(
 
 **Stability:** Stable.
 **Dispatches to:**
+
 - `MatMul8bitFp` on CPU/XPU during training (faster path, no quantized grad computation)
 - `MatMul8bitLt` elsewhere (full quantized matmul with backward support)
 
@@ -1014,18 +1023,19 @@ bnb.matmul_4bit(
 
 **Stability:** Stable.
 **Dispatches to:**
+
 - `F.gemv_4bit` for single-batch inference (fast path, no autograd)
 - `MatMul4Bit.apply` for batched/training (autograd-enabled, dequant + torch.matmul)
 - CPU path supports packed weight format for AVX512BF16
 
 ### Internal autograd classes
 
-| Class | Description | Stability |
-|-------|-------------|-----------|
-| `MatMul8bitLt` | Full 8-bit matmul with backward for weight and input grad | Internal |
-| `MatMul8bitFp` | Dequant + matmul path for CPU/XPU training | Internal |
-| `MatMul4Bit` | Dequant + matmul with backward for 4-bit weights | Internal |
-| `GlobalOutlierPooler` | Pools outlier dimensions across layers | Internal |
+| Class                 | Description                                               | Stability |
+| --------------------- | --------------------------------------------------------- | --------- |
+| `MatMul8bitLt`        | Full 8-bit matmul with backward for weight and input grad | Internal  |
+| `MatMul8bitFp`        | Dequant + matmul path for CPU/XPU training                | Internal  |
+| `MatMul4Bit`          | Dequant + matmul with backward for 4-bit weights          | Internal  |
+| `GlobalOutlierPooler` | Pools outlier dimensions across layers                    | Internal  |
 
 ---
 
@@ -1039,26 +1049,26 @@ implementation for `torch.compile` / FX tracing.
 
 ### Op Schema Table
 
-| Op Name | Signature | Description |
-|---------|-----------|-------------|
-| `bitsandbytes::int8_mixed_scaled_mm` | `(A, CA, CB, SCA, SCB, outlier_cols?, bias?) -> (Tensor, Tensor?)` | Int8 matmul with mixed-precision outlier handling |
-| `bitsandbytes::int8_scaled_mm` | `(A, B, row_stats, col_stats, bias?, dtype?) -> Tensor` | Int8 matmul + dequant + bias |
-| `bitsandbytes::int8_linear_matmul` | `(A, B) -> Tensor` | Raw int8 matmul (A, B are int8, result is int32) |
-| `bitsandbytes::int8_linear_matmul.out` | `(A, B, out!) -> ()` | In-place variant |
-| `bitsandbytes::int8_vectorwise_quant` | `(A, threshold=0.0) -> (Tensor, Tensor, Tensor?)` | Row-wise int8 quantization with optional outlier extraction |
-| `bitsandbytes::int8_vectorwise_dequant` | `(A, stats) -> Tensor` | Row-wise int8 dequantization |
-| `bitsandbytes::int8_mm_dequant` | `(A, row_stats, col_stats, dtype?, bias?) -> Tensor` | Dequantize int32 matmul result |
-| `bitsandbytes::int8_double_quant` | `(A, threshold=0.0) -> (Tensor, Tensor, Tensor, Tensor, Tensor?)` | Simultaneous row and column quantization |
-| `bitsandbytes::quantize_4bit` | `(A, blocksize, quant_type, quant_storage) -> (Tensor, Tensor)` | 4-bit blockwise quantization |
-| `bitsandbytes::dequantize_4bit` | `(A, absmax, blocksize, quant_type, shape, dtype) -> Tensor` | 4-bit blockwise dequantization |
-| `bitsandbytes::dequantize_4bit.out` | `(A, absmax, blocksize, quant_type, shape, dtype, out!) -> ()` | In-place variant |
-| `bitsandbytes::quantize_blockwise` | `(A, code, blocksize) -> (Tensor, Tensor)` | 8-bit blockwise quantization |
-| `bitsandbytes::dequantize_blockwise` | `(A, absmax, code, blocksize, dtype) -> Tensor` | 8-bit blockwise dequantization |
-| `bitsandbytes::dequantize_blockwise.out` | `(A, absmax, code, blocksize, dtype, out!) -> ()` | In-place variant |
-| `bitsandbytes::gemv_4bit` | `(A, B, shapeB, absmax, code, blocksize) -> Tensor` | 4-bit GEMV (matrix-vector product) |
-| `bitsandbytes::gemv_4bit.out` | `(A, B, shapeB, absmax, code, blocksize, out!) -> ()` | In-place variant |
-| `bitsandbytes::optimizer_update_32bit` | `(name, g!, p!, state1!, state2!?, ...) -> ()` | 32-bit optimizer step |
-| `bitsandbytes::optimizer_update_8bit_blockwise` | `(name, g!, p!, state1!, state2!?, ...) -> ()` | 8-bit blockwise optimizer step |
+| Op Name                                         | Signature                                                          | Description                                                 |
+| ----------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------- |
+| `bitsandbytes::int8_mixed_scaled_mm`            | `(A, CA, CB, SCA, SCB, outlier_cols?, bias?) -> (Tensor, Tensor?)` | Int8 matmul with mixed-precision outlier handling           |
+| `bitsandbytes::int8_scaled_mm`                  | `(A, B, row_stats, col_stats, bias?, dtype?) -> Tensor`            | Int8 matmul + dequant + bias                                |
+| `bitsandbytes::int8_linear_matmul`              | `(A, B) -> Tensor`                                                 | Raw int8 matmul (A, B are int8, result is int32)            |
+| `bitsandbytes::int8_linear_matmul.out`          | `(A, B, out!) -> ()`                                               | In-place variant                                            |
+| `bitsandbytes::int8_vectorwise_quant`           | `(A, threshold=0.0) -> (Tensor, Tensor, Tensor?)`                  | Row-wise int8 quantization with optional outlier extraction |
+| `bitsandbytes::int8_vectorwise_dequant`         | `(A, stats) -> Tensor`                                             | Row-wise int8 dequantization                                |
+| `bitsandbytes::int8_mm_dequant`                 | `(A, row_stats, col_stats, dtype?, bias?) -> Tensor`               | Dequantize int32 matmul result                              |
+| `bitsandbytes::int8_double_quant`               | `(A, threshold=0.0) -> (Tensor, Tensor, Tensor, Tensor, Tensor?)`  | Simultaneous row and column quantization                    |
+| `bitsandbytes::quantize_4bit`                   | `(A, blocksize, quant_type, quant_storage) -> (Tensor, Tensor)`    | 4-bit blockwise quantization                                |
+| `bitsandbytes::dequantize_4bit`                 | `(A, absmax, blocksize, quant_type, shape, dtype) -> Tensor`       | 4-bit blockwise dequantization                              |
+| `bitsandbytes::dequantize_4bit.out`             | `(A, absmax, blocksize, quant_type, shape, dtype, out!) -> ()`     | In-place variant                                            |
+| `bitsandbytes::quantize_blockwise`              | `(A, code, blocksize) -> (Tensor, Tensor)`                         | 8-bit blockwise quantization                                |
+| `bitsandbytes::dequantize_blockwise`            | `(A, absmax, code, blocksize, dtype) -> Tensor`                    | 8-bit blockwise dequantization                              |
+| `bitsandbytes::dequantize_blockwise.out`        | `(A, absmax, code, blocksize, dtype, out!) -> ()`                  | In-place variant                                            |
+| `bitsandbytes::gemv_4bit`                       | `(A, B, shapeB, absmax, code, blocksize) -> Tensor`                | 4-bit GEMV (matrix-vector product)                          |
+| `bitsandbytes::gemv_4bit.out`                   | `(A, B, shapeB, absmax, code, blocksize, out!) -> ()`              | In-place variant                                            |
+| `bitsandbytes::optimizer_update_32bit`          | `(name, g!, p!, state1!, state2!?, ...) -> ()`                     | 32-bit optimizer step                                       |
+| `bitsandbytes::optimizer_update_8bit_blockwise` | `(name, g!, p!, state1!, state2!?, ...) -> ()`                     | 8-bit blockwise optimizer step                              |
 
 **Stability:** Semi-public. The op schemas are the most important stability contract in
 the codebase — changing a schema breaks all backend implementations.
@@ -1137,18 +1147,18 @@ quantization maps created via `create_fp8_map`.
 
 **Import path:** `from bitsandbytes.utils import <symbol>`
 
-| Symbol | Type | Description | Stability |
-|--------|------|-------------|-----------|
-| `replace_linear` | function | Recursively replace `nn.Linear` modules in a model | Stable |
-| `OutlierTracer` | class (singleton) | Traces outlier dimensions across linear layers | Experimental |
-| `find_outlier_dims` | function | Find outlier dimensions via z-score or top-k | Experimental |
-| `outlier_hook` | function | Forward pre-hook for `OutlierTracer` | Internal |
-| `pack_dict_to_tensor` | function | Pack a dict into a uint8 tensor (for safetensors) | Stable (internal) |
-| `unpack_tensor_to_dict` | function | Unpack uint8 tensor back to dict | Stable (internal) |
-| `execute_and_return` | function | Run a shell command and return stdout/stderr | Internal |
-| `sync_gpu` | function | Synchronize CUDA/XPU device | Internal |
-| `LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING` | dict | Maps format names to int codes | Stable (internal) |
-| `INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING` | dict | Reverse mapping | Stable (internal) |
+| Symbol                                       | Type              | Description                                        | Stability         |
+| -------------------------------------------- | ----------------- | -------------------------------------------------- | ----------------- |
+| `replace_linear`                             | function          | Recursively replace `nn.Linear` modules in a model | Stable            |
+| `OutlierTracer`                              | class (singleton) | Traces outlier dimensions across linear layers     | Experimental      |
+| `find_outlier_dims`                          | function          | Find outlier dimensions via z-score or top-k       | Experimental      |
+| `outlier_hook`                               | function          | Forward pre-hook for `OutlierTracer`               | Internal          |
+| `pack_dict_to_tensor`                        | function          | Pack a dict into a uint8 tensor (for safetensors)  | Stable (internal) |
+| `unpack_tensor_to_dict`                      | function          | Unpack uint8 tensor back to dict                   | Stable (internal) |
+| `execute_and_return`                         | function          | Run a shell command and return stdout/stderr       | Internal          |
+| `sync_gpu`                                   | function          | Synchronize CUDA/XPU device                        | Internal          |
+| `LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING`         | dict              | Maps format names to int codes                     | Stable (internal) |
+| `INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING` | dict              | Reverse mapping                                    | Stable (internal) |
 
 ### `replace_linear`
 
@@ -1172,21 +1182,21 @@ bitsandbytes.utils.replace_linear(
 
 ### Classes
 
-| Class | Description |
-|-------|-------------|
-| `BNBNativeLibrary` | Base wrapper for the ctypes-loaded native library |
-| `CudaBNBNativeLibrary` | CUDA-specific subclass (sets up context/managed ptr) |
+| Class                              | Description                                           |
+| ---------------------------------- | ----------------------------------------------------- |
+| `BNBNativeLibrary`                 | Base wrapper for the ctypes-loaded native library     |
+| `CudaBNBNativeLibrary`             | CUDA-specific subclass (sets up context/managed ptr)  |
 | `ErrorHandlerMockBNBNativeLibrary` | Fallback mock that defers error messages to call time |
 
 ### Module-level symbols
 
-| Symbol | Type | Description |
-|--------|------|-------------|
-| `lib` | `BNBNativeLibrary` | The loaded native library instance |
-| `BNB_BACKEND` | `str` | `"CUDA"`, `"ROCm"`, `"XPU"`, or `"CPU"` |
-| `HIP_ENVIRONMENT` | `bool` | `True` if running on ROCm |
-| `ROCM_GPU_ARCH` | `str` or `None` | e.g., `"gfx90a"` |
-| `ROCM_WARP_SIZE_64` | `bool` | `True` if ROCm warp size is 64 |
+| Symbol              | Type               | Description                             |
+| ------------------- | ------------------ | --------------------------------------- |
+| `lib`               | `BNBNativeLibrary` | The loaded native library instance      |
+| `BNB_BACKEND`       | `str`              | `"CUDA"`, `"ROCm"`, `"XPU"`, or `"CPU"` |
+| `HIP_ENVIRONMENT`   | `bool`             | `True` if running on ROCm               |
+| `ROCM_GPU_ARCH`     | `str` or `None`    | e.g., `"gfx90a"`                        |
+| `ROCM_WARP_SIZE_64` | `bool`             | `True` if ROCm warp size is 64          |
 
 **Stability:** Internal — but `lib` is used extensively by `functional.py` for ctypes calls.
 
@@ -1201,28 +1211,29 @@ Each backend registers kernels via `@register_kernel("bitsandbytes::<op_name>", 
 
 ### Backend → Op Coverage Matrix
 
-| Op | `default` | `cuda` | `cpu` | `xpu` | `hpu` | `triton` |
-|----|-----------|--------|-------|-------|-------|----------|
-| `int8_linear_matmul` | Yes | Yes | Yes | Yes | — | — |
-| `int8_linear_matmul.out` | Yes | Yes | — | — | — | — |
-| `int8_vectorwise_quant` | Yes | Yes | — | — | — | — |
-| `int8_vectorwise_dequant` | (in _ops.py) | — | — | — | — | — |
-| `int8_mm_dequant` | Yes | Yes | — | — | — | — |
-| `int8_mixed_scaled_mm` | Yes | — | — | — | — | — |
-| `int8_scaled_mm` | Yes | — | — | — | — | — |
-| `int8_double_quant` | — | Yes | — | — | — | — |
-| `quantize_blockwise` | Yes | Yes | Yes | Yes | — | Yes |
-| `dequantize_blockwise` | Yes | Yes | Yes | Yes | — | Yes |
-| `dequantize_blockwise.out` | — | Yes | — | Yes | — | — |
-| `quantize_4bit` | Yes | Yes | — | Yes | — | Yes |
-| `dequantize_4bit` | Yes | Yes | Yes | Yes | Yes | Yes |
-| `dequantize_4bit.out` | — | Yes | — | Yes | — | Yes |
-| `gemv_4bit` | Yes | Yes | Yes | Yes | — | Yes |
-| `gemv_4bit.out` | — | Yes | — | Yes | — | — |
-| `optimizer_update_32bit` | Yes | Yes | — | Yes | — | Yes |
-| `optimizer_update_8bit_blockwise` | — | Yes | — | Yes | — | Yes |
+| Op                                | `default`     | `cuda` | `cpu` | `xpu` | `hpu` | `triton` |
+| --------------------------------- | ------------- | ------ | ----- | ----- | ----- | -------- |
+| `int8_linear_matmul`              | Yes           | Yes    | Yes   | Yes   | —     | —        |
+| `int8_linear_matmul.out`          | Yes           | Yes    | —     | —     | —     | —        |
+| `int8_vectorwise_quant`           | Yes           | Yes    | —     | —     | —     | —        |
+| `int8_vectorwise_dequant`         | (in \_ops.py) | —      | —     | —     | —     | —        |
+| `int8_mm_dequant`                 | Yes           | Yes    | —     | —     | —     | —        |
+| `int8_mixed_scaled_mm`            | Yes           | —      | —     | —     | —     | —        |
+| `int8_scaled_mm`                  | Yes           | —      | —     | —     | —     | —        |
+| `int8_double_quant`               | —             | Yes    | —     | —     | —     | —        |
+| `quantize_blockwise`              | Yes           | Yes    | Yes   | Yes   | —     | Yes      |
+| `dequantize_blockwise`            | Yes           | Yes    | Yes   | Yes   | —     | Yes      |
+| `dequantize_blockwise.out`        | —             | Yes    | —     | Yes   | —     | —        |
+| `quantize_4bit`                   | Yes           | Yes    | —     | Yes   | —     | Yes      |
+| `dequantize_4bit`                 | Yes           | Yes    | Yes   | Yes   | Yes   | Yes      |
+| `dequantize_4bit.out`             | —             | Yes    | —     | Yes   | —     | Yes      |
+| `gemv_4bit`                       | Yes           | Yes    | Yes   | Yes   | —     | Yes      |
+| `gemv_4bit.out`                   | —             | Yes    | —     | Yes   | —     | —        |
+| `optimizer_update_32bit`          | Yes           | Yes    | —     | Yes   | —     | Yes      |
+| `optimizer_update_8bit_blockwise` | —             | Yes    | —     | Yes   | —     | Yes      |
 
 **Notes:**
+
 - `default` backend is pure PyTorch (no native code), registered for any device
 - `cuda` backend uses ctypes calls to the native CUDA/HIP library
 - `cpu` backend uses ctypes calls to the CPU native library (limited coverage)
@@ -1243,12 +1254,12 @@ to be distributed.
 These symbols are marked with `@deprecated` and emit `FutureWarning`. They will be
 removed in a future release.
 
-| Symbol | Module | Replacement |
-|--------|--------|-------------|
-| `quantize` | `functional` | `quantize_blockwise` |
-| `dequantize` | `functional` | `dequantize_blockwise` |
-| `quantize_no_absmax` | `functional` | `quantize_blockwise` |
-| `dequantize_no_absmax` | `functional` | `dequantize_blockwise` |
+| Symbol                  | Module       | Replacement                       |
+| ----------------------- | ------------ | --------------------------------- |
+| `quantize`              | `functional` | `quantize_blockwise`              |
+| `dequantize`            | `functional` | `dequantize_blockwise`            |
+| `quantize_no_absmax`    | `functional` | `quantize_blockwise`              |
+| `dequantize_no_absmax`  | `functional` | `dequantize_blockwise`            |
 | `optimizer_update_8bit` | `functional` | `optimizer_update_8bit_blockwise` |
 
 ---

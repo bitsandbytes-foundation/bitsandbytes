@@ -158,48 +158,48 @@ project before making changes so you can verify your setup works.
 
 After implementing and verifying the fix:
 
-1. **Run only the tests relevant to your change.** Do NOT run the full
-   test suite — it takes 10+ minutes and will be run separately later.
-   Instead, run the specific test file(s) that cover the code you changed:
+1.  **Run only the tests relevant to your change.** Do NOT run the full
+    test suite — it takes 10+ minutes and will be run separately later.
+    Instead, run the specific test file(s) that cover the code you changed:
 
-       pytest tests/test_autograd.py -v --tb=short -k "relevant_test_name"
+        pytest tests/test_autograd.py -v --tb=short -k "relevant_test_name"
 
-   If you wrote a new test, run that plus the existing tests in the same
-   file to check for regressions in that area.
+    If you wrote a new test, run that plus the existing tests in the same
+    file to check for regressions in that area.
 
-2. **Commit** your changes with a message referencing the issue:
+2.  **Commit** your changes with a message referencing the issue:
 
-       git add <files>
-       git commit -m "Fix <brief description> (#<NUMBER>)"
+    git add <files>
+    git commit -m "Fix <brief description> (#<NUMBER>)"
 
-3. **Push** the branch:
+3.  **Push** the branch:
 
-       git push -u origin fix/issue-<NUMBER>
+    git push -u origin fix/issue-<NUMBER>
 
-4. **Create a pull request** with `gh pr create`. The PR body must
-   include "Fixes #<NUMBER>" so GitHub auto-links and auto-closes the
-   issue on merge. Describe what the fix does and how you verified it.
+4.  **Create a pull request** with `gh pr create`. The PR body must
+    include "Fixes #<NUMBER>" so GitHub auto-links and auto-closes the
+    issue on merge. Describe what the fix does and how you verified it.
 
-5. **Post to the bitsandbytes Slack channel** to notify the team.
-   Write a temporary Python script to `/tmp/slack_notify.py` and run it:
+5.  **Post to the bitsandbytes Slack channel** to notify the team.
+    Write a temporary Python script to `/tmp/slack_notify.py` and run it:
 
-       import json, urllib.request, sys
+        import json, urllib.request, sys
 
-       TOKEN = open("/home/tim/Dropbox/Cloud/api_keys/slack_bot.txt").read().strip()
-       data = {"channel": "C0AF43L9BT6", "text": "<your message>"}
-       req = urllib.request.Request(
-           "https://slack.com/api/chat.postMessage",
-           data=json.dumps(data).encode(),
-           headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
-       )
-       resp = json.loads(urllib.request.urlopen(req).read())
-       if not resp.get("ok"):
-           print(f"ERROR: {resp.get('error')}", file=sys.stderr)
+        TOKEN = open("/home/tim/Dropbox/Cloud/api_keys/slack_bot.txt").read().strip()
+        data = {"channel": "C0AF43L9BT6", "text": "<your message>"}
+        req = urllib.request.Request(
+            "https://slack.com/api/chat.postMessage",
+            data=json.dumps(data).encode(),
+            headers={"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"},
+        )
+        resp = json.loads(urllib.request.urlopen(req).read())
+        if not resp.get("ok"):
+            print(f"ERROR: {resp.get('error')}", file=sys.stderr)
 
-   The message should include: which issue you fixed, a one-line
-   description of the fix, and the PR URL. Keep it concise.
+    The message should include: which issue you fixed, a one-line
+    description of the fix, and the PR URL. Keep it concise.
 
-   Then delete the script: `rm /tmp/slack_notify.py`
+    Then delete the script: `rm /tmp/slack_notify.py`
 
 If tests are failing and you cannot resolve the failures, still commit,
 push, and create the PR — but note the failures in the PR description
@@ -238,9 +238,9 @@ related issues the user linked]
 ### Comments
 
 [1] @matthewdouglas (2025-11-18) | THUMBS_UP:1:
-    [the full comment text about LARS reusing Momentum kernels and
-    LAMB reusing Adam kernels, and the note about 8bit blockwise
-    also being missing]
+[the full comment text about LARS reusing Momentum kernels and
+LAMB reusing Adam kernels, and the note about 8bit blockwise
+also being missing]
 
 ## Related Issues
 
@@ -261,6 +261,7 @@ Different root cause from #1810 but same area of the codebase.
 ## Additional Context
 
 The maintainer @matthewdouglas confirmed in the comment on #1810 that:
+
 - LARS should reuse the Momentum kernel implementations
 - LAMB already maps to Adam kernels (this is the pattern to follow)
 - Both LARS and LAMB are missing 8bit blockwise implementations, but that

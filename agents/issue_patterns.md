@@ -11,6 +11,7 @@ These are the single largest category of issues. Most are environment problems o
 **How to identify:** Tracebacks reference `bitsandbytes/cuda_setup/main.py` (line 166 or 167). Error output includes `UserWarning: Welcome to bitsandbytes. For bug reports, please run python -m bitsandbytes` in the old format. The import chain goes through `bitsandbytes/research/__init__.py` → `modules.py` → `GlobalOptimManager` → `cextension.py` line 20.
 
 **What happened:** Versions 0.41.x–0.42.x used a fragile CUDA detection system in `cuda_setup/main.py` that searched for `libcudart.so` in environment paths. It had bugs:
+
 - It re-initialized `cuda_runtime_libs = set()` after already populating it from `CONDA_PREFIX` and `LD_LIBRARY_PATH`, discarding valid search results.
 - It failed in conda environments, Docker containers, and systems with multiple CUDA versions.
 - It searched for Linux `.so` files on Windows.
@@ -19,6 +20,7 @@ These are the single largest category of issues. Most are environment problems o
 **Resolution:** The entire `cuda_setup/main.py` module was replaced in v0.43.0 with a new library loading mechanism in `cextension.py`. Users should upgrade to the latest version.
 
 **Closing template:**
+
 > Closing this issue. The CUDA detection system (`cuda_setup/main.py`) used in bitsandbytes 0.41.x–0.42.x was fragile and had known bugs — it could fail to find CUDA libraries even when they were correctly installed, particularly in conda environments, Docker containers, and systems with multiple CUDA versions. That entire module was replaced starting in v0.43.0 with a more robust library loading mechanism.
 >
 > If you're still hitting CUDA setup problems on the **latest** bitsandbytes (v0.45+), please open a new issue with the output of `python -m bitsandbytes` and your environment details (OS, Python version, PyTorch version, GPU).
@@ -30,6 +32,7 @@ These are the single largest category of issues. Most are environment problems o
 **What happened:** Official Windows support was added in v0.43.0. Before that, users relied on unofficial forks or got the Linux-only `.so` builds that don't work on Windows.
 
 **Closing template:**
+
 > Closing this issue. This was reported before official Windows support was added in bitsandbytes v0.43.0. The old CUDA detection system also gave Linux-specific guidance on Windows. Both Windows support and the library loading system have been overhauled in recent releases.
 >
 > If you're still hitting problems on the **latest** bitsandbytes (v0.45+), please open a new issue with the output of `python -m bitsandbytes` and your environment details.
@@ -41,6 +44,7 @@ These are the single largest category of issues. Most are environment problems o
 **What happened:** The bnb binary was compiled against one CUDA version (e.g., 11.x) but the system only has another (e.g., 12.x). The shared library dependencies don't exist. Modern releases ship platform-specific wheels with better CUDA version detection and multiple binary variants.
 
 **Closing template:**
+
 > Closing this issue. The error indicates a mismatch between the CUDA version bitsandbytes was compiled against and the system CUDA libraries. Modern bitsandbytes releases (v0.43.0+) ship platform-specific wheels that handle CUDA version detection more reliably.
 >
 > If you're still hitting this on the **latest** bitsandbytes (v0.45+), please open a new issue with the output of `python -m bitsandbytes` and your environment details.
@@ -52,6 +56,7 @@ These are the single largest category of issues. Most are environment problems o
 **What happened:** When the C/CUDA binary fails to load (for any reason — wrong platform, missing deps, version mismatch), the `lib` object is `None` and Python-level dispatch dictionaries are never populated. The resulting errors are confusing symptoms of the real problem. PR #1615 (merged, tracked by #1548) improved error messaging to surface the actual load failure.
 
 **Closing template:**
+
 > Closing this issue. This error is a symptom of the C/CUDA library failing to load — the confusing `NameError`/`AttributeError` was a downstream effect. Error messaging for this case was improved in PR #1615. Please upgrade to the latest bitsandbytes, which will show a clearer error if the library fails to load.
 >
 > If you're still hitting this on the **latest** bitsandbytes (v0.45+), please open a new issue with the output of `python -m bitsandbytes` and your environment details.
@@ -63,6 +68,7 @@ These are the single largest category of issues. Most are environment problems o
 **What happened:** Pre-built binaries only cover x86-64 + certain CUDA versions. aarch64 support has improved in recent releases. Kepler (compute 3.5) and ppc64le are not officially supported.
 
 **Closing template:**
+
 > Closing this issue. Pre-built binaries were not available for this platform at the time of reporting. Please check the latest release notes for current platform support. For source builds, see the [installation docs](https://huggingface.co/docs/bitsandbytes/main/en/installation).
 
 ## Not bitsandbytes Issues
@@ -74,6 +80,7 @@ These are the single largest category of issues. Most are environment problems o
 **Resolution:** These are dependency management issues in third-party apps. Close with a note to report to the app's issue tracker and upgrade bitsandbytes.
 
 **Closing template:**
+
 > Closing this issue. This appears to be a dependency/environment issue in the application you're using rather than a bitsandbytes bug. Please ensure the application is using the latest bitsandbytes version (v0.45+). If the issue persists, reporting it to the application's own issue tracker may be more effective.
 
 ### Transformers version mismatch
@@ -83,6 +90,7 @@ These are the single largest category of issues. Most are environment problems o
 **What happened:** Older `transformers` versions had a version check that could emit this misleading error even when both accelerate and bitsandbytes were installed. Upgrading `transformers` resolves it.
 
 **Closing template:**
+
 > Closing this issue. This error message originates from the `transformers` library, not from bitsandbytes. Upgrading `transformers` to the latest version resolves it.
 
 ### TensorFlow / non-PyTorch frameworks
@@ -92,6 +100,7 @@ These are the single largest category of issues. Most are environment problems o
 **Resolution:** Close, noting that bitsandbytes is PyTorch-only.
 
 **Closing template:**
+
 > Closing this issue. Bitsandbytes is only compatible with PyTorch (>= 2.2.2) and does not support TensorFlow or other frameworks. The issue you're describing appears to be related to your [TensorFlow/other] setup rather than bitsandbytes.
 
 ### Unrelated errors filed against bitsandbytes
@@ -99,6 +108,7 @@ These are the single largest category of issues. Most are environment problems o
 **How to identify:** The traceback's root cause is in another library (sentencepiece, diffusers, ONNX, etc.) but the user filed it here because bitsandbytes appeared somewhere in their stack. Look at the actual exception — if it's about tokenizer parsing (e.g., `could not parse ModelProto from tokenizer.model` — that's sentencepiece), model loading from a different library, or API changes in diffusers/transformers, it's not a bnb issue.
 
 **Closing template:**
+
 > Closing this issue. The error originates in [library name], not in bitsandbytes. Please report it to the appropriate issue tracker.
 
 ## Other Recurring Patterns
@@ -112,6 +122,7 @@ These are the single largest category of issues. Most are environment problems o
 ### Questions filed as bugs
 
 **How to identify:** The issue asks about NF4 internals (offset value, data format, quantile bins), how quantization works, or how to use a feature. Often has the `Question` label. No actual error or bug report. Common specific questions:
+
 - How NF4 values are derived from `create_normal_map` and why they differ slightly from recomputing (floating-point rounding; the hardcoded values are canonical and avoid a scipy runtime dependency).
 - Whether NF4 is a floating-point format with sign/exponent/mantissa bits — it is not; NF4 is a lookup table of 16 quantile-based values, not an IEEE-style float format.
 - How `Linear8bitLt`'s `threshold` parameter works — users often assume it operates on **weights**, but it actually controls outlier detection on **activations** (inputs). Columns where activation magnitude exceeds the threshold are computed in fp16; the rest use int8.
@@ -137,6 +148,7 @@ These are the single largest category of issues. Most are environment problems o
 **Resolution:** Close, noting that ZeRO-3 `zero.Init` does not support quantized weights. Users should use ZeRO-2 or load the model without ZeRO-3 `zero.Init`.
 
 **Closing template:**
+
 > Closing this issue. DeepSpeed ZeRO-3's `zero.Init` does not support bitsandbytes-quantized weights. The weight partitioning mechanism expects standard floating-point parameters. Consider using ZeRO stage 1 or 2 instead, or loading the model outside of `zero.Init`.
 
 ### CPU optimizer support requests
@@ -154,6 +166,7 @@ These are the single largest category of issues. Most are environment problems o
 **Resolution:** Verify the ROCm installation is complete and `ROCM_HOME`/`HIP_PATH` are set correctly. Upgrading ROCm often resolves the issue. If the user has a valid ROCm setup and still fails, it may be a real build bug.
 
 **Closing template:**
+
 > Closing this issue. The build failure appears to be caused by an incomplete or misconfigured ROCm installation. Please ensure ROCm is installed correctly, `ROCM_HOME` and `HIP_PATH` are set, and `hipcc` is functional. Upgrading to a recent ROCm version (6.3+) often resolves these issues.
 
 ### Colab / Jupyter runtime not restarted after upgrade
@@ -163,6 +176,7 @@ These are the single largest category of issues. Most are environment problems o
 **Resolution:** Instruct the user to restart their Colab runtime / Jupyter kernel after upgrading bitsandbytes. Also check for outdated dependency versions (e.g., old PEFT).
 
 **Closing template:**
+
 > Closing this issue. The `ImportError` indicates a version mismatch caused by upgrading bitsandbytes without restarting your Colab runtime / Jupyter kernel. After running `pip install -U bitsandbytes`, you must restart the runtime so that all modules are reloaded from the new version. Also consider upgrading related packages (peft, transformers, accelerate) to their latest versions.
 
 ### CMake + CUDA version architecture mismatch (source builds)
@@ -174,6 +188,7 @@ These are the single largest category of issues. Most are environment problems o
 **Resolution:** Upgrade CMake to 3.31.9+, or manually specify supported architectures with `-DCOMPUTE_CAPABILITY=`.
 
 **Closing template:**
+
 > Closing this issue. CMake versions before 3.31.9 don't know which architectures CUDA 13 dropped, so they attempt to compile for unsupported targets (Maxwell, Pascal, Volta). The fix is to either upgrade CMake to 3.31.9+ or manually specify your target architectures with `-DCOMPUTE_CAPABILITY=75;80;86` (or whichever you need). This is a CMake limitation, not a bitsandbytes bug.
 
 ### EOL platforms / old glibc preventing upgrades
@@ -185,6 +200,7 @@ These are the single largest category of issues. Most are environment problems o
 **Resolution:** Close, noting that EOL platforms can't be officially supported. Suggest building from source or upgrading the OS.
 
 **Closing template:**
+
 > Closing this issue. The bitsandbytes wheels on PyPI require glibc >= 2.24, which means EOL platforms like CentOS 7 cannot install modern versions. We recommend upgrading your OS or building bitsandbytes from source. See the [installation docs](https://huggingface.co/docs/bitsandbytes/main/en/installation) for source build instructions.
 
 ### `prepare_model_for_kbit_training` memory concerns
@@ -196,6 +212,7 @@ These are the single largest category of issues. Most are environment problems o
 **Resolution:** Close, noting this is expected behavior. Users can skip `prepare_model_for_kbit_training` and call `model.gradient_checkpointing_enable()` directly if they want to trade off training stability for lower memory.
 
 **Closing template:**
+
 > Closing this issue. The higher-than-expected memory usage is by design — `prepare_model_for_kbit_training` (from PEFT) casts adapter weights to float32 for training stability. You can skip it and call `model.gradient_checkpointing_enable()` directly if you prefer lower memory at the cost of potential training instability. This is a PEFT behavior, not a bitsandbytes issue.
 
 ### Insufficient information / no reproduction
@@ -205,6 +222,7 @@ These are the single largest category of issues. Most are environment problems o
 **Resolution:** Ask for specifics. If no response after a reasonable period, close.
 
 **Closing template:**
+
 > Closing this issue due to insufficient information to reproduce or investigate. If you're still experiencing this problem, please open a new issue with: (1) the output of `python -m bitsandbytes`, (2) your full environment details (OS, Python, PyTorch, GPU), and (3) a minimal code snippet that reproduces the error.
 
 ### Quantized model output quality (NaN, large numeric differences)
@@ -214,6 +232,7 @@ These are the single largest category of issues. Most are environment problems o
 **Resolution:** Ask the user to upgrade bitsandbytes and try with `torch_dtype=torch.bfloat16`. If on the latest version with bfloat16 and the issue persists with a minimal repro, it may be a real bug. Otherwise close.
 
 **Closing template:**
+
 > Closing this issue. NaN or large numeric differences in quantized outputs are often caused by using an old bitsandbytes version or float16 dtype. Please upgrade to the latest bitsandbytes and use `torch_dtype=torch.bfloat16`. If the issue persists, please open a new issue with a minimal reproduction.
 
 ### 4-bit model loading drops certain weights
