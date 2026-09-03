@@ -741,3 +741,43 @@ def test_adagrad8bit_rejects_non_8_optim_bits():
         bnb.optim.Adagrad8bit(p, optim_bits=32)
     # default (optim_bits=8) still constructs
     bnb.optim.Adagrad8bit(p)
+
+
+def test_adam8bit_rejects_amsgrad():
+    # amsgrad is not supported in Adam8bit; must be False (relates to #1261).
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        bnb.optim.Adam8bit(p, amsgrad=True)
+    # default (amsgrad=False) still constructs
+    bnb.optim.Adam8bit(p)
+
+
+def test_adam8bit_rejects_non_default_optim_bits():
+    # optim_bits is ignored (Adam8bit always uses 8-bit); guard invalid values (relates to #1261).
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        bnb.optim.Adam8bit(p, optim_bits=8)
+    with pytest.raises(ValueError):
+        bnb.optim.Adam8bit(p, optim_bits=16)
+    # default (optim_bits=32) still constructs
+    bnb.optim.Adam8bit(p)
+
+
+def test_adamw8bit_rejects_amsgrad():
+    # amsgrad is not supported in AdamW8bit; must be False (relates to #1261).
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        bnb.optim.AdamW8bit(p, amsgrad=True)
+    # default (amsgrad=False) still constructs
+    bnb.optim.AdamW8bit(p)
+
+
+def test_adamw8bit_rejects_non_default_optim_bits():
+    # optim_bits is ignored (AdamW8bit always uses 8-bit); guard invalid values (relates to #1261).
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        bnb.optim.AdamW8bit(p, optim_bits=8)
+    with pytest.raises(ValueError):
+        bnb.optim.AdamW8bit(p, optim_bits=16)
+    # default (optim_bits=32) still constructs
+    bnb.optim.AdamW8bit(p)
