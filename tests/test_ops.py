@@ -375,6 +375,69 @@ class Test4bitBlockwiseQuantOps:
         torch.testing.assert_close(out, ref)
 
 
+_SM103_GEMM_4BIT_CASES = (
+    pytest.param(torch.float16, "nf4", False, False, 32, 28672, id="fp16-nf4-plain-nobias-block32-aligned"),
+    pytest.param(torch.float16, "fp4", True, True, 64, 28672, id="fp16-fp4-nested-bias-block64-aligned"),
+    pytest.param(torch.bfloat16, "nf4", True, False, 128, 28672, id="bf16-nf4-nested-nobias-block128-aligned"),
+    pytest.param(torch.bfloat16, "fp4", False, True, 256, 28672, id="bf16-fp4-plain-bias-block256-aligned"),
+    pytest.param(torch.float16, "nf4", False, False, 32, 28640, id="fp16-nf4-plain-nobias-block32-nonaligned"),
+)
+
+
+@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+@pytest.mark.parametrize(
+    "dtype,quant_type,compress_statistics,has_bias,blocksize,K",
+    _SM103_GEMM_4BIT_CASES,
+)
+def test_gemm_4bit_sm103_tall_k_dispatch(device, dtype, quant_type, compress_statistics, has_bias, blocksize, K):
+    if device != "cuda" or torch.cuda.get_device_capability() != (10, 3):
+        pytest.skip("SM103 dispatch coverage requires a B300 GPU")
+
+    N = 28416  # 444 output tiles: exactly three waves on a 148-SM B300.
+    weight = torch.randn(N, K, dtype=dtype, device=device) / (K**0.5)
+    packed, state = bitsandbytes.functional.quantize_4bit(
+        weight,
+        blocksize=blocksize,
+        quant_type=quant_type,
+        compress_statistics=compress_statistics,
+    )
+    reference_weight = bitsandbytes.functional.dequantize_4bit(packed, state).to(dtype)
+    del weight
+
+    for M in (4, 5, 6):
+        activation = torch.randn(M, K, dtype=dtype, device=device)
+        bias = torch.randn(N, dtype=dtype, device=device) if has_bias else None
+        reference = torch.nn.functional.linear(activation, reference_weight, bias)
+        if compress_statistics:
+            output = torch.ops.bitsandbytes.gemm_4bit.default(
+                activation,
+                packed,
+                list(state.shape),
+                state.state2.absmax,
+                blocksize,
+                quant_type,
+                bias=bias,
+                absmax_8bit=state.absmax,
+                absmax_code=state.state2.code,
+                absmax_offset=state.offset,
+            )
+        else:
+            output = torch.ops.bitsandbytes.gemm_4bit.default(
+                activation,
+                packed,
+                list(state.shape),
+                state.absmax,
+                blocksize,
+                quant_type,
+                bias=bias,
+            )
+
+        assert output.shape == reference.shape
+        assert output.dtype == dtype
+        assert torch.isfinite(output).all()
+        torch.testing.assert_close(output, reference, rtol=0.02, atol=0.02 if dtype == torch.float16 else 0.08)
+
+
 class TestNonContiguousInputs:
     """Regression tests for #1342 and #1690: quantization must handle non-contiguous tensors correctly."""
 
