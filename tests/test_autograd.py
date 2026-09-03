@@ -76,7 +76,7 @@ def test_matmullt(
                 if not transpose[0] and not transpose[1]:
                     B2 = B2.t().contiguous()
 
-                state.CB, state.SCB, _ = bnb.functional.int8_vectorwise_quant(B2.to(torch.float16))
+                state.CB, state.SCB, _ = bnb.functional.int8_vectorwise_quant(B2)
                 B2 = state.CB
 
             if not transpose[0] and transpose[1]:

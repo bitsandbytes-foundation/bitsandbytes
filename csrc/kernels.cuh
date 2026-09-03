@@ -65,10 +65,10 @@ __global__ void kOptimizerStatic8bit1StateBlockwise(
     const float gnorm_scale, const bool skip_zeros, const int n
 );
 
-template <int ITEMS_PER_THREAD, int THREADS>
+template <typename T, int ITEMS_PER_THREAD, int THREADS>
 __global__ void kdequant_mm_int32_fp16(
-    int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats, half* out,
-    half* __restrict__ const bias, const int numRows, const int numCols, const int n
+    int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats, T* out,
+    T* __restrict__ const bias, const int numRows, const int numCols, const int n
 );
 
 template <typename T, int THREADS, int SPARSE_DECOMP>
