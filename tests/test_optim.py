@@ -8,12 +8,157 @@ import torch
 
 import bitsandbytes as bnb
 import bitsandbytes.functional as F
+from bitsandbytes.optim.optimizer import Optimizer1State, Optimizer2State
 from bitsandbytes.utils import sync_gpu
 from tests.helpers import describe_dtype, get_available_devices, id_formatter
 
 # import apex
 
 k = 20
+
+
+def make_skip_zeros_optimizer(optimizer_name, optim_bits, parameter):
+    common_kwargs = {
+        "lr": 0.05,
+        "weight_decay": 0.1,
+        "optim_bits": optim_bits,
+        "min_8bit_size": 0,
+    }
+
+    if optimizer_name == "adam":
+        return Optimizer2State(
+            "adam",
+            [parameter],
+            betas=(0.9, 0.99),
+            eps=1e-8,
+            skip_zeros=True,
+            **common_kwargs,
+        )
+    if optimizer_name == "ademamix":
+        optimizer = bnb.optim.AdEMAMix(
+            [parameter],
+            betas=(0.9, 0.99, 0.999),
+            alpha=2.0,
+            eps=1e-8,
+            **common_kwargs,
+        )
+        optimizer.args.skip_zeros = True
+        return optimizer
+    return Optimizer1State(
+        optimizer_name,
+        [parameter],
+        betas=(0.9, 0.99),
+        eps=1e-8,
+        skip_zeros=True,
+        **common_kwargs,
+    )
+
+
+@pytest.mark.parametrize("optim_bits", [32, 8])
+@pytest.mark.parametrize("optimizer_name", ["adam", "ademamix", "momentum", "lion", "rmsprop", "adagrad"])
+@pytest.mark.parametrize("parameter_dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+def test_cpu_optimizer_skip_zeros_preserves_inactive_entries(optimizer_name, optim_bits, parameter_dtype):
+    parameter = torch.nn.Parameter(torch.linspace(-1.0, 1.0, 512, dtype=parameter_dtype))
+    optimizer = make_skip_zeros_optimizer(optimizer_name, optim_bits, parameter)
+
+    # Populate the momentum statistics so a zero gradient would normally keep
+    # moving both the parameter and its optimizer states.
+    parameter.grad = torch.linspace(0.5, 1.5, parameter.numel(), dtype=parameter_dtype)
+    optimizer.step()
+
+    parameter_before = parameter.detach().clone()
+    state_before = {
+        name: value.clone()
+        for name, value in optimizer.state[parameter].items()
+        if torch.is_tensor(value) and name != "unorm_vec"
+    }
+    parameter.grad.zero_()
+    optimizer.step()
+
+    torch.testing.assert_close(parameter, parameter_before, rtol=0, atol=0)
+    for name, value in state_before.items():
+        torch.testing.assert_close(optimizer.state[parameter][name], value, rtol=0, atol=0)
+
+    parameter_before = parameter.detach().clone()
+    state_before = {
+        name: value.clone() for name, value in optimizer.state[parameter].items() if torch.is_tensor(value)
+    }
+    parameter.grad = torch.ones_like(parameter)
+    parameter.grad[:256] = 0
+    optimizer.step()
+
+    torch.testing.assert_close(parameter[:256], parameter_before[:256], rtol=0, atol=0)
+    assert not torch.equal(parameter[256:], parameter_before[256:])
+
+    for state_name in ("state1", "state2"):
+        if state_name not in state_before:
+            continue
+        state = optimizer.state[parameter][state_name]
+        previous_state = state_before[state_name]
+        if state.numel() == parameter.numel():
+            torch.testing.assert_close(state.flatten()[:256], previous_state.flatten()[:256], rtol=0, atol=0)
+        else:
+            torch.testing.assert_close(
+                state.reshape(2, -1)[:, :256],
+                previous_state.reshape(2, -1)[:, :256],
+                rtol=0,
+                atol=0,
+            )
+
+    # The inactive range is one complete quantization block, so its scale must
+    # remain unchanged even while later blocks are updated.
+    for absmax_name in ("absmax1", "absmax2"):
+        if absmax_name in state_before:
+            torch.testing.assert_close(
+                optimizer.state[parameter][absmax_name][..., 0],
+                state_before[absmax_name][..., 0],
+                rtol=0,
+                atol=0,
+            )
+
+
+@pytest.mark.parametrize("optimizer_name", ["adam", "ademamix", "momentum", "lion", "rmsprop", "adagrad"])
+def test_cpu_8bit_skip_zeros_preserves_untouched_blocks(optimizer_name):
+    """A sparse update must not re-quantize blocks with no active gradients."""
+    torch.manual_seed(8)
+    parameter = torch.nn.Parameter(torch.randn(1024))
+    optimizer = make_skip_zeros_optimizer(optimizer_name, 8, parameter)
+
+    for _ in range(3):
+        parameter.grad = torch.randn_like(parameter)
+        optimizer.step()
+
+    state_before = {
+        name: value.clone() for name, value in optimizer.state[parameter].items() if torch.is_tensor(value)
+    }
+    gradient = torch.randn_like(parameter)
+    gradient[:256] = 0
+    parameter.grad = gradient
+    optimizer.step()
+
+    for state_name in ("state1", "state2"):
+        if state_name not in state_before:
+            continue
+        state = optimizer.state[parameter][state_name]
+        previous_state = state_before[state_name]
+        if state.ndim == 1:
+            torch.testing.assert_close(state[:256], previous_state[:256], rtol=0, atol=0)
+        else:
+            torch.testing.assert_close(
+                state.reshape(state.shape[0], -1)[..., :256],
+                previous_state.reshape(previous_state.shape[0], -1)[..., :256],
+                rtol=0,
+                atol=0,
+            )
+
+    for absmax_name in ("absmax1", "absmax2"):
+        if absmax_name in state_before:
+            torch.testing.assert_close(
+                optimizer.state[parameter][absmax_name][..., 0],
+                state_before[absmax_name][..., 0],
+                rtol=0,
+                atol=0,
+            )
 
 
 def assert_most_approx_close(a, b, rtol=1e-3, atol=1e-3, max_error_count=0):
