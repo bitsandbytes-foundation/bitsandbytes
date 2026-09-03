@@ -118,7 +118,9 @@ def _(A: torch.Tensor, stats: torch.Tensor) -> torch.Tensor:
 @register_kernel("bitsandbytes::int8_vectorwise_dequant", "default")
 def _(A: torch.Tensor, stats: torch.Tensor):
     # To dequantize we divide by 127, or multiply by the reciprocal.
-    return A * stats.view(-1, 1) * 7.874015718698502e-3
+    # A may have more than 2 dimensions, so flatten the leading dimensions into rows first.
+    out = A.reshape(-1, A.shape[-1]) * stats.view(-1, 1) * 7.874015718698502e-3
+    return out.reshape(A.shape)
 
 
 torch.library.define(
