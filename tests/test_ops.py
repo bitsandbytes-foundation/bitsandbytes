@@ -1,4 +1,5 @@
 from math import prod
+import warnings
 
 import pytest
 import torch
@@ -332,6 +333,28 @@ class Test4bitBlockwiseQuantOps:
                 (A_op, B_q, list(B.shape), qs.absmax, blocksize, quant_type),
                 kwargs={"bias": bias},
             )
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_gemm_4bit_unaligned_warning(self, device):
+        """Regression test for #2027: the blocksize-alignment warning must not be emitted
+        on every call, nor at all when the fused kernel was not going to be used anyway."""
+        N, K, blocksize = 128, 3420, 64  # 3420 % 64 != 0 (Qwen2.5-VL vision tower)
+        B = torch.randn(N, K, dtype=torch.float16, device=device)
+        B_q, qs = bitsandbytes.functional.quantize_4bit(B, blocksize=blocksize, quant_type="nf4")
+
+        def run(M):
+            A = torch.randn(M, K, dtype=torch.float16, device=device)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                for _ in range(2):
+                    torch.ops.bitsandbytes.gemm_4bit.default(A, B_q, list(B.shape), qs.absmax, blocksize, "nf4")
+            return [w for w in caught if "not aligned" in str(w.message)]
+
+        # Large M always takes the dequant+F.linear path, aligned or not.
+        assert run(1024) == []
+
+        # When alignment does decide it, warn at most once per (K, blocksize).
+        assert len(run(1)) <= 1
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)

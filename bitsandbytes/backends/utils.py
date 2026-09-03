@@ -1,4 +1,6 @@
+import functools
 from importlib.metadata import metadata
+from warnings import warn
 
 from packaging import version
 import torch
@@ -73,6 +75,17 @@ def _get_4bit_code(quant_type: str, device: torch.device) -> torch.Tensor:
 
         _code_4bit_cache[key] = get_4bit_type(quant_type, device=device)
     return _code_4bit_cache[key]
+
+
+@functools.cache
+def _warn_gemm_4bit_unaligned(K: int, blocksize: int) -> None:
+    """Warn at most once per (K, blocksize): the misalignment is a fixed property of the
+    model, so repeating it on every gemm_4bit call is pure noise."""
+    warn(
+        f"inner dimension ({K}) is not aligned for fast kernel "
+        f"with blocksize={blocksize}, falling back to slower implementation.",
+        UserWarning,
+    )
 
 
 def get_gaudi_sw_version():
