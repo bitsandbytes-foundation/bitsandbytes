@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from bitsandbytes.cextension import get_cuda_bnb_library_path
+from bitsandbytes.cextension import HIP_ENVIRONMENT, get_cuda_bnb_library_path
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX
 from bitsandbytes.cuda_specs import CUDASpecs
 
@@ -106,7 +106,9 @@ def test_version_selection(monkeypatch, caplog, spec, fake_libs, hip_version, ex
 
 
 def test_override(monkeypatch, cuda120_spec, caplog):
-    """BNB_CUDA_VERSION overrides path selection."""
+    """BNB_CUDA_VERSION overrides path selection (CUDA builds only)."""
+    if HIP_ENVIRONMENT:
+        pytest.skip("BNB_CUDA_VERSION applies to CUDA library selection; use test_rocm_override on ROCm")
     monkeypatch.setenv("BNB_CUDA_VERSION", "110")
     with patch("bitsandbytes.cextension._find_cuda_libs", return_value={}):
         with caplog.at_level("WARNING"):
@@ -130,6 +132,21 @@ def test_rocm_override(monkeypatch, rocm70_spec, caplog):
 
 def test_override_invalid_format(monkeypatch, cuda120_spec):
     """Override value must be digits only (e.g. '124'), not dotted or alphanumeric."""
+    if HIP_ENVIRONMENT:
+        pytest.skip("BNB_CUDA_VERSION applies to CUDA library selection; use test_rocm_override_invalid_format on ROCm")
     monkeypatch.setenv("BNB_CUDA_VERSION", "12.4")
     with pytest.raises(RuntimeError, match="digits only"):
         get_cuda_bnb_library_path(cuda120_spec)
+
+
+def test_rocm_override_invalid_format(monkeypatch, rocm70_spec):
+    """BNB_ROCM_VERSION override must be digits only on ROCm."""
+    if not HIP_ENVIRONMENT:
+        pytest.skip("BNB_ROCM_VERSION applies to ROCm library selection only")
+    monkeypatch.setenv("BNB_ROCM_VERSION", "7.2")
+    with (
+        patch("torch.version.hip", "7.0.0"),
+        patch("bitsandbytes.cextension._find_cuda_libs", return_value={}),
+    ):
+        with pytest.raises(RuntimeError, match="digits only"):
+            get_cuda_bnb_library_path(rocm70_spec)

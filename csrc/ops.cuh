@@ -6,6 +6,8 @@
 #ifndef ops_H
 #define ops_H
 
+#define ERR_NOT_IMPLEMENTED 100
+
 #include <assert.h>
 #include <cstdint>
 #include <functional>
@@ -62,31 +64,30 @@ class Context {
   public:
 #if BNB_HIP
     rocblas_handle m_handle;
+#else
+    cublasHandle_t m_handle;
+#endif
+    // Separate Lt handle for igemmlt (int8 matmul). Do not reuse m_handle: on HIP it is
+    // rocblas/hipblas, on CUDA it is cublas — neither is compatible with (hip|cublas)Lt APIs.
+#if !BNB_HIP || !defined(NO_HIPBLASLT)
+    bnb_blasLt_handle_t m_lt_handle;
+#endif
 
     Context() {
+#if BNB_HIP
         rocblas_handle handle;
         rocblas_create_handle(&handle);
         m_handle = handle;
-    }
 #else
-    cublasHandle_t m_handle;
-
-    Context() {
         cublasHandle_t handle;
         cublasCreate_v2(&handle);
         m_handle = handle;
-    }
 #endif
-};
-
-class ContextLt {
-  public:
-    bnb_blasLt_handle_t m_handle;
-
-    ContextLt() {
-        bnb_blasLt_handle_t handle;
-        bnb_blasLtCreate(&handle);
-        m_handle = handle;
+#if !BNB_HIP || !defined(NO_HIPBLASLT)
+        bnb_blasLt_handle_t lt_handle;
+        bnb_blasLtCreate(&lt_handle);
+        m_lt_handle = lt_handle;
+#endif
     }
 };
 
@@ -129,6 +130,14 @@ int igemmlt(
     bnb_blasLt_handle_t ltHandle, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale,
     int lda, int ldb, int ldc, bnb_stream_t stream
 );
+
+#if BNB_HIP && defined(NO_HIPBLASLT)
+// ROCm builds without hipBLASLt: int8 matmul via hipblasGemmEx on the rocblas handle.
+int igemmlt_32_gemmex_fallback(
+    Context* context, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, int lda, int ldb, int ldc,
+    bnb_stream_t stream
+);
+#endif
 
 void cutlass_igemm(
     bool transposeA, bool transposeB, int m, int n, int k, void* A, void* B, void* C, int lda, int ldb, int ldc
