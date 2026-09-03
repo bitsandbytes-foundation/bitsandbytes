@@ -58,11 +58,18 @@ _setup_ctypes(
     [ct.c_void_p] * 3 + [ct.c_float, ct.c_int32, ct.c_int32, ct.c_void_p],
 )
 
-# 4-bit/8-bit blockwise quantize: (code, A, absmax, out, blocksize, n)
+# Legacy 4-bit/8-bit blockwise quantize: (code, A, absmax, out, blocksize, n)
 _setup_ctypes(
     [f"cquantize_blockwise_{d}_{q}" for d in ("fp32", "bf16", "fp16") for q in ("nf4", "fp4")]
     + [f"cquantize_blockwise_{d}" for d in ("fp32", "bf16", "fp16")],
     [ct.c_void_p] * 4 + [ct.c_int32, ct.c_int32],
+)
+
+# 4-bit/8-bit blockwise quantize: (code, A, absmax, out, blocksize, n, stream)
+_setup_ctypes(
+    [f"cquantize_blockwise_{d}_{q}_with_stream" for d in ("fp32", "bf16", "fp16") for q in ("nf4", "fp4")]
+    + [f"cquantize_blockwise_{d}_with_stream" for d in ("fp32", "bf16", "fp16")],
+    [ct.c_void_p] * 4 + [ct.c_int32, ct.c_int32, ct.c_void_p],
 )
 
 
@@ -311,11 +318,11 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
     out = torch.empty_like(A, dtype=torch.uint8)
 
     if A.dtype == torch.float32:
-        fn = lib.cquantize_blockwise_fp32
+        fn = lib.cquantize_blockwise_fp32_with_stream
     elif A.dtype == torch.float16:
-        fn = lib.cquantize_blockwise_fp16
+        fn = lib.cquantize_blockwise_fp16_with_stream
     elif A.dtype == torch.bfloat16:
-        fn = lib.cquantize_blockwise_bf16
+        fn = lib.cquantize_blockwise_bf16_with_stream
     else:
         raise ValueError(f"Blockwise quantization only supports 16/32-bit floats, but got {A.dtype}")
 
@@ -327,6 +334,7 @@ def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor
             out.data_ptr(),
             blocksize,
             n,
+            _get_raw_stream(A.device.index),
         )
 
     return out, absmax
@@ -393,19 +401,19 @@ def _(
 
     if A.dtype == torch.bfloat16:
         if quant_type == "fp4":
-            fn = lib.cquantize_blockwise_bf16_fp4
+            fn = lib.cquantize_blockwise_bf16_fp4_with_stream
         else:
-            fn = lib.cquantize_blockwise_bf16_nf4
+            fn = lib.cquantize_blockwise_bf16_nf4_with_stream
     elif A.dtype == torch.float16:
         if quant_type == "fp4":
-            fn = lib.cquantize_blockwise_fp16_fp4
+            fn = lib.cquantize_blockwise_fp16_fp4_with_stream
         else:
-            fn = lib.cquantize_blockwise_fp16_nf4
+            fn = lib.cquantize_blockwise_fp16_nf4_with_stream
     elif A.dtype == torch.float32:
         if quant_type == "fp4":
-            fn = lib.cquantize_blockwise_fp32_fp4
+            fn = lib.cquantize_blockwise_fp32_fp4_with_stream
         else:
-            fn = lib.cquantize_blockwise_fp32_nf4
+            fn = lib.cquantize_blockwise_fp32_nf4_with_stream
 
     with _cuda_device_of(A):
         fn(
@@ -415,6 +423,7 @@ def _(
             out.data_ptr(),
             blocksize,
             n,
+            _get_raw_stream(A.device.index),
         )
 
     return out, absmax
