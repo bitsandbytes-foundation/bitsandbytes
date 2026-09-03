@@ -354,10 +354,16 @@ class MatMul4Bit(torch.autograd.Function):
         ctx.state = quant_state
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
+        # Save the packed weight through save_for_backward rather than as a plain
+        # ctx attribute. torch.utils.checkpoint discards and recomputes *saved*
+        # tensors, so a caller that re-materialises the weight (weight offloading,
+        # layer streaming) into a recycled buffer under checkpointing gets a fresh
+        # copy in backward. A raw ctx attribute is invisible to that mechanism and
+        # would keep pointing at the original buffer -- silently wrong gradients.
         if any(ctx.needs_input_grad[:2]):
-            ctx.tensors = (None, B)
+            ctx.save_for_backward(B)
         else:
-            ctx.tensors = (None, None)
+            ctx.save_for_backward()
 
         return output
 
@@ -368,7 +374,8 @@ class MatMul4Bit(torch.autograd.Function):
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
 
         req_gradA, _, _, req_gradBias, _ = ctx.needs_input_grad
-        _, B = ctx.tensors
+        saved = ctx.saved_tensors
+        B = saved[0] if saved else None
 
         grad_A, grad_B, grad_bias = None, None, None
 
@@ -379,7 +386,7 @@ class MatMul4Bit(torch.autograd.Function):
         # not supported by PyTorch. TODO: create work-around
         # if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
         if req_gradA:
-            # B in ctx.tensors is already in canonical [(N*K+1)//2, 1] form (normalized in forward).
+            # B from saved_tensors is already in canonical [(N*K+1)//2, 1] form (normalized in forward).
             # dequantize returns [N, K]; matmul(grad_output[M,N], [N,K]) = grad_A[M,K].
             grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype))
 
