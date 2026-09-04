@@ -3,3 +3,17 @@
 Please submit your questions in [this Github Discussion thread](https://github.com/bitsandbytes-foundation/bitsandbytes/discussions/1013) if you feel that they will likely affect a lot of other users and that they haven't been sufficiently covered in the documentation.
 
 We'll pick the most generally applicable ones and post the QAs here or integrate them into the general documentation (also feel free to submit doc PRs, please).
+
+## Does quantizing a model always reduce energy use?
+
+No. Quantization (e.g. NF4, INT8) lowers the memory footprint, but it does not always lower energy consumption: the dequantization overhead can outweigh the memory-bandwidth savings, especially on smaller models. Whether quantization saves energy depends on both model size and GPU architecture.
+
+Direct GPU power measurements (Zhang, 2026; data and interactive tool: <https://hongping-zh.github.io/quant-energy/>) show, for weight-only NF4 vs FP16:
+
+- **Small models (~1–3B):** NF4 often *increases* energy — roughly +25–56% on RTX 4090 (Ada) and +12–29% on RTX 5090 (Blackwell), while being near-neutral on T4.
+- **Larger models:** NF4 can save energy — about −11% for a 7B model on RTX 5090 and −14% on T4; on A100/A800 (Ampere) it is roughly neutral (−4% at 7B, +2.5% at 14B).
+- **INT8:** in the measured A800 set, INT8 *increased* energy substantially (+107–131% at 7–14B) from dequantization/throughput overhead — don't assume INT8 saves energy without measuring.
+
+The crossover size (where NF4 flips from an energy penalty to savings) varies by architecture: ~2.1B on T4 (Turing) and ~4.8B on RTX 5090 (Blackwell); it is not reached within the tested range on RTX 4090 (Ada).
+
+If energy efficiency matters, benchmark your specific model and hardware. For small models, FP16 may be more energy-efficient than quantized formats.
