@@ -45,3 +45,13 @@ If you see an error like `No compatible CUDA library found`, it means no compati
    set BNB_CUDA_VERSION=128
    ```
    The value must be digits only, e.g. `128` for CUDA 12.8 or `72` for ROCm 7.2.
+
+## ROCm architecture detection without `rocminfo`
+
+On Linux, bitsandbytes normally uses `rocminfo` to report the active GPU architecture. If that executable is unavailable in a restricted container, set the architecture before importing bitsandbytes:
+
+```bash
+export BNB_ROCM_ARCH=gfx90a
+```
+
+Use one concrete `gfx` architecture. This runtime override is separate from the `-DBNB_ROCM_ARCH` CMake option used when compiling bitsandbytes.
