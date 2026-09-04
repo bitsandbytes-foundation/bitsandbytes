@@ -383,6 +383,26 @@ def _dequantize_blockwise_impl(
         )
 
 
+# The CUDA kernels take the number of elements as a 32-bit int, so a single launch
+# cannot cover more than INT32_MAX elements: the count wraps negative and the launch
+# fails with cudaErrorInvalidValue ("invalid configuration argument"). Larger tensors
+# are issued as several blocksize-aligned launches instead. See #1785.
+_MAX_ELEMENTS_PER_LAUNCH = 2**31 - 1
+
+
+def _launch_chunks(n: int, blocksize: int):
+    """Yield ``(offset, count)`` pairs covering ``n`` elements.
+
+    Each chunk fits in the int32 element count the kernels take and starts on a
+    ``blocksize`` boundary, so per-block absmax entries and the two-elements-per-byte
+    4-bit packing stay aligned. Tensors within the limit yield a single ``(0, n)``
+    chunk, i.e. exactly the previous single-launch behaviour.
+    """
+    step = (_MAX_ELEMENTS_PER_LAUNCH // blocksize) * blocksize
+    for offset in range(0, n, step):
+        yield offset, min(step, n - offset)
+
+
 @register_kernel("bitsandbytes::quantize_4bit", "cuda")
 def _(
     A: torch.Tensor, blocksize: int, quant_type: str, quant_storage: torch.dtype
@@ -410,14 +430,16 @@ def _(
             fn = lib.cquantize_blockwise_fp32_nf4
 
     with _cuda_device_of(A):
-        fn(
-            None,
-            A.data_ptr(),
-            absmax.data_ptr(),
-            out.data_ptr(),
-            blocksize,
-            n,
-        )
+        a_ptr, absmax_ptr, out_ptr = A.data_ptr(), absmax.data_ptr(), out.data_ptr()
+        for offset, count in _launch_chunks(n, blocksize):
+            fn(
+                None,
+                a_ptr + offset * A.element_size(),
+                absmax_ptr + (offset // blocksize) * absmax.element_size(),
+                out_ptr + offset // 2,  # 4-bit output: exactly two elements per byte
+                blocksize,
+                count,
+            )
 
     return out, absmax
 
@@ -482,15 +504,18 @@ def _dequantize_4bit_impl(
         raise ValueError(f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}")
 
     with _cuda_device_of(A):
-        fn(
-            None,
-            A.data_ptr(),
-            absmax.data_ptr(),
-            out.data_ptr(),
-            blocksize,
-            out.numel(),
-            _get_raw_stream(A.device.index),
-        )
+        a_ptr, absmax_ptr, out_ptr = A.data_ptr(), absmax.data_ptr(), out.data_ptr()
+        stream = _get_raw_stream(A.device.index)
+        for offset, count in _launch_chunks(out.numel(), blocksize):
+            fn(
+                None,
+                a_ptr + offset // 2,  # 4-bit input: exactly two elements per byte
+                absmax_ptr + (offset // blocksize) * absmax.element_size(),
+                out_ptr + offset * out.element_size(),
+                blocksize,
+                count,
+                stream,
+            )
 
 
 @register_kernel("bitsandbytes::gemv_4bit", "cuda")

@@ -663,6 +663,33 @@ class TestQuantize4BitFunctional:
             f"rel error {relerr:.6f} exceeds {relerr_mean:.6f} + {N_SIGMA}*{relerr_std:.6f}"
         )
 
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512, 1024, 2048, 4096])
+    def test_4bit_chunked_launch(self, monkeypatch, dtype, quant_type, blocksize):
+        """Tensors with more than INT32_MAX elements are quantized/dequantized in
+        several kernel launches (#1785). Exercise that path on a small tensor by
+        lowering the per-launch element limit; the result must be bit-identical to
+        the single-launch one.
+        """
+        from bitsandbytes.backends.cuda import ops as cuda_ops
+
+        # Deliberately not a whole number of blocks, so the final chunk is partial.
+        A = torch.randn(blocksize * 37 + blocksize // 2, device="cuda", dtype=dtype)
+
+        q_ref, state_ref = F.quantize_4bit(A, blocksize=blocksize, quant_type=quant_type)
+        out_ref = F.dequantize_4bit(q_ref, state_ref, blocksize=blocksize, quant_type=quant_type)
+
+        # Not a multiple of blocksize either: _launch_chunks must round the step down.
+        monkeypatch.setattr(cuda_ops, "_MAX_ELEMENTS_PER_LAUNCH", blocksize * 5 + 3)
+        q, state = F.quantize_4bit(A, blocksize=blocksize, quant_type=quant_type)
+        out = F.dequantize_4bit(q, state, blocksize=blocksize, quant_type=quant_type)
+
+        assert torch.equal(q, q_ref)
+        assert torch.equal(state.absmax, state_ref.absmax)
+        assert torch.equal(out, out_ref)
+
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [32, 64, 128], ids=id_formatter("blocksize"))
