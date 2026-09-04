@@ -4,6 +4,7 @@ import pytest
 import torch
 
 import bitsandbytes
+from bitsandbytes.backends.utils import _get_4bit_code
 from tests.helpers import TRUE_FALSE, describe_dtype, get_available_devices, id_formatter, is_supported_on_hpu
 
 opcheck = torch.library.opcheck
@@ -218,6 +219,55 @@ class Test4bitBlockwiseQuantOps:
             torch.ops.bitsandbytes.dequantize_4bit.default,
             (A, absmax, blocksize, quant_type, shape, dtype),
         )
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512, 1024, 2048, 4096])
+    @pytest.mark.parametrize(
+        "shape",
+        [
+            (64, 256),  # last dim multiple of 16 and of every blocksize <= 256
+            (3, 48),  # last dim multiple of 16, not of blocksize
+            (5, 32),  # last dim smaller than most blocksizes
+            (7, 10),  # numel not a multiple of 16
+            (9, 33),  # odd last dim (generic fallback path)
+            (1000,),  # 1-D
+            (256, 1024),  # larger, multi-block rows
+        ],
+        ids=id_formatter("shape"),
+    )
+    def test_dequantize_4bit_matches_reference(self, device, dtype, quant_type, blocksize, shape):
+        """Bit-exact comparison of dequantize_4bit against a pure-torch reference."""
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, torch.uint8):
+            pytest.skip("This configuration is not supported on HPU.")
+
+        n = prod(shape)
+        blocks = -(n // -blocksize)
+
+        A = torch.randint(0, 256, ((n + 1) // 2, 1), dtype=torch.uint8, device=device)
+        # Positive, finite scales so the comparison is not dominated by sign/NaN handling.
+        absmax = torch.rand((blocks,), dtype=torch.float32, device=device) + 0.1
+
+        out = torch.ops.bitsandbytes.dequantize_4bit.default(A, absmax, blocksize, quant_type, shape, dtype)
+
+        assert out.device == A.device
+        assert out.dtype == dtype
+        assert out.numel() == n
+        if len(shape) > 1:
+            # The CPU backend currently returns (1, n) for a 1-D shape; values are still checked below.
+            assert out.shape == shape
+
+        # Reference: high nibble first, fp32 codebook lookup, per-block scale over the
+        # flattened element index, then a single round-to-nearest cast to the output dtype.
+        code = _get_4bit_code(quant_type, A.device)
+        nibbles = torch.stack([A.flatten() >> 4, A.flatten() & 0xF], dim=1).flatten()[:n].long()
+        scale = absmax.repeat_interleave(blocksize)[:n]
+        ref = (code[nibbles] * scale).to(dtype).reshape(shape)
+
+        # Exact match expected: both sides do one fp32 multiply and one round-to-nearest-even cast.
+        # (fp4 index 8 is -0.0 in the C++ table and +0.0 in the torch code; assert_close treats them equal.)
+        torch.testing.assert_close(out.reshape(shape), ref, rtol=0, atol=0)
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
