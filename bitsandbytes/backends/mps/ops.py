@@ -10,6 +10,7 @@ implemented using pure PyTorch fallbacks.
 
 from collections.abc import Sequence
 from math import prod
+import os
 import platform
 from typing import Optional
 
@@ -477,6 +478,28 @@ def _(
     out.copy_(result)
 
 
+def _bf16_gemm_enabled(backward: bool = False) -> bool:
+    """Whether the native bf16 gemm may run for this direction.
+
+    Two kinds of gate. The capability symbol is the correctness one: a dylib with
+    bnb_mps_gemm_4bit but built before bf16 support would take dtype_flag=2, fall through to
+    fp32 element size, and read a bf16 scratch as float -- silent garbage, no crash.
+
+    The env vars are the measurement ones, and they are per-direction on purpose. Forward and
+    backward are separate phases of a training step with separate costs, so a single switch
+    could only ever answer "both or neither"; these answer "what did the backward alone buy",
+    in one session against one binary:
+        BNB_MPS_DISABLE_BF16_GEMM=1      -- forces the fallback for BOTH directions
+        BNB_MPS_DISABLE_BF16_GEMM_BWD=1  -- forces it for the backward only
+    A speedup you cannot switch off is a speedup you cannot verify.
+    """
+    if os.environ.get("BNB_MPS_DISABLE_BF16_GEMM", "") not in ("", "0"):
+        return False
+    if backward and os.environ.get("BNB_MPS_DISABLE_BF16_GEMM_BWD", "") not in ("", "0"):
+        return False
+    return hasattr(_mps_native._lib, "bnb_mps_gemm_4bit_supports_bf16")
+
+
 def _gemm_4bit_native(
     A: torch.Tensor,
     B: torch.Tensor,
@@ -496,10 +519,13 @@ def _gemm_4bit_native(
     per-call cross-queue sync is what dominates wall-clock at small/medium M -- see the
     Phase M2 finding in MPS_STATUS.md).
 
+    fp32/fp16 run the GEMM through MPSMatrixMultiplication; bf16 runs it through MPSGraph,
+    which has a bf16 matmul where MPSMatrixMultiplication hard-asserts on anything but
+    fp32/fp16/int8/int16. Same structure either way.
+
     `absmax` must already be the plain per-block fp32 scale: nested/compressed absmax is
     unpacked by the caller BEFORE this function. Preconditions (checked by the caller):
-    A.dtype is fp32/fp16 (MPSMatrixMultiplication asserts on bf16), K % 32 == 0, and
-    power-of-two blocksize >= 32.
+    A.dtype is fp32/fp16/bf16, K % 32 == 0, and power-of-two blocksize >= 32.
     """
     N, K = int(shapeB[0]), int(shapeB[-1])
     M = A.numel() // K
@@ -515,7 +541,7 @@ def _gemm_4bit_native(
         bias_ptr = bias_f.data_ptr()
 
     out = torch.empty(M * N, dtype=A.dtype, device=A.device)
-    dtype_flag = {torch.float32: 0, torch.float16: 1}[A.dtype]
+    dtype_flag = {torch.float32: 0, torch.float16: 1, torch.bfloat16: 2}[A.dtype]
     bs_shift = blocksize.bit_length() - 1
 
     torch.mps.synchronize()
@@ -534,6 +560,98 @@ def _gemm_4bit_native(
     )
 
     return out.reshape(*A.shape[:-1], N)
+
+
+def _gemm_4bit_backward_native(
+    grad_output: torch.Tensor,
+    B: torch.Tensor,
+    shapeB: Sequence[int],
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+) -> torch.Tensor:
+    """grad_A[M, K] = grad_output[M, N] . B_dq[N, K], one command buffer / one commit / one wait.
+
+    Structurally identical to _gemm_4bit_native, and deliberately so: the same chunked dequant
+    fills the same private scratch, and only the matmul orientation differs (no transpose here --
+    dequantize_4bit already emits [N, K], which is the orientation grad_A wants).
+
+    The win is the sync, not the arithmetic. The composition this replaces runs a native dequant
+    on our queue (wait), hands the result to torch, and runs a matmul on torch's queue (wait) --
+    twice the cross-queue round trip, per Linear4bit, per step.
+
+    `absmax` must already be the plain per-block fp32 scale. Preconditions are the caller's.
+    """
+    N, K = int(shapeB[0]), int(shapeB[-1])
+    M = grad_output.numel() // N
+
+    B_flat = B if B.dtype == torch.uint8 else B.view(torch.uint8)
+    B_flat = _ensure_native_buffer(B_flat.reshape(-1))
+    G_flat = _ensure_native_buffer(grad_output.reshape(-1))
+    code_f = _ensure_native_buffer(_get_4bit_code(quant_type, grad_output.device).to(torch.float32))
+    absmax_f = _ensure_native_buffer(absmax.to(torch.float32))
+
+    out = torch.empty(M * K, dtype=grad_output.dtype, device=grad_output.device)
+    dtype_flag = {torch.float32: 0, torch.float16: 1, torch.bfloat16: 2}[grad_output.dtype]
+    bs_shift = blocksize.bit_length() - 1
+
+    torch.mps.synchronize()
+    _mps_native.bnb_mps_gemm_4bit_bwd(
+        code_f.data_ptr(),
+        B_flat.data_ptr(),
+        absmax_f.data_ptr(),
+        G_flat.data_ptr(),
+        out.data_ptr(),
+        M,
+        K,
+        N,
+        bs_shift,
+        dtype_flag,
+    )
+
+    return out.reshape(*grad_output.shape[:-1], K)
+
+
+@register_kernel("bitsandbytes::gemm_4bit_backward", "mps")
+def _(
+    grad_output: torch.Tensor,
+    B: torch.Tensor,
+    shapeB: Sequence[int],
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    absmax_8bit: Optional[torch.Tensor] = None,
+    absmax_code: Optional[torch.Tensor] = None,
+    absmax_offset: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    N, K = int(shapeB[0]), int(shapeB[-1])
+
+    if absmax_8bit is not None:
+        absmax = (
+            torch.ops.bitsandbytes.dequantize_blockwise.default(absmax_8bit, absmax, absmax_code, 256, torch.float32)
+            + absmax_offset
+        )
+
+    # Same guards as the forward, minus bias (there is none) and with the inner dim being N.
+    # K % 32 == 0 is still what the chunked dequant needs; it fills B_dq[N, K] either way.
+    if (
+        _native_available()
+        and hasattr(_mps_native._lib, "bnb_mps_gemm_4bit_bwd")  # dylibs before the fused backward
+        and (
+            grad_output.dtype in (torch.float32, torch.float16)
+            or (grad_output.dtype == torch.bfloat16 and _bf16_gemm_enabled(backward=True))
+        )
+        and len(shapeB) == 2
+        and grad_output.shape[-1] == N
+        and K % 32 == 0
+        and blocksize >= 32
+        and (blocksize & (blocksize - 1)) == 0
+        and B.numel() * B.element_size() == (N * K) // 2
+    ):
+        return _gemm_4bit_backward_native(grad_output, B, shapeB, absmax, blocksize, quant_type)
+
+    B_dq = _dequantize_4bit_impl(B, absmax, blocksize, quant_type, shapeB, grad_output.dtype)
+    return torch.matmul(grad_output, B_dq)
 
 
 @register_kernel("bitsandbytes::gemm_4bit", "mps")
@@ -561,16 +679,19 @@ def _(
             + absmax_offset
         )
 
-    # Native Metal path (dequant -> scratch -> MPSMatrixMultiplication -> bias, one command
-    # buffer / one sync). Guards: fp32/fp16 only (MPSMatrixMultiplication hard-asserts on
-    # bf16 -- verified on macOS 26.4.1 -- so bf16 keeps the dequant + F.linear fallback),
-    # 2-D shapeB matching A's K, K % 32 == 0 (uint4 loads in the chunked dequant kernel),
-    # power-of-two blocksize (absmax indexed with a shift), a bias matching out's dtype and
-    # width, and packed B of the expected size.
+    # Native Metal path (dequant -> scratch -> MPSMatrixMultiplication (fp32/fp16) or MPSGraph
+    # (bf16) -> bias, one command buffer / one sync). Guards: 2-D shapeB matching A's K,
+    # K % 32 == 0 (uint4 loads in the chunked dequant kernel), power-of-two blocksize (absmax
+    # indexed with a shift), a bias matching out's dtype and width, and packed B of the
+    # expected size. bf16 additionally requires the capability marker, since a dylib with
+    # bnb_mps_gemm_4bit but no bf16 support would misread the scratch as fp32.
     if (
         _native_available()
         and hasattr(_mps_native._lib, "bnb_mps_gemm_4bit")  # stale dylibs predate the native gemm
-        and A.dtype in (torch.float32, torch.float16)
+        and (
+            A.dtype in (torch.float32, torch.float16)
+            or (A.dtype == torch.bfloat16 and _bf16_gemm_enabled())
+        )
         and len(shapeB) == 2
         and shapeB[-1] == K
         and K % 32 == 0

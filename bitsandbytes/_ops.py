@@ -237,6 +237,43 @@ def _(
 
 
 torch.library.define(
+    "bitsandbytes::gemm_4bit_backward",
+    "(Tensor grad_output, Tensor B, int[] shapeB, Tensor absmax, int blocksize, str quant_type, "
+    "Tensor? absmax_8bit=None, Tensor? absmax_code=None, Tensor? absmax_offset=None) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::gemm_4bit_backward")
+def _(
+    grad_output: torch.Tensor,
+    B: torch.Tensor,
+    shapeB: Sequence[int],
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    absmax_8bit: Optional[torch.Tensor] = None,
+    absmax_code: Optional[torch.Tensor] = None,
+    absmax_offset: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    # grad_A[..., K] = grad_output[..., N] @ B_dq[N, K]. Note the inner dim is N here, not K:
+    # this consumes B_dq in the orientation dequantize_4bit already produces, untransposed.
+    torch._check(len(shapeB) == 2, lambda: f"shapeB must be 2D [N, K], got {list(shapeB)}")
+    torch._check(
+        grad_output.shape[-1] == shapeB[0],
+        lambda: f"grad_output inner dim ({grad_output.shape[-1]}) must match shapeB[0] ({shapeB[0]})",
+    )
+    torch._check(
+        grad_output.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: f"grad_output must be float16, bfloat16, or float32, got {grad_output.dtype}",
+    )
+    torch._check(blocksize in (32, 64, 128, 256, 512, 1024, 2048, 4096), lambda: f"invalid blocksize {blocksize}")
+    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be 'nf4' or 'fp4', got {quant_type!r}")
+    return torch.empty(
+        (*grad_output.shape[:-1], shapeB[1]), device=grad_output.device, dtype=grad_output.dtype
+    )
+
+
+torch.library.define(
     "bitsandbytes::gemm_4bit",
     "(Tensor A, Tensor B, int[] shapeB, Tensor absmax, int blocksize, str quant_type, "
     "Tensor? bias=None, Tensor? absmax_8bit=None, Tensor? absmax_code=None, Tensor? absmax_offset=None) -> Tensor",

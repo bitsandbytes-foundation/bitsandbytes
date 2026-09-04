@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
+#import <MetalPerformanceShadersGraph/MetalPerformanceShadersGraph.h>
 
 #include <cstdint>
 #include <dlfcn.h>
@@ -320,25 +321,26 @@ static id<MTLBuffer> get_scratch(size_t bytes) {
 // Shape-keyed MPSMatrixMultiplication cache. Operands are supplied at encode time, so one
 // object per {M, N, K, dtype} can be reused across calls (transformer workloads repeat a
 // few shapes, so the hit rate is high -- the CT2 Metal backend lesson).
-static MPSMatrixMultiplication* get_gemm(int64_t M, int64_t N, int64_t K, int64_t dtype_flag) {
+static MPSMatrixMultiplication* get_gemm(int64_t M, int64_t N, int64_t K, int64_t dtype_flag, bool backward) {
     static NSMutableDictionary<NSString*, MPSMatrixMultiplication*>* cache = nil;
     if (!cache) {
         cache = [[NSMutableDictionary alloc] init];
     }
-    NSString* key = [NSString
-        stringWithFormat:@"%lld_%lld_%lld_%lld", (long long)M, (long long)N, (long long)K, (long long)dtype_flag];
+    NSString* key = [NSString stringWithFormat:@"%lld_%lld_%lld_%lld_%d", (long long)M, (long long)N, (long long)K,
+                                               (long long)dtype_flag, backward ? 1 : 0];
     MPSMatrixMultiplication* mm = cache[key];
     if (mm) {
         return mm;
     }
-    // C[M, N] = A[M, K] . B_dq[N, K]^T  (row-major on both sides; MPS is row-major, so no
-    // cuBLAS-style operand swap).
+    // Forward:  C[M, N] = A[M, K] . B_dq[N, K]^T   (row-major on both sides; MPS is row-major,
+    //           so no cuBLAS-style operand swap).
+    // Backward: C[M, K] = G[M, N] . B_dq[N, K]     (B_dq needs no transpose here).
     mm = [[MPSMatrixMultiplication alloc] initWithDevice:get_device()
                                            transposeLeft:NO
-                                          transposeRight:YES
+                                          transposeRight:(backward ? NO : YES)
                                               resultRows:(NSUInteger)M
-                                           resultColumns:(NSUInteger)N
-                                         interiorColumns:(NSUInteger)K
+                                           resultColumns:(NSUInteger)(backward ? K : N)
+                                         interiorColumns:(NSUInteger)(backward ? N : K)
                                                    alpha:1.0
                                                     beta:0.0];
     if (!mm) {
@@ -353,6 +355,54 @@ static MPSMatrixMultiplication* get_gemm(int64_t M, int64_t N, int64_t K, int64_
     return mm;
 }
 
+// Shape-keyed MPSGraph cache -- the bf16 GEMM. MPSMatrixMultiplication has no bf16 path (it
+// hard-asserts on anything but fp32/fp16/int8/int16), but MPSGraph does, so bf16 gets the
+// same one-command-buffer structure through a graph instead of falling back to torch. Each
+// entry is @[graph, A placeholder, B placeholder, result]; operands are supplied at encode
+// time, so one entry serves every call at that shape.
+//
+// Graph construction is the expensive part (MPSGraph compiles on first encode), which is why
+// this is cached rather than rebuilt: a transformer repeats a handful of {M, N, K}.
+static NSArray* get_gemm_graph_bf16(int64_t M, int64_t N, int64_t K, bool backward) {
+    static NSMutableDictionary<NSString*, NSArray*>* cache = nil;
+    if (!cache) {
+        cache = [[NSMutableDictionary alloc] init];
+    }
+    NSString* key = [NSString
+        stringWithFormat:@"%lld_%lld_%lld_%d", (long long)M, (long long)N, (long long)K, backward ? 1 : 0];
+    NSArray* entry = cache[key];
+    if (entry) {
+        return entry;
+    }
+
+    MPSGraph* g = [[MPSGraph alloc] init];
+    // Forward:  C[M, N] = A[M, K] . B_dq[N, K]^T  (explicit transpose, folded into the matmul).
+    // Backward: C[M, K] = G[M, N] . B_dq[N, K]    (no transpose -- B_dq is already the right way
+    //           round for grad_A, which is the whole reason this orientation is cheap).
+    MPSGraphTensor* a = [g placeholderWithShape:@[@(M), @(backward ? N : K)]
+                                       dataType:MPSDataTypeBFloat16
+                                           name:@"A"];
+    MPSGraphTensor* b = [g placeholderWithShape:@[@(N), @(K)] dataType:MPSDataTypeBFloat16 name:@"B"];
+    MPSGraphTensor* rhs = backward ? b : [g transposeTensor:b dimension:0 withDimension:1 name:@"Bt"];
+    MPSGraphTensor* c = [g matrixMultiplicationWithPrimaryTensor:a secondaryTensor:rhs name:@"C"];
+    if (!a || !b || !c) {
+        NSLog(
+            @"bitsandbytes: failed to build bf16 MPSGraph GEMM (M=%lld N=%lld K=%lld)", (long long)M,
+            (long long)N, (long long)K
+        );
+        abort();
+    }
+    entry = @[g, a, b, c];
+    cache[key] = entry;
+    [g release]; // the entry array retains it
+    return entry;
+}
+
+// Capability marker. The Python router gates the bf16 path on this symbol so a stale dylib
+// -- one that has bnb_mps_gemm_4bit but predates bf16 -- keeps the fallback instead of being
+// handed dtype_flag=2 and silently reading the scratch as fp32.
+extern "C" int bnb_mps_gemm_4bit_supports_bf16(void) { return 1; }
+
 // gemm_4bit (general M): dequantize packed B into a scratch buffer in the activation dtype,
 // then run MPSMatrixMultiplication A[M,K] . B_dq[N,K]^T -> out[M,N], plus an optional bias
 // epilogue -- ALL encoded on ONE command buffer with ONE commit + ONE blocking wait. That
@@ -362,25 +412,35 @@ static MPSMatrixMultiplication* get_gemm(int64_t M, int64_t N, int64_t K, int64_
 //
 // code (float32[16]), B (uint8 packed, N*K/2 bytes), absmax (float32[N*K >> bs_shift]),
 // A (M*K elements of T), bias (N elements of T, may be NULL), out (M*N elements of T).
-// dtype_flag: 0 = fp32, 1 = fp16. bf16 is NOT accepted: MPSMatrixMultiplication asserts on
-// anything but fp32/fp16/int8/int16 (verified on macOS 26.4.1), so the Python router keeps
-// bf16 on the dequant + F.linear fallback.
-extern "C" void bnb_mps_gemm_4bit(
+// dtype_flag: 0 = fp32, 1 = fp16, 2 = bf16. fp32/fp16 use MPSMatrixMultiplication; bf16 uses
+// MPSGraph, which does have a bf16 matmul where MPSMatrixMultiplication hard-asserts on
+// anything but fp32/fp16/int8/int16 (verified on macOS 26.4.1). Both keep the same
+// one-command-buffer / one-commit / one-wait structure.
+static void gemm_4bit_common(
     void* code, void* B, void* absmax, void* A, void* bias, void* out, int64_t M, int64_t K, int64_t N,
-    int64_t bs_shift, int64_t dtype_flag
+    int64_t bs_shift, int64_t dtype_flag, bool backward
 ) {
     @autoreleasepool {
         const bool fp16 = (dtype_flag == 1);
-        const size_t elsize = fp16 ? 2 : 4;
+        const bool bf16 = (dtype_flag == 2);
+        const size_t elsize = (fp16 || bf16) ? 2 : 4;
         const MPSDataType mps_dtype = fp16 ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
 
         id<MTLBuffer> scratch = get_scratch((size_t)N * (size_t)K * elsize);
-        id<MTLCommandBuffer> cb = [get_queue() commandBuffer];
+        // bf16 encodes an MPSGraph, which requires an MPSCommandBuffer. MPSCommandBuffer
+        // conforms to MTLCommandBuffer, so the dequant and bias encoders below are unchanged
+        // and everything still rides one buffer. (MPSGraph may commitAndContinue internally,
+        // rolling the root buffer; commit order is preserved either way, and waiting on the
+        // final root therefore also waits for anything it rolled off.)
+        MPSCommandBuffer* mcb = bf16 ? [MPSCommandBuffer commandBufferFromCommandQueue:get_queue()] : nil;
+        id<MTLCommandBuffer> cb = bf16 ? (id<MTLCommandBuffer>)mcb : [get_queue() commandBuffer];
 
         // 1) Dequantize packed B -> scratch B_dq[N, K] in T (one thread per 32-element chunk).
         {
-            id<MTLComputePipelineState> pso =
-                get_pipeline(fp16 ? @"dequantize_4bit_chunked_fp16" : @"dequantize_4bit_chunked_fp32");
+            id<MTLComputePipelineState> pso = get_pipeline(
+                bf16 ? @"dequantize_4bit_chunked_bf16"
+                     : (fp16 ? @"dequantize_4bit_chunked_fp16" : @"dequantize_4bit_chunked_fp32")
+            );
             id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
             [enc setComputePipelineState:pso];
             [enc setBuffer:(__bridge id<MTLBuffer>)code offset:0 atIndex:0];
@@ -407,28 +467,56 @@ extern "C" void bnb_mps_gemm_4bit(
 
         // 2) GEMM on the same command buffer. Metal's automatic hazard tracking orders the
         //    MPS encoder after the dequant encoder (scratch is a tracked resource).
-        {
+        if (bf16) {
+            NSArray* entry = get_gemm_graph_bf16(M, N, K, backward);
+            // The buffers torch hands us come from its caching allocator and are routinely
+            // LARGER than the tensor; MPSGraphTensorData accepts that (probed) and reads only
+            // the leading shape-many elements.
+            MPSGraphTensorData* tA = [[[MPSGraphTensorData alloc] initWithMTLBuffer:(__bridge id<MTLBuffer>)A
+                                                                             shape:@[@(M), @(backward ? N : K)]
+                                                                          dataType:MPSDataTypeBFloat16]
+                autorelease];
+            MPSGraphTensorData* tB = [[[MPSGraphTensorData alloc] initWithMTLBuffer:scratch
+                                                                             shape:@[@(N), @(K)]
+                                                                          dataType:MPSDataTypeBFloat16]
+                autorelease];
+            MPSGraphTensorData* tC = [[[MPSGraphTensorData alloc] initWithMTLBuffer:(__bridge id<MTLBuffer>)out
+                                                                             shape:@[@(M), @(backward ? K : N)]
+                                                                          dataType:MPSDataTypeBFloat16]
+                autorelease];
+            [(MPSGraph*)entry[0] encodeToCommandBuffer:mcb
+                                                 feeds:@{entry[1]: tA, entry[2]: tB}
+                                      targetOperations:nil
+                                     resultsDictionary:@{entry[3]: tC}
+                                   executionDescriptor:nil];
+        } else {
+            const NSUInteger lhs_cols = (NSUInteger)(backward ? N : K);
+            const NSUInteger res_cols = (NSUInteger)(backward ? K : N);
             MPSMatrixDescriptor* dA = [MPSMatrixDescriptor matrixDescriptorWithRows:(NSUInteger)M
-                                                                            columns:(NSUInteger)K
-                                                                           rowBytes:(NSUInteger)K * elsize
+                                                                            columns:lhs_cols
+                                                                           rowBytes:lhs_cols * elsize
                                                                            dataType:mps_dtype];
             MPSMatrixDescriptor* dB = [MPSMatrixDescriptor matrixDescriptorWithRows:(NSUInteger)N
                                                                             columns:(NSUInteger)K
                                                                            rowBytes:(NSUInteger)K * elsize
                                                                            dataType:mps_dtype];
             MPSMatrixDescriptor* dC = [MPSMatrixDescriptor matrixDescriptorWithRows:(NSUInteger)M
-                                                                            columns:(NSUInteger)N
-                                                                           rowBytes:(NSUInteger)N * elsize
+                                                                            columns:res_cols
+                                                                           rowBytes:res_cols * elsize
                                                                            dataType:mps_dtype];
             MPSMatrix* mA = [[[MPSMatrix alloc] initWithBuffer:(__bridge id<MTLBuffer>)A descriptor:dA] autorelease];
             MPSMatrix* mB = [[[MPSMatrix alloc] initWithBuffer:scratch descriptor:dB] autorelease];
             MPSMatrix* mC = [[[MPSMatrix alloc] initWithBuffer:(__bridge id<MTLBuffer>)out descriptor:dC] autorelease];
-            [get_gemm(M, N, K, dtype_flag) encodeToCommandBuffer:cb leftMatrix:mA rightMatrix:mB resultMatrix:mC];
+            [get_gemm(M, N, K, dtype_flag, backward) encodeToCommandBuffer:cb
+                                                          leftMatrix:mA
+                                                         rightMatrix:mB
+                                                        resultMatrix:mC];
         }
 
         // 3) Optional bias epilogue: out[m, n] += bias[n], still the same command buffer.
         if (bias) {
-            id<MTLComputePipelineState> pso = get_pipeline(fp16 ? @"gemm_bias_add_fp16" : @"gemm_bias_add_fp32");
+            id<MTLComputePipelineState> pso =
+                get_pipeline(bf16 ? @"gemm_bias_add_bf16" : (fp16 ? @"gemm_bias_add_fp16" : @"gemm_bias_add_fp32"));
             id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
             [enc setComputePipelineState:pso];
             [enc setBuffer:(__bridge id<MTLBuffer>)out offset:0 atIndex:0];
@@ -459,11 +547,37 @@ extern "C" void bnb_mps_gemm_4bit(
             const double gpu_ms = ([cb GPUEndTime] - [cb GPUStartTime]) * 1000.0;
             const double done_ms = (t_done - [cb GPUEndTime]) * 1000.0;
             NSLog(
-                @"bnb_mps_gemm_4bit dtype=%lld M=%lld N=%lld K=%lld bias=%d sched=%.3fms gpu=%.3fms done=%.3fms",
-                (long long)dtype_flag, (long long)M, (long long)N, (long long)K, bias ? 1 : 0, sched_ms, gpu_ms, done_ms
+                @"bnb_mps_gemm_4bit%s dtype=%lld M=%lld N=%lld K=%lld bias=%d sched=%.3fms gpu=%.3fms done=%.3fms",
+                backward ? "_bwd" : "", (long long)dtype_flag, (long long)M, (long long)N, (long long)K, bias ? 1 : 0,
+                sched_ms, gpu_ms, done_ms
             );
         }
     }
+}
+
+extern "C" void bnb_mps_gemm_4bit(
+    void* code, void* B, void* absmax, void* A, void* bias, void* out, int64_t M, int64_t K, int64_t N,
+    int64_t bs_shift, int64_t dtype_flag
+) {
+    gemm_4bit_common(code, B, absmax, A, bias, out, M, K, N, bs_shift, dtype_flag, /*backward=*/false);
+}
+
+// gemm_4bit backward (grad_A): out[M, K] = G[M, N] . B_dq[N, K], same dequant-to-scratch and the
+// same one command buffer / one commit / one wait as the forward. The orientation is the point:
+// MatMul4Bit.backward wants grad_output @ dequantize_4bit(B), and dequantize_4bit already yields
+// [N, K], so this needs NO transpose where the forward needs one.
+//
+// This is the half of a QLoRA step that M3/M5 could not reach: the Python backward composes a
+// native dequant (its own sync) with a torch matmul (torch's queue), paying the cross-queue round
+// trip twice per Linear4bit per step. No bias -- grad_bias is grad_output.sum(0), computed in
+// Python, and never routed here.
+extern "C" void bnb_mps_gemm_4bit_bwd(
+    void* code, void* B, void* absmax, void* G, void* out, int64_t M, int64_t K, int64_t N, int64_t bs_shift,
+    int64_t dtype_flag
+) {
+    gemm_4bit_common(
+        code, B, absmax, G, /*bias=*/nullptr, out, M, K, N, bs_shift, dtype_flag, /*backward=*/true
+    );
 }
 
 // quantize_4bit: bounds (float32[15]), order (uint8[16]), A (float32[n]) ->

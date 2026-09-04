@@ -1,8 +1,10 @@
 # MPS Backend Status — Phase 1 audit + Phase 2 first native kernel
 
 **Date:** 2026-07-08 (Phases 1–3) · 2026-07-14 (Phases M1–M4, 4-bit matmul) ·
-**Branch:** `feature/mps-metal-kernels` (base: `777c145`), then `feature/mps-matmul`
-**Machine:** Apple Silicon (arm64), macOS **26.4.1**
+2026-09-03 (Phase M5, bf16 gemm — §11.5) ·
+**Branch:** `feature/mps-metal-kernels` (base: `777c145`), then `feature/mps-matmul`,
+then `feat/mps-gemm-4bit-bf16`
+**Machine:** Apple Silicon (arm64), macOS **26.4.1** (M5: macOS **26.5**, M4 Max)
 **Stack:** Python 3.14.2 · torch **2.12.1** · bitsandbytes 0.50.0.dev0
 **Harness:** `tests/test_mps_parity.py` — Phase-1 baseline (no native build): **183 passed, 1 xfailed
 (strict), 0 skipped**. Phase-3 source build (`-DCOMPUTE_BACKEND=mps`, `BNB_MPS_REQUIRE_NATIVE=1`):
@@ -69,7 +71,7 @@ Parity = max deviation vs the CPU oracle with seeded inputs (see §3 for toleran
 | `quantize_4bit`                   | ✅ **native Metal** (P3)       | hand-written kernel (fallback avail) | packed nibbles **bit-exact**, absmax **bit-exact** |
 | `dequantize_4bit` (+`.out`)       | ✅ **native Metal** (P3)       | hand-written kernel (fallback avail) | **bit-exact** all dtypes/blocksizes                |
 | `gemv_4bit` (+`.out`)             | ✅ **native Metal** (M2)       | fused dequant+dot kernel (§11.1)     | within per-dtype tolerances (§3); fallback avail   |
-| `gemm_4bit`                       | ✅ **native Metal** (M3)       | dequant→scratch + MPSMatMul (§11.2)  | within per-dtype tolerances; **bf16 → fallback**   |
+| `gemm_4bit`                       | ✅ **native Metal** (M3/M5)    | dequant→scratch + MPSMatMul/Graph    | within per-dtype tolerances, **all 3 dtypes**      |
 | `int8_linear_matmul` (+`.out`)    | ❌ → `default`                 | fp32 matmul on MPS                   | exact (int32)                                      |
 | `int8_vectorwise_quant`           | ❌ → `default`                 | pure-torch on MPS                    | exact (incl. outlier extraction, threshold=6)      |
 | `int8_vectorwise_dequant`         | ❌ → `default`                 | pure-torch on MPS                    | exact                                              |
@@ -460,11 +462,11 @@ blocking wait**: (1) a chunked dequant kernel (`dequantize_4bit_chunked_fp32/fp1
 `out[m,n] += bias[n]` epilogue kernel. The single sync is the structural win over
 dequant+`F.linear`, which pays the cross-queue round trip twice.
 
-- **bf16 is excluded by the router:** `MPSMatrixMultiplication` hard-asserts on anything but
-  fp32/fp16/int8/int16 (probed on macOS 26.4.1: "Input data type must be one of
-  MPSDataTypeFloat32, MPSDataTypeFloat16, MPSDataTypeInt8, or MPSDataTypeInt16"), so bf16 keeps
-  the dequant+`F.linear` fallback verbatim (still parity-green, asserted by
-  `test_gemm_4bit_bf16_uses_fallback`).
+- **bf16 was excluded by the router at M3:** `MPSMatrixMultiplication` hard-asserts on anything
+  but fp32/fp16/int8/int16 (probed on macOS 26.4.1: "Input data type must be one of
+  MPSDataTypeFloat32, MPSDataTypeFloat16, MPSDataTypeInt8, or MPSDataTypeInt16"), so bf16 kept
+  the dequant+`F.linear` fallback verbatim. **Phase M5 (§11.5) lifted this** by routing bf16
+  through `MPSGraph` instead; the rest of §11.2 is unchanged.
 - Other router guards mirror gemv: K % 32 == 0, power-of-two blocksize ≥ 32, packed-size and bias
   checks; nested absmax is unpacked to plain fp32 absmax before routing, unchanged.
 - Parity: native asserted via spy incl. ±bias/±nested-absmax; fp32-vs-MPSMatMul accumulation stays
@@ -553,3 +555,252 @@ Verified on this build (torch 2.12.1):
   workload actually hits the copy. `test_view_data_ptr_is_base_plus_offset` pins the verified
   semantics so a future torch that changes them fails loudly instead of silently invalidating
   `_ensure_native_buffer`'s premise.
+
+### 11.5 Phase M5 — `gemm_4bit` in bf16 via MPSGraph
+
+**Status: complete and green.** Correctness verified, wall-clock measured (below).
+
+bf16 was the one dtype with no native 4-bit matmul, and it is the dtype the CogKit CogView4-6B
+QLoRA lane actually trains in — so on that lane the M3 work did not apply at all. The blocker
+was never Metal, only `MPSMatrixMultiplication`, which accepts fp32/fp16/int8/int16 and nothing
+else. **`MPSGraph` does have a bf16 matmul.** Probed directly on macOS 26.5 / M4 Max before any
+code was written: `matrixMultiplicationWithPrimaryTensor:` on `MPSDataTypeBFloat16` builds,
+runs, and returns the exact expected value.
+
+The M3 structure is unchanged — chunked dequant into a private scratch buffer, then GEMM, then
+optional bias epilogue, all on **one command buffer / one commit / one blocking wait**. Only the
+middle step differs: bf16 encodes a shape-cached `MPSGraph` (`get_gemm_graph_bf16`) onto an
+`MPSCommandBuffer`, where fp32/fp16 keep the shape-cached `MPSMatrixMultiplication`. The Metal
+kernels needed no new code, only two instantiations of the existing `T`-templated macros
+(`dequantize_4bit_chunked_bf16`, `gemm_bias_add_bf16`) — `bfloat` was already in use by the M2
+gemv kernels.
+
+Three things were probed before committing to the design, because each would have sunk it:
+
+1. **Oversized buffers.** `MPSGraphTensorData initWithMTLBuffer:shape:dataType:` accepts a
+   buffer larger than the shape requires and reads only the leading elements. This is not an
+   edge case: torch's caching allocator hands out oversized buffers as the *normal* case, so a
+   strict-size requirement would have meant a copy on every call.
+2. **Sharing a command buffer.** `MPSCommandBuffer` conforms to `MTLCommandBuffer`, so our own
+   `computeCommandEncoder` for dequant and bias works on it unmodified — the single-sync
+   structure survives.
+3. **Hazard tracking across the two.** Our compute kernel writes the *private* scratch buffer
+   and the graph reads it, on one command buffer, with no explicit barrier. Verified correct at
+   the first and last element. (MPSGraph may `commitAndContinue` internally, rolling the root
+   command buffer; commit order is preserved regardless, so waiting on the final root also
+   waits for anything rolled off. The `BNB_MPS_PROFILE` GPU-time decomposition is the one thing
+   that could be skewed by such a split.)
+
+**Known property, inherited from M3: the shape cache is unbounded.** `get_gemm_graph_bf16` keys
+on `{M, N, K}` and never evicts, exactly like M3's `get_gemm` cache of `MPSMatrixMultiplication`
+objects. For training that is free — M is fixed by the config and a transformer repeats a handful
+of `{N, K}` — but a long-running inference server with a varying sequence length would accumulate
+one compiled graph per distinct M, and an `MPSGraph` is a heavier object to leak than an
+`MPSMatrixMultiplication`. Left as-is deliberately rather than bounding one cache and not the
+other; if it ever matters, both want the same LRU.
+
+**Router gating.** bf16 requires the new `bnb_mps_gemm_4bit_supports_bf16` capability symbol,
+not just `bnb_mps_gemm_4bit`. Without it, a dylib built before M5 would be handed `dtype_flag=2`
+and would fall through to `elsize = 4` / `MPSDataTypeFloat32` — reading a bf16 scratch as fp32
+and returning silent garbage. Old dylib, new Python, no crash: exactly the failure mode worth a
+symbol.
+
+**`BNB_MPS_DISABLE_BF16_GEMM=1`** forces the dequant+`F.linear` fallback for bf16 with the native
+build otherwise intact. It exists so the path can be A/B'd in place — the end-to-end table above
+was produced by toggling this between runs of the same binary and config, which is the only way to
+know the difference is the GEMM and not a rebuild, a reinstall, or the weather. A speedup you
+cannot switch off is a speedup you cannot verify.
+
+**Numerics.** Without bias the native bf16 path reproduces the dequant+`F.linear` fallback it
+replaces **bit-exactly** — asserted by `torch.equal` in
+`test_gemm_4bit_bf16_is_native_and_matches_the_fallback`, which is the assertion with teeth
+here. With bias the two can differ: the epilogue computes `(bfloat)(gemm + bias)` on an already
+bf16-rounded GEMM result where `F.linear` rounds once, so the error is one ulp of the *pre-add*
+magnitude. Wherever bias largely cancels the GEMM result that is several ulp of the much smaller
+output, which is why the biased case is held to the documented CPU parity tolerance rather than
+a relative-to-output bound. (A first draft of the test used exactly such a bound and failed —
+correctly. The kernel was fine; the tolerance was the wrong shape.) bf16 is also now part of the
+`test_gemm_4bit_native` parametrized sweep across nf4/fp4 × ±bias × ±nested-absmax.
+
+Quantified at the CogKit shapes (M=1024, each of the four `(N, K)`): **without bias, bit-exact at
+every one, K=16384 included.** With bias, ~25% of output elements differ, always by exactly one ulp
+— which is what a double rounding does to uniformly distributed values. CogView4's linears are
+`bias=True`, and across 28 layers this is visible end to end: the QLoRA loss sequence is otherwise
+identical between the two arms (1.12, 1.36, 1.32, 1.32) and deterministic within each, but the one
+high-loss outlier step reads **5.56 on the fallback and 5.59 native**, a 0.5% shift on a step whose
+loss is 4x the others. This is the same epilogue design fp32/fp16 have shipped with since M3, so it
+is left alone rather than made inconsistent across dtypes; eliminating it would mean an fp32 output
+scratch so the bias adds before the single rounding.
+
+**Wall-clock.** Measured on a quiet M4 Max (macOS 26.5, torch `2.15.0a0+gitf6df965`), 30 iters /
+8 warmup, with a 64 MB `clone()` control read before and after each table (0.300 → 0.287 ms, i.e.
+~427 GB/s and stable, so each table is internally comparable). An earlier attempt the same day was
+discarded entirely: the machine sat at load average 200–298 under a runaway editor file-scan, where
+plain torch bf16 `F.linear` read 3.0 TFLOP/s — about a tenth of this GPU — and *the sign of some
+comparisons flipped*. See the retraction below for how badly.
+
+M sweep, `gemm_4bit` native vs the dequant+`F.linear` fallback, nf4/bs64, N=K=4096:
+
+| M    | bf16       | fp16   | fp32   |
+| ---- | ---------- | ------ | ------ |
+| 8    | **2.09x**  | 2.16x  | 1.22x  |
+| 64   | **1.94x**  | 1.94x  | 1.04x  |
+| 512  | **1.09x**  | 1.80x  | 1.24x  |
+| 2048 | **1.03x**  | 0.96x  | 0.93x  |
+
+bf16 traces the same curve M3 found for fp16: a large win where the fixed ~0.15 ms sync tax is a big
+share of a small op, converging to break-even once the GEMM dominates. At the CogView4-6B shapes
+(M=1024/1280 × the four `(N, K)` of qkv/out/mlp-in/mlp-out) bf16 lands between **0.98x and 2.11x,
+mostly 1.0–1.16x** — the training lane sits in the flat part of the curve, not the steep part.
+
+**End-to-end: CogKit CogView4-6B QLoRA, 512×512, batch 1.** *Superseded by the three-arm n=6
+measurement in §11.6 — the forward figure held, the step figure did not.* Four runs per arm, alternated, toggled
+in place with `BNB_MPS_DISABLE_BF16_GEMM` (identical binary and config, so nothing else can drift):
+
+| stage           | fallback (mean, range)   | native (mean, range)     | delta      | ranges overlap? |
+| --------------- | ------------------------ | ------------------------ | ---------- | --------------- |
+| **forward**     | 4.418 s [4.196–4.646]    | **3.950 s [3.754–4.181]**| **−10.6%** | **no**          |
+| backward        | 3.963 s [3.863–4.183]    | 4.111 s [3.919–4.433]    | +3.7%      | yes             |
+| **step**        | 8.651 s [8.338–9.098]    | **8.329 s [7.956–8.860]**| −3.7%      | yes             |
+| memory_reserved | 17.39 GB [17.05–18.05]   | 16.43 GB [16.18–17.18]   | −5.5%      | yes             |
+
+Read this carefully, because the honest claim is narrower than the headline:
+
+- **Forward is the real result: −10.6%, with no overlap between the two arms' ranges across 4+4
+  runs.** That is the only stage `gemm_4bit` touches, and it is the only one that separates.
+- **Backward's +3.7% is noise**, and must be: `MatMul4Bit.backward` never calls `gemm_4bit` (verified
+  by spy, not by reading — a bf16 `Linear4bit` fwd+bwd gives *forward = 1 native call, backward = 0*).
+  A stage this path cannot reach moving by 3.7% is a direct measurement of the run-to-run noise floor.
+- **Step time −3.7% overlaps** and is therefore suggestive, not established. At n=2 it looked like a
+  clean −7% with no overlap; two more runs per arm dissolved that. The forward win is real and the
+  backward noise is comparable in size, so it partly eats the step-level gain.
+- The ~1 GB of `memory_reserved` is a plausible side effect — the fallback materializes a full `B_dq`
+  torch tensor per layer through the caching allocator, where the native path reuses one private
+  scratch `MTLBuffer` outside it — but the arms overlap, and ~134 MB of that scratch is simply
+  invisible to torch's accounting rather than saved.
+
+**Retraction.** The pre-code probe recorded during the contended window had `MPSGraph` bf16 at 2.33 ms
+against `MPSMatrixMultiplication` fp16 at 3.84 ms (1024×2560×2560) and was written up as a lead that
+fp32/fp16 might want MPSGraph too. Re-run on the quiet machine: **1.183 ms vs 1.081 ms — MPSMatrix-
+Multiplication is slightly faster, and the ratio reversed.** There is no case for moving fp32/fp16 onto
+MPSGraph. Both numbers were ~2x slower under contention *and* their ordering flipped, which is the
+cleanest available demonstration that a contended benchmark is not merely imprecise but can be
+directionally wrong.
+
+**What this does NOT cover: the backward pass.** `MatMul4Bit.backward` computes
+`grad_A = grad_output @ dequantize_4bit(B)` in Python and never calls `gemm_4bit` at all — so it
+still pays two syncs and a full weight dequant, and none of M3 or M5 reaches it. In the CogKit
+QLoRA profile backward is 4.03 s of an 8.52 s step, comparable to forward. A fused
+`gemm_4bit_backward` (same dequant scratch, `transposeRight:NO`, one command buffer) is the
+obvious next phase and is not started.
+
+### 11.6 Phase M6 — the fused backward: `gemm_4bit_backward`
+
+**Status: correctness complete; end-to-end numbers below.**
+
+§11.5 closed the last dtype gap in the forward and, in doing so, made the remaining asymmetry
+obvious: **`MatMul4Bit.backward` never called `gemm_4bit` at all.** It computed
+`grad_A = grad_output @ dequantize_4bit(B)` inline in Python — a native dequant on our private
+queue (wait), handed to torch, then a matmul on torch's queue (wait). Two cross-queue round trips
+per `Linear4bit` per step, on a stage that is ~48% of a CogKit QLoRA step. Every phase from M3
+through M5 optimised the half of the step that was already the faster half.
+
+This was verified by spy before any code was written, not inferred from reading: a bf16
+`Linear4bit` fwd+bwd reported **forward = 1 native call, backward = 0**.
+
+**The new op.** `bitsandbytes::gemm_4bit_backward(grad_output, B, shapeB, absmax, blocksize,
+quant_type, ...)` returns `grad_A[..., K] = grad_output[..., N] · B_dq[N, K]`. Note the inner
+dimension is **N**, not K. Its `default` kernel is exactly the composition it replaces, so every
+non-MPS device gets the op for free and the fused kernel has an oracle to be checked against.
+
+**Why this orientation is cheap.** `dequantize_4bit` already emits `B_dq` as `[N, K]`, which is
+precisely what `grad_A` wants — so the backward needs **no transpose** where the forward does
+(`transposeRight:NO` for `MPSMatrixMultiplication`; no `transposeTensor` node for the bf16
+`MPSGraph`). There is also no bias: `grad_bias` is `grad_output.sum(0)`, computed in Python and
+never routed here.
+
+The C side is not a second implementation. `bnb_mps_gemm_4bit` and `bnb_mps_gemm_4bit_bwd` are
+both thin `extern "C"` shims over one `gemm_4bit_common(..., bool backward)` body, so the chunked
+dequant, the private scratch, the shape caches, the profiling hooks and — critically — the
+one-command-buffer / one-commit / one-wait discipline are literally the same code in both
+directions. The orientation flows through as three expressions (`lhs_cols`, `res_cols`,
+`transposeRight`) and one cache-key bit.
+
+**Numerics: bit-exact, with nothing to caveat.** The forward's one-ulp deviation came entirely
+from the bias epilogue double-rounding (§11.5); the backward has no bias, so there is no such
+term. The fused kernel reproduces `dequant + torch.matmul` **bit-exactly** at every shape tested,
+asserted with `torch.equal` in `test_gemm_4bit_backward_native` across fp32/fp16/bf16 × nf4/fp4 ×
+±nested-absmax. End to end this is pinned by
+`test_linear4bit_bf16_autograd_is_unchanged_by_the_native_paths`: with `bias=False` a whole
+`Linear4bit` fwd+bwd is **bit-identical** with the native paths on and off; with `bias=True` only
+the *forward* differs and the gradient merely inherits that one ulp. The fused backward adds no
+deviation of its own.
+
+**A trap found while writing the tests, which applies to §11.2's forward test too.** The new
+backward test first failed at `compress_statistics=True` + fp32, and the fused kernel was not the
+cause — it was bit-exact against the on-device `dequant + torch.matmul` (deviation 0.0) in exactly
+the failing case. The cause is upstream: with nested statistics the **absmax is itself quantized
+with `quantize_blockwise`**, and that is the one op whose CPU kernel is known-approximate (it snaps
+to a 65536-point LUT before the codebook lookup — the 26 standing failures in §5). For this tensor
+it picked a different code for **1 block out of 512**, shifting that block's scale by ~9.3e-4, which
+lands in `B_dq` and blows fp32's 1e-5 tolerance. The plain (non-nested) absmax was bit-identical.
+
+So a test that quantizes *independently* on cpu and mps is not really testing the matmul when
+`compress_statistics=True`; it is also re-testing a quantizer that is already known to disagree.
+`test_gemm_4bit_backward_native` now quantizes once on cpu and moves the state across, making both
+sides bit-identical by construction. **`test_gemm_4bit_native` (forward) still quantizes
+independently and passes only because its RNG draw happens not to produce a differing code** — it
+is one seed away from the same failure, and should be converted the same way when someone next
+touches it.
+
+**Gating.** bf16 requires the `bnb_mps_gemm_4bit_supports_bf16` marker as before; every dtype
+additionally requires `bnb_mps_gemm_4bit_bwd` to exist, so a dylib predating M6 keeps the old
+composition. `BNB_MPS_DISABLE_BF16_GEMM_BWD=1` disables the backward alone, which is what makes
+the three-arm measurement below possible against a single binary — a single switch could only
+ever have answered "both or neither".
+
+**Wall-clock: `gemm_4bit_backward` alone**, nf4/bs64, CogView4-6B shapes, quiet machine (64 MB
+`clone()` control 0.298 → 0.287 ms across the table):
+
+| M    | bf16 (native vs dequant+matmul)          | fp16                    |
+| ---- | ---------------------------------------- | ----------------------- |
+| 1024 | 1.18–1.31x across the four `(N, K)`      | 1.02–1.18x              |
+| 1280 | 1.01–1.20x                               | 1.10–1.15x              |
+
+Slightly better than the forward at the same shapes (§11.5: 0.98–1.16x), which is what the
+orientation predicts: no bias epilogue to encode, and no transpose for the GEMM to absorb.
+
+**End to end: CogKit CogView4-6B QLoRA, 512×512, batch 1, three arms, n=6 each.** Arms toggled in
+place against one binary via `BNB_MPS_DISABLE_BF16_GEMM` / `..._BWD`, so nothing but the routing
+differs. **Half the reps ran the arms in the opposite order**, because with a fixed arm order any
+warming across a rep hands the last arm a free win:
+
+| arm                       | forward         | backward        | step             |
+| ------------------------- | --------------- | --------------- | ---------------- |
+| NEITHER (pre-M5 baseline) | 4.784 ± 0.363 s | 4.340 ± 0.375 s | 9.394 ± 0.716 s  |
+| FWD_ONLY (M5)             | 4.130 ± 0.468 s | 4.171 ± 0.435 s | 8.575 ± 0.891 s  |
+| **BOTH (M5 + M6)**        | 4.055 ± 0.264 s | **3.638 ± 0.179 s** | **7.960 ± 0.431 s** |
+
+- **BOTH vs NEITHER: forward −15.2%, backward −16.2%, step −15.3%.**
+- **M6's own contribution (BOTH vs FWD_ONLY): backward −12.8%, step −7.2%.**
+
+Two built-in noise checks say those are signal. `FWD_ONLY` should not move the backward at all,
+and reports −3.9%; `BOTH` should not move the forward relative to `FWD_ONLY`, and reports −1.8%.
+So the per-stage noise floor here is ~2–4%, and the −12.8% backward sits three to six times
+above it. The backward arm is also the *tightest* in the table (± 0.179 vs ± 0.375 for the
+baseline), which is what removing a per-layer cross-queue round trip should do to variance.
+
+The ordering control earned its keep: reversing the arm order moved the same arm's step time by
+−0.50 s to +0.64 s, comparable to the effect being measured. It happened to run **against**
+`BOTH` in the original order (`BOTH` was last and *slower* there), so the headline was not an
+artefact — but that was luck, not design, and a fixed arm order should not be trusted again.
+
+**This supersedes §11.5's end-to-end row.** That measurement was two arms at n=4 in a single
+fixed order and put the step at −3.7% (overlapping) where this one puts M5's step contribution at
+−8.7%. The forward figure held up (−10.6% there, −13.7% here); the step figure did not, which is
+exactly the stage where n=4 was called insufficient at the time.
+
+**What is left.** Both directions of the 4-bit matmul are now native for every dtype, so the
+remaining per-call cost is the ~0.15 ms fixed sync tax dissected in §11.3 — unchanged, and still
+gated on either a libtorch-linked extension or `torch.mps.compile_shader`, both re-architectures.
+Beyond that the step's remaining time is no longer in `bitsandbytes` at all.

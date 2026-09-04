@@ -210,8 +210,30 @@ class MpsBNBNativeLibrary(BNBNativeLibrary):
                 ct.c_int64,  # K
                 ct.c_int64,  # N
                 ct.c_int64,  # bs_shift = log2(blocksize)
-                ct.c_int64,  # dtype_flag (0=fp32, 1=fp16; MPSMatrixMultiplication has no bf16)
+                ct.c_int64,  # dtype_flag (0=fp32, 1=fp16, 2=bf16)
             ]
+
+        if hasattr(lib, "bnb_mps_gemm_4bit_bwd"):
+            lib.bnb_mps_gemm_4bit_bwd.restype = None
+            lib.bnb_mps_gemm_4bit_bwd.argtypes = [
+                ct.c_void_p,  # code (float32[16])
+                ct.c_void_p,  # B (uint8 packed, N*K/2 bytes)
+                ct.c_void_p,  # absmax (float32[blocks])
+                ct.c_void_p,  # G = grad_output (activation dtype [M*N])
+                ct.c_void_p,  # out = grad_A (activation dtype [M*K])
+                ct.c_int64,  # M
+                ct.c_int64,  # K
+                ct.c_int64,  # N
+                ct.c_int64,  # bs_shift = log2(blocksize)
+                ct.c_int64,  # dtype_flag (0=fp32, 1=fp16, 2=bf16)
+            ]
+
+        # Capability marker for the bf16 GEMM (MPSGraph path). Gated separately from
+        # bnb_mps_gemm_4bit so a dylib built before bf16 support keeps the fallback rather
+        # than being handed dtype_flag=2 and reading the scratch as fp32.
+        if hasattr(lib, "bnb_mps_gemm_4bit_supports_bf16"):
+            lib.bnb_mps_gemm_4bit_supports_bf16.restype = ct.c_int
+            lib.bnb_mps_gemm_4bit_supports_bf16.argtypes = []
 
     def verify_buffer_contract(self) -> None:
         """Verify the undocumented torch contract that an MPS tensor's data_ptr() is its

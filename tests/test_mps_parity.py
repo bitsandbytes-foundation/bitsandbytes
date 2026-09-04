@@ -393,15 +393,16 @@ class TestNativeMetalPath:
 
     # ---- Phase M3: native gemm_4bit (dequant scratch + MPSMatrixMultiplication + bias) ----
 
-    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=describe_dtype)
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
     @pytest.mark.parametrize("has_bias", [False, True], ids=id_formatter("has_bias"))
     @pytest.mark.parametrize("compress_statistics", [False, True], ids=id_formatter("compress_statistics"))
     def test_gemm_4bit_native(self, dtype, quant_type, has_bias, compress_statistics, monkeypatch):
         """gemm_4bit routes through the native one-command-buffer Metal path (asserted via a
-        spy) and matches the CPU oracle within the documented per-dtype tolerances. bf16 is
-        excluded: MPSMatrixMultiplication hard-asserts on it (macOS 26.4.1), so bf16 stays on
-        the dequant + F.linear fallback (covered by test_gemm_4bit_bf16_uses_fallback)."""
+        spy) and matches the CPU oracle within the documented per-dtype tolerances. All three
+        dtypes are native: fp32/fp16 via MPSMatrixMultiplication, bf16 via MPSGraph (which has
+        a bf16 matmul where MPSMatrixMultiplication hard-asserts on anything but
+        fp32/fp16/int8/int16)."""
         _require_native()
         if _mps_ops is None:
             pytest.skip("mps backend ops not importable.")
@@ -474,30 +475,216 @@ class TestNativeMetalPath:
         assert out_mps.dtype == dtype
         assert_parity(out_mps, out_cpu, dtype)
 
-    def test_gemm_4bit_bf16_uses_fallback(self, monkeypatch):
-        """bf16 must NOT take the native gemm (MPSMatrixMultiplication asserts on bf16); it
-        falls back to dequant + F.linear and stays correct."""
+    def test_gemm_4bit_bf16_is_native_and_matches_the_fallback(self, monkeypatch):
+        """bf16 takes the native MPSGraph gemm and reproduces the dequant + F.linear fallback
+        it replaced.
+
+        That fallback is the sharper oracle here, not the CPU one: it is the exact composition
+        bf16 ran before this path existed, on the same device, so any drift is a real change in
+        what a QLoRA forward computes. Without bias the two agree BIT-EXACTLY, which is the
+        assertion with teeth.
+
+        With bias they can differ. The epilogue kernel computes (bf16)(gemm + bias) on an
+        already-rounded gemm result where F.linear rounds once, so the error is one ulp of the
+        *pre-add* magnitude -- which, wherever bias largely cancels the gemm result, is several
+        ulp of the much smaller output. Relative-to-output tolerances are the wrong shape for
+        that, so the biased case is held to the documented CPU parity tolerance instead.
+        """
         _require_native()
         if _mps_ops is None:
             pytest.skip("mps backend ops not importable.")
+        if not hasattr(_mps_ops._mps_native._lib, "bnb_mps_gemm_4bit_supports_bf16"):
+            pytest.skip("dylib predates bf16 gemm support")
 
-        def fail_if_called(*args, **kwargs):
-            pytest.fail("native gemm_4bit must not be used for bf16 (MPSMatrixMultiplication has no bf16)")
+        calls = []
+        orig = _mps_ops._gemm_4bit_native
 
-        monkeypatch.setattr(_mps_ops, "_gemm_4bit_native", fail_if_called)
+        def spy(*args, **kwargs):
+            calls.append(1)
+            return orig(*args, **kwargs)
+
+        monkeypatch.setattr(_mps_ops, "_gemm_4bit_native", spy)
 
         torch.manual_seed(1337)
         N, K, blocksize = 128, 256, 64
         A = torch.randn(2, 2, K, dtype=torch.bfloat16)
         B = torch.randn(N, K, dtype=torch.bfloat16)
+        bias = torch.randn(N, dtype=torch.bfloat16)
         B_q, qs = bitsandbytes.functional.quantize_4bit(B, blocksize=blocksize, quant_type="nf4")
         B_q_mps, qs_mps = bitsandbytes.functional.quantize_4bit(B.to("mps"), blocksize=blocksize, quant_type="nf4")
 
-        out_cpu = torch.ops.bitsandbytes.gemm_4bit(A, B_q, list(B.shape), qs.absmax, blocksize, "nf4")
-        out_mps = torch.ops.bitsandbytes.gemm_4bit(
-            A.to("mps"), B_q_mps, list(B.shape), qs_mps.absmax, blocksize, "nf4"
+        B_dq = torch.ops.bitsandbytes.dequantize_4bit(
+            B_q_mps.view(-1, 1), qs_mps.absmax, blocksize, "nf4", [N, K], torch.bfloat16
         )
-        assert_parity(out_mps, out_cpu, torch.bfloat16)
+
+        for use_bias in (False, True):
+            b_cpu = bias if use_bias else None
+            b_mps = bias.to("mps") if use_bias else None
+            n_before = len(calls)
+
+            out_cpu = torch.ops.bitsandbytes.gemm_4bit(
+                A, B_q, list(B.shape), qs.absmax, blocksize, "nf4", bias=b_cpu
+            )
+            out_mps = torch.ops.bitsandbytes.gemm_4bit(
+                A.to("mps"), B_q_mps, list(B.shape), qs_mps.absmax, blocksize, "nf4", bias=b_mps
+            )
+            assert len(calls) > n_before, f"bf16 gemm_4bit (bias={use_bias}) did not route native"
+            assert out_mps.dtype == torch.bfloat16
+            assert_parity(out_mps, out_cpu, torch.bfloat16)
+
+            out_fallback = torch.nn.functional.linear(A.to("mps"), B_dq, b_mps)
+            if not use_bias:
+                assert torch.equal(out_mps, out_fallback), (
+                    "bf16 native gemm must reproduce the dequant + F.linear fallback bit-exactly "
+                    f"without bias; max deviation {(out_mps.float() - out_fallback.float()).abs().max().item()}"
+                )
+
+    # ---- Phase M6: fused gemm_4bit_backward (grad_A) ----
+
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+    @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+    @pytest.mark.parametrize("compress_statistics", [False, True], ids=id_formatter("compress_statistics"))
+    def test_gemm_4bit_backward_native(self, dtype, quant_type, compress_statistics, monkeypatch):
+        """grad_A = grad_output @ B_dq routes through the fused native path and matches both
+        oracles.
+
+        Two oracles, and the on-device one is the strict half: with no bias in the backward
+        there is no epilogue to double-round, so the fused kernel must reproduce the dequant +
+        torch.matmul composition it replaced BIT-EXACTLY. Any drift at all is a real change to
+        the gradients a QLoRA run computes.
+        """
+        _require_native()
+        if _mps_ops is None:
+            pytest.skip("mps backend ops not importable.")
+        if not hasattr(_mps_ops._mps_native._lib, "bnb_mps_gemm_4bit_bwd"):
+            pytest.skip("dylib predates the fused backward")
+
+        calls = []
+        orig = _mps_ops._gemm_4bit_backward_native
+
+        def spy(*args, **kwargs):
+            calls.append(1)
+            return orig(*args, **kwargs)
+
+        monkeypatch.setattr(_mps_ops, "_gemm_4bit_backward_native", spy)
+
+        torch.manual_seed(1337)
+        N, K, blocksize = 128, 256, 64
+        grad_output = torch.randn(2, 2, N, dtype=dtype)
+        B = torch.randn(N, K, dtype=dtype)
+
+        # Quantize ONCE on cpu and move the state across, rather than quantizing independently on
+        # each device. The subject of this test is the matmul, and independent quantization drags
+        # in a confound that has nothing to do with it: with compress_statistics the absmax is
+        # itself run through `quantize_blockwise`, whose CPU kernel snaps to a 65536-point LUT and
+        # so disagrees with the exact MPS kernel on the occasional code (see the known
+        # quantize_blockwise failures). One differing code in 512 shifts that block's scale by
+        # ~9e-4, which lands in B_dq and blows the fp32 1e-5 tolerance -- a real discrepancy, but
+        # an upstream one. Sharing the state makes both sides bit-identical by construction.
+        B_q, qs = bitsandbytes.functional.quantize_4bit(
+            B, blocksize=blocksize, quant_type=quant_type, compress_statistics=compress_statistics
+        )
+        B_q_mps = B_q.to("mps")
+
+        if compress_statistics:
+            extra_cpu = dict(absmax_8bit=qs.absmax, absmax_code=qs.state2.code, absmax_offset=qs.offset)
+            am_cpu = qs.state2.absmax
+        else:
+            extra_cpu = {}
+            am_cpu = qs.absmax
+        am_mps = am_cpu.to("mps")
+        extra_mps = {k: v.to("mps") for k, v in extra_cpu.items()}
+
+        out_cpu = torch.ops.bitsandbytes.gemm_4bit_backward(
+            grad_output, B_q, list(B.shape), am_cpu, blocksize, quant_type, **extra_cpu
+        )
+        out_mps = torch.ops.bitsandbytes.gemm_4bit_backward(
+            grad_output.to("mps"), B_q_mps, list(B.shape), am_mps, blocksize, quant_type, **extra_mps
+        )
+
+        assert calls, "gemm_4bit_backward did not route through the native Metal path"
+        assert out_mps.shape == (2, 2, K)
+        assert out_mps.dtype == dtype
+        assert_parity(out_mps, out_cpu, dtype)
+
+        # ...and bit-exactly against the composition MatMul4Bit.backward used to run inline.
+        absmax_mps = am_mps
+        if compress_statistics:
+            absmax_mps = (
+                torch.ops.bitsandbytes.dequantize_blockwise.default(
+                    extra_mps["absmax_8bit"], am_mps, extra_mps["absmax_code"], 256, torch.float32
+                )
+                + extra_mps["absmax_offset"]
+            )
+        B_dq = torch.ops.bitsandbytes.dequantize_4bit(
+            B_q_mps.view(-1, 1), absmax_mps, blocksize, quant_type, [N, K], dtype
+        )
+        out_fallback = torch.matmul(grad_output.to("mps"), B_dq)
+        assert torch.equal(out_mps, out_fallback), (
+            "fused backward must reproduce dequant + torch.matmul bit-exactly (no bias epilogue "
+            f"exists here to explain a difference); max deviation "
+            f"{(out_mps.float() - out_fallback.float()).abs().max().item()}"
+        )
+
+    def test_gemm_4bit_backward_unaligned_k_uses_fallback(self, monkeypatch):
+        """K % 32 != 0 cannot take the fused backward (uint4 loads in the chunked dequant)."""
+        _require_native()
+        if _mps_ops is None:
+            pytest.skip("mps backend ops not importable.")
+
+        def fail_if_called(*args, **kwargs):
+            pytest.fail("native gemm_4bit_backward must not be used when K % 32 != 0")
+
+        monkeypatch.setattr(_mps_ops, "_gemm_4bit_backward_native", fail_if_called)
+
+        torch.manual_seed(1337)
+        N, K, blocksize = 128, 80, 64  # K % 32 == 16
+        grad_output = torch.randn(2, 2, N, dtype=torch.float32)
+        B = torch.randn(N, K, dtype=torch.float32)
+        B_q, qs = bitsandbytes.functional.quantize_4bit(B, blocksize=blocksize, quant_type="nf4")
+        B_q_mps, qs_mps = bitsandbytes.functional.quantize_4bit(B.to("mps"), blocksize=blocksize, quant_type="nf4")
+
+        out_cpu = torch.ops.bitsandbytes.gemm_4bit_backward(grad_output, B_q, list(B.shape), qs.absmax, blocksize, "nf4")
+        out_mps = torch.ops.bitsandbytes.gemm_4bit_backward(
+            grad_output.to("mps"), B_q_mps, list(B.shape), qs_mps.absmax, blocksize, "nf4"
+        )
+        assert_parity(out_mps, out_cpu, torch.float32)
+
+    def test_linear4bit_bf16_autograd_is_unchanged_by_the_native_paths(self, monkeypatch):
+        """End to end: toggling the native bf16 paths must not change what a Linear4bit computes.
+
+        Without bias the whole fwd+bwd is bit-identical between the two arms. With bias only the
+        FORWARD differs, by the one-ulp bias-epilogue double rounding documented in §11.5, and
+        the gradient merely inherits it -- pinning that the fused backward adds no deviation of
+        its own.
+        """
+        _require_native()
+        if _mps_ops is None:
+            pytest.skip("mps backend ops not importable.")
+        if not hasattr(_mps_ops._mps_native._lib, "bnb_mps_gemm_4bit_bwd"):
+            pytest.skip("dylib predates the fused backward")
+
+        def run(disabled, use_bias):
+            monkeypatch.setenv("BNB_MPS_DISABLE_BF16_GEMM", disabled)
+            torch.manual_seed(0)
+            lin = bitsandbytes.nn.Linear4bit(
+                256, 256, bias=use_bias, compute_dtype=torch.bfloat16, quant_type="nf4"
+            ).to("mps")
+            x = torch.randn(8, 256, device="mps", dtype=torch.bfloat16, requires_grad=True)
+            y = lin(x)
+            (y * y).sum().backward()
+            return y.clone(), x.grad.clone()
+
+        y_nat, g_nat = run("0", False)
+        y_fb, g_fb = run("1", False)
+        assert torch.equal(y_nat, y_fb), "bias-free forward must be bit-identical across the toggle"
+        assert torch.equal(g_nat, g_fb), "bias-free gradient must be bit-identical across the toggle"
+
+        y_nat, g_nat = run("0", True)
+        y_fb, g_fb = run("1", True)
+        one_ulp = g_fb.float().abs().max().item() * 2**-7
+        assert (g_nat.float() - g_fb.float()).abs().max().item() <= one_ulp
+        assert torch.isfinite(g_nat).all()
 
     def test_gemm_4bit_unaligned_k_uses_fallback(self, monkeypatch):
         """K % 32 != 0 cannot take the native gemm (uint4 loads in the chunked dequant); it

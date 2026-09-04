@@ -380,8 +380,28 @@ class MatMul4Bit(torch.autograd.Function):
         # if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
         if req_gradA:
             # B in ctx.tensors is already in canonical [(N*K+1)//2, 1] form (normalized in forward).
-            # dequantize returns [N, K]; matmul(grad_output[M,N], [N,K]) = grad_A[M,K].
-            grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype))
+            # dequantize returns [N, K]; matmul(grad_output[M,N], [N,K]) = grad_A[M,K]. The op's
+            # default kernel is exactly that composition; a backend may fuse it (MPS does, into
+            # one command buffer, which halves the cross-queue syncs this pays per layer).
+            state = ctx.state
+            if not state.nested:
+                grad_A = torch.ops.bitsandbytes.gemm_4bit_backward.default(
+                    grad_output, B, state.shape, state.absmax, state.blocksize, state.quant_type
+                )
+            elif state.state2.blocksize == 256:
+                grad_A = torch.ops.bitsandbytes.gemm_4bit_backward.default(
+                    grad_output,
+                    B,
+                    state.shape,
+                    state.state2.absmax,
+                    state.blocksize,
+                    state.quant_type,
+                    absmax_8bit=state.absmax,
+                    absmax_code=state.state2.code,
+                    absmax_offset=state.offset,
+                )
+            else:
+                raise NotImplementedError("nested quantization with state2.blocksize != 256 is not supported")
 
         return grad_A, grad_B, None, grad_bias, None
 

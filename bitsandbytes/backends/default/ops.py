@@ -345,6 +345,36 @@ def _gemm_4bit_default_impl(
 register_kernel("bitsandbytes::gemm_4bit", "default")(_gemm_4bit_default_impl)
 
 
+def _gemm_4bit_backward_default_impl(
+    grad_output: torch.Tensor,
+    B: torch.Tensor,
+    shapeB: Sequence[int],
+    absmax: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    absmax_8bit: Optional[torch.Tensor] = None,
+    absmax_code: Optional[torch.Tensor] = None,
+    absmax_offset: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """grad_A = grad_output @ dequantize_4bit(B) -- verbatim what MatMul4Bit.backward did inline.
+
+    Keeping it here means every device gets the op for free and the fused MPS kernel has an
+    oracle to be checked against.
+    """
+    if absmax_8bit is not None:
+        absmax = (
+            torch.ops.bitsandbytes.dequantize_blockwise.default(absmax_8bit, absmax, absmax_code, 256, torch.float32)
+            + absmax_offset
+        )
+    B_dq = torch.ops.bitsandbytes.dequantize_4bit.default(
+        B, absmax, blocksize, quant_type, shapeB, grad_output.dtype
+    )
+    return torch.matmul(grad_output, B_dq)
+
+
+register_kernel("bitsandbytes::gemm_4bit_backward", "default")(_gemm_4bit_backward_default_impl)
+
+
 MOMENTUM = 0
 RMSPROP = 1
 ADAGRAD = 2

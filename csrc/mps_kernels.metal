@@ -283,6 +283,7 @@ static inline void dequantize_4bit_chunked_body(
 
 BNB_DEQUANT_4BIT_CHUNKED_KERNEL(dequantize_4bit_chunked_fp32, float)
 BNB_DEQUANT_4BIT_CHUNKED_KERNEL(dequantize_4bit_chunked_fp16, half)
+BNB_DEQUANT_4BIT_CHUNKED_KERNEL(dequantize_4bit_chunked_bf16, bfloat)
 
 // ---- Phase M3: bias epilogue for gemm_4bit ----
 // out[m, n] += bias[n], broadcast over rows, in the activation dtype (reproducing
@@ -299,6 +300,7 @@ BNB_DEQUANT_4BIT_CHUNKED_KERNEL(dequantize_4bit_chunked_fp16, half)
 
 BNB_GEMM_BIAS_ADD_KERNEL(gemm_bias_add_fp32, float)
 BNB_GEMM_BIAS_ADD_KERNEL(gemm_bias_add_fp16, half)
+BNB_GEMM_BIAS_ADD_KERNEL(gemm_bias_add_bf16, bfloat)
 
 // ---- 4-bit blockwise quantize (NF4/FP4): A (float32) -> packed out + absmax ----
 // `bounds` are the 15 midpoints of the SORTED 16-entry code; `order` maps the searchsorted
