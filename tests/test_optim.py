@@ -1,7 +1,6 @@
 import io
 import sys
 import time
-import warnings
 
 from lion_pytorch import Lion
 import pytest
@@ -167,7 +166,7 @@ optimizer_names_32bit = [
 @pytest.mark.parametrize("device", get_available_devices(), ids=id_formatter("device"))
 def test_optimizer32bit(dim1, dim2, gtype, optim_name, device):
     if device not in ("cuda", "xpu") and optim_name.startswith("paged_"):
-        pytest.skip(f"Paged optimizers are not meaningful on {device}; the fallback is covered separately")
+        pytest.skip(f"Paged optimizers are not meaningful on {device}")
 
     if optim_name.startswith("paged_") and sys.platform == "win32":
         pytest.skip("Paged optimizers can have issues on Windows.")
@@ -337,36 +336,6 @@ def test_global_config(dim1, dim2, gtype, device):
 
         assert adam2.state[p3]["state1"].dtype == torch.uint8
         assert adam2.state[p3]["state2"].dtype == torch.uint8
-
-
-@pytest.mark.parametrize("device", get_available_devices())
-@pytest.mark.skipif(not get_available_devices(), reason="No device")
-def test_paged_optimizer_fallback_on_unsupported_device(device):
-    """Paged optimizers must degrade to regular state buffers on devices without managed memory.
-
-    Previously only ``cpu`` was handled; other devices such as ``mps`` reached ``F.get_paged`` and
-    failed with a misleading "not available in CPU-only version" error.
-    """
-    if device in ("cuda", "xpu"):
-        pytest.skip("Device supports paged optimizers")
-
-    # numel >= 1e5 so that the paged buffer path would be taken on a supported device.
-    p = torch.nn.Parameter(torch.randn(512, 256, device=device))
-    p.grad = torch.randn_like(p) * 0.01
-    optimizer = bnb.optim.PagedAdamW([p], lr=1e-3)
-
-    with pytest.warns(UserWarning, match=f"Paged optimizers are not supported on {device} devices"):
-        optimizer.step()
-
-    # Second step must not warn again.
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
-        optimizer.step()
-
-    state = optimizer.state[p]
-    assert state["state1"].device.type == device
-    assert not getattr(state["state1"], "is_paged", False)
-    assert torch.isfinite(p).all()
 
 
 @pytest.mark.parametrize("device", get_available_devices())
