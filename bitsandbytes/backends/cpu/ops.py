@@ -16,24 +16,6 @@ logger = logging.getLogger(__name__)
 
 _has_avx512 = torch.backends.cpu.get_cpu_capability() == "AVX512"
 
-
-def _load_gemm_4bit_forward_kernel():
-    try:
-        from kernels import get_kernel
-
-        return get_kernel(
-            "kernels-community/quantization-bitsandbytes",
-            version=1,
-            backend="cpu",
-        ).gemm_4bit_forward
-    except Exception as exc:  # pragma: no cover - best effort fallback
-        logger.warning(
-            "Failed to load CPU gemm_4bit_forward from kernels-community: %s. Please make sure you already `pip install kernels` and the kernels >= 0.11.1",
-            exc,
-        )
-        return None
-
-
 # torch._int_mm for s8@s8->s32 is supported on CPU from torch 2.4+.
 # However, we can overflow if we use this without AVX512_VNNI support.
 # This is fixed in torch 2.6+, so we set this as the minimum to be safe.
@@ -258,7 +240,21 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         return out
 
     if has_avx512bf16():
-        gemm_4bit_forward_kernel = _load_gemm_4bit_forward_kernel()
+        gemm_4bit_forward_kernel = None
+        try:
+            from kernels import get_kernel
+
+            gemm_4bit_forward_kernel = get_kernel(
+                "kernels-community/quantization-bitsandbytes",
+                version=1,
+                backend="cpu",
+            ).gemm_4bit_forward
+        except Exception as exc:  # pragma: no cover - best effort fallback
+            gemm_4bit_forward_kernel = None
+            logger.warning(
+                "Failed to load CPU gemm_4bit_forward from kernels-community: %s. Please make sure you already `pip install kernels` and the kernels >= 0.13.0",
+                exc,
+            )
 
         @register_kernel("bitsandbytes::gemv_4bit", "cpu")
         def _(
