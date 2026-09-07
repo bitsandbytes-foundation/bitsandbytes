@@ -1291,7 +1291,7 @@ def check_matmul(A, B, out, transposed_A, transposed_B, expected_type=torch.int8
 
     if not correct:
         raise ValueError(
-            f"Tensor dimensions incorrect for matrix mulitiplication: A x B: {sA} x {sB} with transpose for A x B: {tA} x {tB}.",
+            f"Tensor dimensions incorrect for matrix multiplication: A x B: {sA} x {sB} with transpose for A x B: {tA} x {tB}.",
         )
 
     return sout
