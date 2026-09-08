@@ -352,7 +352,7 @@ class PagedAdEMAMix(AdEMAMix):
         )
 
 
-class AdEMAMix32bit(Optimizer2State):
+class AdEMAMix32bit(AdEMAMix):
     def __init__(
         self,
         params: Iterable[torch.nn.Parameter],
@@ -367,19 +367,17 @@ class AdEMAMix32bit(Optimizer2State):
         is_paged: bool = False,
     ):
         super().__init__(
-            "ademamix",
-            params=params,
+            params,
             lr=lr,
             betas=betas,
-            eps=eps,
-            weight_decay=weight_decay,
-            optim_bits=32,
-            args=None,
-            min_8bit_size=min_8bit_size,
-            is_paged=is_paged,
             alpha=alpha,
             t_alpha=t_alpha,
             t_beta3=t_beta3,
+            eps=eps,
+            weight_decay=weight_decay,
+            optim_bits=32,
+            min_8bit_size=min_8bit_size,
+            is_paged=is_paged,
         )
 
 
