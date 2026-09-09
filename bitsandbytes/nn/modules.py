@@ -3,6 +3,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 import copy
+import functools
 import logging
 from typing import Any, Optional, TypeVar, Union, overload
 
@@ -23,6 +24,26 @@ from bitsandbytes.utils import INVERSE_LINEAR_8BIT_WEIGHTS_FORMAT_MAPPING, Outli
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound="torch.nn.Module")
+
+
+@functools.cache
+def _warn_fp32_compute_dtype(device_type: str) -> None:
+    """Log a one-time hint that a `Linear4bit` is computing in float32 on a GPU device.
+
+    `functools.cache` keeps this to one message per process per device type: a 4-bit model
+    has hundreds of `Linear4bit` layers and each one would otherwise repeat the hint.
+    """
+    logger.warning(
+        "Linear4bit is computing in torch.float32 on a %s device, which is much slower than "
+        "16-bit compute: bitsandbytes has no tensor-core (MMA) 4-bit GEMM kernel for float32, "
+        "so these layers fall back to the SIMT kernel or to an unfused dequantize + matmul. "
+        "Pass bnb_4bit_compute_dtype=torch.bfloat16 (or torch.float16) to "
+        "transformers.BitsAndBytesConfig, or compute_dtype= to Linear4bit directly, unless you "
+        "specifically need float32 compute. Note that float32 is the default in "
+        "transformers.BitsAndBytesConfig. This is logged once; silence it with "
+        "logging.getLogger('bitsandbytes.nn.modules').setLevel(logging.ERROR).",
+        device_type,
+    )
 
 
 class StableEmbedding(torch.nn.Embedding):
@@ -534,6 +555,11 @@ class Linear4bit(nn.Linear):
     ```
     """
 
+    # Class-level default so that modules restored from a checkpoint saved by an older
+    # version, which has no such instance attribute, still resolve it. Instances that emit
+    # the warning shadow it with True; it is deliberately not part of the state dict.
+    _fp32_compute_warned = False
+
     def __init__(
         self,
         input_features,
@@ -574,11 +600,11 @@ class Linear4bit(nn.Linear):
 
     def set_compute_type(self, x):
         if x.dtype in [torch.float32, torch.bfloat16]:
-            # the input is in a dtype that is safe to compute in, we switch
-            # to this type for speed and stability
+            # the input is in a dtype that is safe to compute in, so we adopt it. Note that
+            # float32 is safe but slow on GPU; forward() warns about that case separately.
             self.compute_dtype = x.dtype
         elif x.dtype == torch.float16:
-            # we take the compoute dtype passed into the layer
+            # we take the compute dtype passed into the layer
             if self.compute_dtype in [None, torch.float32] and (x.numel() == x.shape[-1]):
                 # single batch inference with input torch.float16 and compute_dtype float32 -> slow inference when it could be fast
                 # warn the user about this
@@ -622,6 +648,21 @@ class Linear4bit(nn.Linear):
         if not self.compute_type_is_set:
             self.set_compute_type(x)
             self.compute_type_is_set = True
+
+        # A float32 compute_dtype costs several times the runtime of a 16-bit one on GPU (see
+        # _warn_fp32_compute_dtype). It is easy to end up here without meaning to, because
+        # transformers.BitsAndBytesConfig defaults bnb_4bit_compute_dtype to float32 -- and in
+        # that case compute_type_is_set is already True, so set_compute_type()'s own warnings
+        # about float32 never run. The `_fp32_compute_warned` latch keeps the common path to a
+        # single attribute load, and is_compiling() keeps this branch out of Dynamo graphs.
+        if (
+            self.compute_dtype == torch.float32
+            and not self._fp32_compute_warned
+            and x.device.type == "cuda"
+            and not torch.compiler.is_compiling()
+        ):
+            self._fp32_compute_warned = True
+            _warn_fp32_compute_dtype(x.device.type)
 
         inp_dtype = x.dtype
         if self.compute_dtype is not None:
