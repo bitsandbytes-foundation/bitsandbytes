@@ -221,6 +221,76 @@ class Test4bitBlockwiseQuantOps:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    def test_dequantize_4bit_nested(self, device, dtype, quant_type):
+        source = torch.randn((17, 19), dtype=dtype, device=device)
+        packed, state = bitsandbytes.functional.quantize_4bit(
+            source,
+            blocksize=64,
+            compress_statistics=True,
+            quant_type=quant_type,
+        )
+        args = (
+            packed,
+            state.absmax,
+            state.state2.absmax,
+            state.state2.code,
+            state.offset,
+            state.blocksize,
+            state.state2.blocksize,
+            state.quant_type,
+            state.shape,
+            state.dtype,
+        )
+        absmax = bitsandbytes.functional.dequantize_blockwise(state.absmax, state.state2)
+        reference = torch.ops.bitsandbytes.dequantize_4bit.default(
+            packed,
+            absmax + state.offset,
+            state.blocksize,
+            state.quant_type,
+            state.shape,
+            state.dtype,
+        )
+
+        out = torch.ops.bitsandbytes.dequantize_4bit_nested.default(*args)
+        torch.testing.assert_close(out, reference, rtol=0, atol=0)
+        opcheck(torch.ops.bitsandbytes.dequantize_4bit_nested.default, args)
+
+        out_buffer = torch.empty_like(reference)
+        torch.ops.bitsandbytes.dequantize_4bit_nested.out(*args, out=out_buffer)
+        torch.testing.assert_close(out_buffer, reference, rtol=0, atol=0)
+        opcheck(torch.ops.bitsandbytes.dequantize_4bit_nested.out, (*args, out_buffer))
+
+    def test_dequantize_4bit_nested_rejects_mismatched_devices(self):
+        A = torch.zeros((8, 1), dtype=torch.uint8)
+        absmax_8bit = torch.zeros(1, dtype=torch.uint8)
+        nested_absmax = torch.ones(1, dtype=torch.float32)
+        nested_code = torch.ones(256, dtype=torch.float32)
+        offset = torch.zeros((), dtype=torch.float32)
+        args = (A, absmax_8bit, nested_absmax, nested_code, offset, 64, 256, "nf4", (4, 4), torch.float16)
+
+        with pytest.raises(RuntimeError, match=r"Expected out\.device"):
+            torch.ops.bitsandbytes.dequantize_4bit_nested.out(
+                *args,
+                out=torch.empty((4, 4), dtype=torch.float16, device="meta"),
+            )
+
+        with pytest.raises(RuntimeError, match=r"Expected offset\.device"):
+            torch.ops.bitsandbytes.dequantize_4bit_nested.default(
+                A,
+                absmax_8bit,
+                nested_absmax,
+                nested_code,
+                offset.to("meta"),
+                64,
+                256,
+                "nf4",
+                (4, 4),
+                torch.float16,
+            )
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512])
@@ -373,6 +443,66 @@ class Test4bitBlockwiseQuantOps:
             absmax_offset=offset_non_f32,
         )
         torch.testing.assert_close(out, ref)
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    def test_gemm_4bit_nested_fallback_sm103(self, device, dtype, quant_type, monkeypatch):
+        if device != "cuda":
+            pytest.skip("The nested CUDA specialization is only available on SM103")
+
+        from bitsandbytes.backends.cuda import ops as cuda_ops
+
+        if not cuda_ops._dequantize_4bit_nested_supported(torch.cuda.current_device()):
+            pytest.skip("The nested CUDA specialization is only selected on SM103")
+
+        n, k, blocksize = 64, 64, 64
+        activation = torch.randn((5, k), dtype=dtype, device=device)
+        weight = torch.randn((n, k), dtype=dtype, device=device)
+        packed, state = bitsandbytes.functional.quantize_4bit(
+            weight,
+            blocksize=blocksize,
+            quant_type=quant_type,
+            compress_statistics=True,
+        )
+        bias = torch.randn((n,), dtype=dtype, device=device)
+
+        legacy_absmax = bitsandbytes.functional.dequantize_blockwise(state.absmax, state.state2)
+        legacy_absmax += state.offset
+        legacy_weight = torch.ops.bitsandbytes.dequantize_4bit.default(
+            packed,
+            legacy_absmax.float(),
+            blocksize,
+            quant_type,
+            list(weight.shape),
+            dtype,
+        )
+        reference = torch.nn.functional.linear(activation, legacy_weight, bias)
+
+        calls = 0
+        nested_impl = cuda_ops._dequantize_4bit_nested_impl
+
+        def counted_nested_impl(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return nested_impl(*args, **kwargs)
+
+        monkeypatch.setattr(cuda_ops, "_dequantize_4bit_nested_impl", counted_nested_impl)
+        actual = cuda_ops._dequant_linear_fallback(
+            activation,
+            packed,
+            list(weight.shape),
+            state.state2.absmax,
+            blocksize,
+            quant_type,
+            bias,
+            absmax_8bit=state.absmax,
+            absmax_code=state.state2.code,
+            absmax_offset=state.offset,
+        )
+
+        assert calls == 1
+        assert torch.equal(actual, reference)
 
 
 class TestNonContiguousInputs:

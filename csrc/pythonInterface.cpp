@@ -220,6 +220,18 @@ void dequantizeBlockwise_bf16_nf4(
     dequantizeBlockwise<bnb_bfloat16, NF4>(nullptr, A, absmax, out, blocksize, n, stream);
 }
 
+#if BUILD_CUDA
+template <typename T, int DATA_TYPE>
+void dequantizeBlockwiseNestedTyped(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, T* out,
+    int blocksize, const int n, cudaStream_t stream
+) {
+    dequantizeBlockwiseNested<T, DATA_TYPE>(
+        A, absmax_8bit, nested_absmax, nested_code, offset, out, blocksize, n, stream
+    );
+}
+#endif
+
 int igemmlt_32(
     cublasLtHandle_t ltHandle, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale,
     int lda, int ldb, int ldc, cudaStream_t stream
@@ -442,6 +454,25 @@ void cdequantize_blockwise_bf16_nf4(
 ) {
     dequantizeBlockwise_bf16_nf4(code, A, absmax, out, blocksize, n, stream);
 }
+
+#if BUILD_CUDA
+#define MAKE_NESTED_DEQUANT_FUNC(dtype, dtype_name, data_type, data_type_name)                                         \
+    void cdequantize_blockwise_nested_##dtype_name##_##data_type_name(                                                 \
+        unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset,         \
+        dtype* out, int blocksize, const int n, cudaStream_t stream                                                    \
+    ) {                                                                                                                \
+        dequantizeBlockwiseNestedTyped<dtype, data_type>(                                                              \
+            A, absmax_8bit, nested_absmax, nested_code, offset, out, blocksize, n, stream                              \
+        );                                                                                                             \
+    }
+
+MAKE_NESTED_DEQUANT_FUNC(half, fp16, FP4, fp4)
+MAKE_NESTED_DEQUANT_FUNC(half, fp16, NF4, nf4)
+MAKE_NESTED_DEQUANT_FUNC(float, fp32, FP4, fp4)
+MAKE_NESTED_DEQUANT_FUNC(float, fp32, NF4, nf4)
+MAKE_NESTED_DEQUANT_FUNC(bnb_bfloat16, bf16, FP4, fp4)
+MAKE_NESTED_DEQUANT_FUNC(bnb_bfloat16, bf16, NF4, nf4)
+#endif
 
 #define MAKE_CFUNC32(name, gtype, gbits)                                                                               \
     void c##name##32bit_grad_##gbits(                                                                                  \
