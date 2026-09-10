@@ -282,6 +282,31 @@ def test_quant_storage_shard_roundtrip(device, quant_type, quant_storage):
 
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+def test_params4bit_to_unpacks_cpu_packing(device, quant_type):
+    """Params4bit.to() must undo CPU AVX512 packing when leaving CPU (#2078)."""
+    if device == "cpu":
+        pytest.skip("Unpacking is only required when moving off CPU.")
+    if device == "hpu" and not is_supported_on_hpu(quant_type, torch.float32, torch.uint8):
+        pytest.skip("This configuration is not supported on HPU.")
+
+    torch.manual_seed(0)
+    tensor = torch.randn(64, 32, dtype=torch.float32)
+    param = bnb.nn.Params4bit(data=tensor, quant_type=quant_type, requires_grad=False)
+    param = param._quantize("cpu")
+    ref = bnb.functional.dequantize_4bit(param.data.clone(), param.quant_state)
+
+    packed_w, packed_qs = bnb.functional._convert_weight_packed_for_cpu(param.data.clone(), param.quant_state)
+    param.data, param.quant_state = packed_w, packed_qs
+    assert param.quant_state.packing_format_for_cpu
+
+    moved = param.to(device)
+    assert not getattr(moved.quant_state, "packing_format_for_cpu", False)
+    out = bnb.functional.dequantize_4bit(moved.data, moved.quant_state)
+    torch.testing.assert_close(out.cpu().float(), ref.float(), atol=1e-5, rtol=1e-4)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
 @pytest.mark.parametrize("blocksize", [32, 64, 128])
 @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
 def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):

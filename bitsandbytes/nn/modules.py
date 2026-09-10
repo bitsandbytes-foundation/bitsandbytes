@@ -424,6 +424,18 @@ class Params4bit(torch.nn.Parameter):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking, _ = torch._C._nn._parse_to(*args, **kwargs)
 
+        # cuda()/xpu() already undo CPU AVX512 packing before calling to().
+        # nn.Module.to() goes through Parameter.to(), so that check has to live
+        # here as well or model.to("cuda") keeps the packed nibble layout.
+        dest_type = device.type if device is not None else self.device.type
+        if (
+            getattr(self.quant_state, "packing_format_for_cpu", False)
+            and dest_type not in ("cpu", "meta")
+        ):
+            self.data, self.quant_state = _convert_weight_packed_for_cpu_inverse(
+                self.data, self.quant_state
+            )
+
         if device is not None and device.type != "meta" and not self.bnb_quantized:
             return self._quantize(device)
         else:
