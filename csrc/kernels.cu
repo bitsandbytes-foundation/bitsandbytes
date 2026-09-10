@@ -497,7 +497,6 @@ __global__ void
         // This is equivalent to (i+threadId.x*NUM_PER_TH)/blocksize.
         local_abs_max = __ldg(&absmax[(i + threadIdx.x * NUM_PER_TH) >> (31 - __clz(blocksize))]);
 
-        __syncthreads();
         LoadChar(loadchar).Load(&(A[i]), qvals, valid_items_load, 128);
 
         switch (DATA_TYPE) {
@@ -523,7 +522,6 @@ __global__ void
             break;
         }
 
-        __syncthreads();
         StoreT(storet).Store(&(out[(DATA_TYPE > 0) ? i * 2 : i]), vals, valid_items_store);
     }
 }
