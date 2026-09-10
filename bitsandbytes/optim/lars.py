@@ -245,6 +245,8 @@ class PytorchLARS(Optimizer):
                         update = d_p + buf * momentum
                     else:
                         update = buf
+                else:
+                    update = d_p
 
                 update_scale = 1.0
                 if max_unorm > 0.0:
