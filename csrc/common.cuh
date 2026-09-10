@@ -31,8 +31,9 @@
 // Warp size
 
 #if BNB_HIP
-#if IS_CDNA
-#define BNB_WARP_SIZE 64 // CDNA
+// All of gfx9 is Wave64, including the GCN5 parts IS_CDNA omits.
+#if defined(__GFX9__)
+#define BNB_WARP_SIZE 64 // GCN5 / CDNA
 #else
 #define BNB_WARP_SIZE 32 // RDNA
 #endif

@@ -133,12 +133,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04]
-        rocm_version: ["6.4.4", "7.0.2", "7.1.1", "7.2.4", "7.14.0"]
+        rocm_version: ["6.4.4", "7.0.2", "7.1.1", "7.2.4", "7.14.0", "10.0.0"]
         include:
           - os: windows-2025
             rocm_version: "7.2.1"
           - os: windows-2025
             rocm_version: "7.14.0"
+          - os: windows-2025
+            rocm_version: "10.0.0"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
