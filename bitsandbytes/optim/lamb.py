@@ -50,6 +50,13 @@ class LAMB(Optimizer2State):
             max_unorm (`float`, defaults to 1.0):
                 The maximum gradient norm.
         """
+        # Validate unsupported parameters
+        if not bias_correction:
+            raise ValueError("LAMB does not support bias_correction=False")
+
+        if not adam_w_mode:
+            raise ValueError("LAMB does not support adam_w_mode=False")
+
         super().__init__(
             "lamb",
             params,
@@ -111,6 +118,12 @@ class LAMB8bit(Optimizer2State):
                 clipping; it is honored by the 32-bit LAMB / LAMB32bit optimizers.
         """
         # Validate unsupported parameters
+        if not bias_correction:
+            raise ValueError("LAMB8bit does not support bias_correction=False")
+
+        if not adam_w_mode:
+            raise ValueError("LAMB8bit does not support adam_w_mode=False")
+
         if amsgrad:
             raise ValueError("LAMB8bit does not support amsgrad=True")
 
@@ -176,6 +189,13 @@ class LAMB32bit(Optimizer2State):
             max_unorm (`float`, defaults to 1.0):
                 The maximum gradient norm.
         """
+        # Validate unsupported parameters
+        if not bias_correction:
+            raise ValueError("LAMB32bit does not support bias_correction=False")
+
+        if not adam_w_mode:
+            raise ValueError("LAMB32bit does not support adam_w_mode=False")
+
         super().__init__(
             "lamb",
             params,

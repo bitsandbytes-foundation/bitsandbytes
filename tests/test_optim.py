@@ -741,3 +741,21 @@ def test_adagrad8bit_rejects_non_8_optim_bits():
         bnb.optim.Adagrad8bit(p, optim_bits=32)
     # default (optim_bits=8) still constructs
     bnb.optim.Adagrad8bit(p)
+
+
+@pytest.mark.parametrize(
+    "optim_cls",
+    [bnb.optim.LAMB, bnb.optim.LAMB8bit, bnb.optim.LAMB32bit],
+    ids=id_formatter("opt"),
+)
+@pytest.mark.parametrize("kwarg", ["bias_correction", "adam_w_mode"], ids=id_formatter("kwarg"))
+def test_lamb_rejects_unsupported_flags(optim_cls, kwarg):
+    # Both flags were accepted by the constructors but never reached the base
+    # optimizer, so a non-default value was silently ignored: the update applies
+    # bias correction and AdamW-style decay regardless. Reject instead; mirrors
+    # the LAMB8bit amsgrad guard (relates to #1261).
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        optim_cls(p, lr=1e-3, **{kwarg: False})
+    # defaults still construct
+    optim_cls(p, lr=1e-3)
