@@ -1013,6 +1013,43 @@ class TestQuantize4BitFunctional:
         assert mean_err < threshold
 
     @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
+    def test_matmul_4bit_rocm_gfx11_dpp_reduction(self, device, dtype):
+        torch_device = torch.device(device)
+        if torch_device.type != "cuda" or torch.version.hip is None:
+            pytest.skip("ROCm is required")
+        from bitsandbytes.backends.cuda.ops import _gemm_4bit_use_custom_rocm, _rocm_gfx_arch
+
+        device_index = torch_device.index
+        if device_index is None:
+            device_index = torch.cuda.current_device()
+        arch = _rocm_gfx_arch(device_index)
+        if not arch.startswith("gfx11"):
+            pytest.skip("gfx11 is required")
+
+        torch.manual_seed(0)
+        M, N, K = 8, 256, 512
+        A = torch.randn(M, K, dtype=dtype, device=device)
+        B = torch.randn(N, K, dtype=dtype, device=device)
+
+        assert _gemm_4bit_use_custom_rocm(device_index, dtype, M, N, K)
+        linear = bnb.nn.Linear4bit(
+            K,
+            N,
+            bias=False,
+            quant_type="nf4",
+            compute_dtype=dtype,
+            device="meta",
+        )
+        linear.weight = bnb.nn.Params4bit(B, quant_type="nf4", requires_grad=False)
+        linear = linear.to(device)
+        dequantized_ref = A @ F.dequantize_4bit(linear.weight.data, linear.weight.quant_state).t()
+        out = linear(A)
+        relative_l1 = (out.float() - dequantized_ref.float()).abs().mean() / dequantized_ref.float().abs().mean()
+
+        assert relative_l1.item() < 0.02
+
+    @pytest.mark.parametrize("device", get_available_devices())
     def test_matmul_4bit_weight_orientation(self, device):
         N, K = 256, 128
         dtype = torch.float16
