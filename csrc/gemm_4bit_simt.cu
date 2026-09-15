@@ -77,10 +77,11 @@ __device__ __forceinline__ float simt_fma_f32(float acc, float a, float b) {
 // CUDA/others: standard __shfl_down_sync tree.
 __device__ __forceinline__ float simt_warp_reduce_sum(float v) {
 #if BNB_HIP
-    v += __builtin_amdgcn_mov_dpp(v, 0x108, 0xf, 0xf, 1); // row_shr:8
-    v += __builtin_amdgcn_mov_dpp(v, 0x104, 0xf, 0xf, 1); // row_shr:4
-    v += __builtin_amdgcn_mov_dpp(v, 0x102, 0xf, 0xf, 1); // row_shr:2
-    v += __builtin_amdgcn_mov_dpp(v, 0x101, 0xf, 0xf, 1); // row_shr:1
+    // mov_dpp is integer-typed; bitcast to preserve the float payload across lanes.
+    v += __uint_as_float(__builtin_amdgcn_mov_dpp(__float_as_uint(v), 0x108, 0xf, 0xf, 1)); // row_shr:8
+    v += __uint_as_float(__builtin_amdgcn_mov_dpp(__float_as_uint(v), 0x104, 0xf, 0xf, 1)); // row_shr:4
+    v += __uint_as_float(__builtin_amdgcn_mov_dpp(__float_as_uint(v), 0x102, 0xf, 0xf, 1)); // row_shr:2
+    v += __uint_as_float(__builtin_amdgcn_mov_dpp(__float_as_uint(v), 0x101, 0xf, 0xf, 1)); // row_shr:1
     return v + __shfl_xor(v, 16, 32);
 #else
 #pragma unroll
