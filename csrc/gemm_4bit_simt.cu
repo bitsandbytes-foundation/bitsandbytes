@@ -106,7 +106,8 @@ __device__ __forceinline__ float simt_warp_reduce_sum(float v) {
 ///
 /// @tparam T           Input/output dtype (`bnb_bfloat16`, `half`, or `float`)
 /// @tparam M_BLOCK     M rows per block
-template <typename T, int M_BLOCK = 1>
+/// @tparam SHARE_NARROW_SCALE  Share a nested NF4 scale between adjacent lanes on sm120
+template <typename T, int M_BLOCK = 1, bool SHARE_NARROW_SCALE = false>
 __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
     // clang-format off
     const T*       __restrict__ A,             // inputs [M, K]
@@ -239,6 +240,52 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
         pref_b_packed4 =
             *reinterpret_cast<const uint4*>(reinterpret_cast<const uint32_t*>(B + warp_n * (K / 2) + pref_inner_k / 2));
     }
+#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+    uint4 pref_b_packed4 = {0u, 0u, 0u, 0u};
+    if constexpr (M_BLOCK == 1) {
+        if (lane_id * NUM_VAL < K) {
+            const uint32_t* bptr = reinterpret_cast<const uint32_t*>(B + warp_n * (K / 2) + lane_id * NUM_VAL / 2);
+            // clang-format off
+            asm volatile(
+                "ld.global.cg.v4.u32 {%0,%1,%2,%3}, [%4];\n"
+                : "=r"(pref_b_packed4.x), "=r"(pref_b_packed4.y),
+                  "=r"(pref_b_packed4.z), "=r"(pref_b_packed4.w)
+                : "l"(bptr)
+            );
+            // clang-format on
+        }
+    }
+#endif
+
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+    float hoisted_state2_scale = 0.0f;
+    bool hoist_state2_scale = false;
+    float last_state2_scale = 0.0f;
+    int first_state2_idx = 0;
+    bool hoist_long_state2_scale = false;
+    if constexpr (M_BLOCK == 1 && (std::is_same_v<T, half> || std::is_same_v<T, bnb_bfloat16>)) {
+        // A column's scale indices stay in one 256-entry state2 block only
+        // when the row has a whole number of scale blocks and divides 256.
+        hoist_state2_scale = absmax_8bit && quant_type == 2 &&
+                             (blocksize & (blocksize - 1)) == 0 && K == blk_per_row * blocksize &&
+                             blk_per_row > 0 && blk_per_row <= 256 && (blk_per_row & (blk_per_row - 1)) == 0;
+        if (hoist_state2_scale && lane_id * NUM_VAL < K && (!SHARE_NARROW_SCALE || (lane_id & 1) == 0)) {
+            const int blk_idx = warp_n * blk_per_row + ((lane_id * NUM_VAL) >> blocksize_log2);
+            hoisted_state2_scale = __ldg(&absmax[blk_idx >> 8]);
+        }
+        // Up to 256 scale blocks per column can touch at most two state2 entries.
+        // Keep the existing one-entry hoist for wide rows that already use it.
+        hoist_long_state2_scale = !hoist_state2_scale && absmax_8bit && quant_type == 2 && blocksize == 64 &&
+                                  K >= 8192 && K == blk_per_row * blocksize && blk_per_row <= 256;
+        if (hoist_long_state2_scale) {
+            const int first_blk_idx = warp_n * blk_per_row;
+            const int last_state2_idx = (first_blk_idx + blk_per_row - 1) >> 8;
+            first_state2_idx = first_blk_idx >> 8;
+            hoisted_state2_scale = __ldg(&absmax[first_state2_idx]);
+            if (last_state2_idx != first_state2_idx)
+                last_state2_scale = __ldg(&absmax[last_state2_idx]);
+        }
+    }
 #endif
 
     for (int g = 0; g < num_groups; g++) {
@@ -265,26 +312,64 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
 
         // Scale: one absmax per lane per outer K step.
         float scale_f = 0.0f;
-        if (lane_active) {
-            const int blk_idx = warp_n * blk_per_row + (inner_k >> blocksize_log2);
-            if (absmax_8bit) {
-                // absmax_8bit[blk_idx] is a uint8 index into absmax_code.
-                // absmax[blk_idx >> 8] is the fp32 state2 scale (one per 256 blocks).
-                // absmax_offset is subtracted at quantize time and re-added here.
-                scale_f = __ldg(&absmax_code[absmax_8bit[blk_idx]]) * __ldg(&absmax[blk_idx >> 8]) + absmax_offset_f;
-            } else {
-                scale_f = __ldg(&absmax[blk_idx]);
+        if (lane_active
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+            && (!SHARE_NARROW_SCALE || (lane_id & 1) == 0)
+#endif
+        ) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+            if constexpr (SHARE_NARROW_SCALE) {
+                // K=4096 and blocksize=64: 64 compressed scales per column,
+                // with one scale shared by each pair of lanes in a K group.
+                const int scale_idx = (warp_n << 6) + (g << 4) + (lane_id >> 1);
+                scale_f = __ldg(&absmax_code[__ldg(&absmax_8bit[scale_idx])]) * hoisted_state2_scale + absmax_offset_f;
+            } else
+#endif
+            {
+                const int blk_idx = warp_n * blk_per_row + (inner_k >> blocksize_log2);
+                if (absmax_8bit) {
+                    // absmax_8bit[blk_idx] is a uint8 index into absmax_code.
+                    // absmax[blk_idx >> 8] is the fp32 state2 scale (one per 256 blocks).
+                    // absmax_offset is subtracted at quantize time and re-added here.
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+                    scale_f = __ldg(&absmax_code[absmax_8bit[blk_idx]]) *
+                                  (hoist_long_state2_scale
+                                       ? ((blk_idx >> 8) == first_state2_idx ? hoisted_state2_scale : last_state2_scale)
+                                       : (hoist_state2_scale ? hoisted_state2_scale : __ldg(&absmax[blk_idx >> 8]))) +
+                              absmax_offset_f;
+#else
+                    scale_f = __ldg(&absmax_code[absmax_8bit[blk_idx]]) * __ldg(&absmax[blk_idx >> 8]) + absmax_offset_f;
+#endif
+                } else {
+                    scale_f = __ldg(&absmax[blk_idx]);
+                }
             }
         }
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+        if constexpr (SHARE_NARROW_SCALE) {
+            // With 32 values per lane and 64 per scale block, the even lane
+            // owns the scale for its adjacent odd lane. All lanes must shuffle.
+            scale_f = __shfl_sync(BNB_FULL_WARP_MASK, scale_f, lane_id & ~1, 32);
+        }
+#endif
 
-        // Load 16 packed 4-bit bytes (.cs: streaming, bypasses L1).
+        // Load 16 packed 4-bit bytes (.cg on sm120, .cs otherwise; both bypass L1).
         // Inactive lanes keep b_packed4 = {0}.
         uint4 b_packed4 = {0u, 0u, 0u, 0u};
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+        if constexpr (M_BLOCK == 1) {
+            b_packed4 = pref_b_packed4;
+        } else
+#endif
         if (lane_active) {
             const uint32_t* bptr = reinterpret_cast<const uint32_t*>(B + warp_n * (K / 2) + inner_k / 2);
             // clang-format off
             asm volatile(
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+                "ld.global.cg.v4.u32 {%0,%1,%2,%3}, [%4];\n"
+#else
                 "ld.global.cs.v4.u32 {%0,%1,%2,%3}, [%4];\n"
+#endif
                 : "=r"(b_packed4.x), "=r"(b_packed4.y),
                   "=r"(b_packed4.z), "=r"(b_packed4.w)
                 : "l"(bptr)
@@ -306,6 +391,53 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
 
 #pragma unroll
         for (int sub = 0; sub < 4; sub++) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+            if constexpr (M_BLOCK == 1) {
+                if (sub == 2) {
+                    const int next_inner_k = (g + 1) * K_STRIDE + lane_id * NUM_VAL;
+                    pref_b_packed4 = {0u, 0u, 0u, 0u};
+                    if ((g + 1 < num_groups) && (next_inner_k < K)) {
+                        const uint32_t* bptr = reinterpret_cast<const uint32_t*>(B + warp_n * (K / 2) + next_inner_k / 2);
+                        // clang-format off
+                        asm volatile(
+                            "ld.global.cg.v4.u32 {%0,%1,%2,%3}, [%4];\n"
+                            : "=r"(pref_b_packed4.x), "=r"(pref_b_packed4.y),
+                              "=r"(pref_b_packed4.z), "=r"(pref_b_packed4.w)
+                            : "l"(bptr)
+                        );
+                        // clang-format on
+                    }
+                }
+            }
+#endif
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+            if constexpr (M_BLOCK == 1 && !std::is_same_v<T, float>) {
+                const int a_k = inner_k + sub * 8;
+                uint4 a_packed4;
+                if (lane_active) {
+                    // clang-format off
+                    asm volatile(
+                        "ld.global.ca.v4.u32 {%0,%1,%2,%3}, [%4];\n"
+                        : "=r"(a_packed4.x), "=r"(a_packed4.y),
+                          "=r"(a_packed4.z), "=r"(a_packed4.w)
+                        : "l"(&A[base_m * K + a_k])
+                    );
+                    // clang-format on
+                }
+                const T2* a_pairs = reinterpret_cast<const T2*>(&a_packed4);
+#pragma unroll
+                for (int j = 0; j < 4; j++) {
+                    const uint8_t byte = b_bytes[sub * 4 + j];
+                    const uint32_t hi = __shfl_sync(BNB_FULL_WARP_MASK, my_lut_u32, byte >> 4, 32);
+                    const uint32_t lo = __shfl_sync(BNB_FULL_WARP_MASK, my_lut_u32, byte & 0x0f, 32);
+                    const T2 b_pair = vec2_mul(vec2_from_u16bits<T>(hi, lo), scale_x2);
+                    if (lane_active) {
+                        const float2 p = vec2_to_float2(vec2_mul(a_pairs[j], b_pair));
+                        acc[0] += p.x + p.y;
+                    }
+                }
+            } else {
+#endif
             // Decode 4 B bytes (8 nibbles) into 8 dequantized values.
             // hi nibble (>>4) = lower K index, lo nibble (&0xf) = higher K index.
             [[maybe_unused]] T2 b_chunk[4];
@@ -457,6 +589,9 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                     }
                 }
             }
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+            }
+#endif
         }
     }
 
@@ -513,6 +648,16 @@ void launch_gemm_4bit_simt(
     auto launch = [&](auto mb_tag) {
         constexpr int MB = decltype(mb_tag)::value;
         const int grid_y = (M + MB - 1) / MB;
+#if !BNB_HIP
+        if constexpr (MB == 1 && (std::is_same_v<T, half> || std::is_same_v<T, bnb_bfloat16>)) {
+            if (M == 1 && N <= 4096 && K == 4096 && blocksize == 64 && absmax_8bit && quant_type == 2) {
+                gemm_4bit_simt<T, MB, true><<<dim3(n_blocks, grid_y), WARPS_PER_BLOCK * 32, 0, stream>>>(
+                    A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type
+                );
+                return;
+            }
+        }
+#endif
         gemm_4bit_simt<T, MB><<<dim3(n_blocks, grid_y), WARPS_PER_BLOCK * 32, 0, stream>>>(
             A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type
         );
