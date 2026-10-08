@@ -292,6 +292,76 @@ def test_lion32bit_weight_decay(dim1, dim2, gtype, device):
             p2.copy_(p1.data)
 
 
+skip_zeros_optimizers = {
+    "adam": lambda pxx: bnb.optim.Adam(pxx, lr=0.01, weight_decay=0.1),
+    "adam8bit_blockwise": lambda pxx: bnb.optim.Adam8bit(pxx, lr=0.01, weight_decay=0.1, min_8bit_size=0),
+    "momentum": lambda pxx: bnb.optim.SGD(pxx, lr=0.01, momentum=0.9, weight_decay=0.1),
+    "momentum8bit_blockwise": lambda pxx: bnb.optim.SGD8bit(
+        pxx, lr=0.01, momentum=0.9, weight_decay=0.1, min_8bit_size=0
+    ),
+    "rmsprop": lambda pxx: bnb.optim.RMSprop(pxx, lr=0.01, alpha=0.9, weight_decay=0.1),
+    "rmsprop8bit_blockwise": lambda pxx: bnb.optim.RMSprop8bit(
+        pxx, lr=0.01, alpha=0.9, weight_decay=0.1, min_8bit_size=0
+    ),
+    "lion": lambda pxx: bnb.optim.Lion(pxx, lr=0.01, weight_decay=0.1),
+    "lion8bit_blockwise": lambda pxx: bnb.optim.Lion8bit(pxx, lr=0.01, weight_decay=0.1, min_8bit_size=0),
+    "ademamix": lambda pxx: bnb.optim.AdEMAMix(pxx, lr=0.01, weight_decay=0.1),
+    "ademamix8bit_blockwise": lambda pxx: bnb.optim.AdEMAMix8bit(pxx, lr=0.01, weight_decay=0.1, min_8bit_size=0),
+}
+
+
+@pytest.mark.parametrize("optim_name", list(skip_zeros_optimizers), ids=id_formatter("opt"))
+@pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=describe_dtype)
+@pytest.mark.parametrize("device", get_available_devices(), ids=id_formatter("device"))
+@pytest.mark.skipif(not get_available_devices(), reason="No device")
+def test_skip_zeros(optim_name, gtype, device):
+    """With `skip_zeros=True`, elements whose gradient is exactly 0 must be left untouched
+    (no weight decay, no state update), while all other elements get exactly the same
+    update as with `skip_zeros=False`.
+    """
+    dim1, dim2 = 1024, 32
+
+    # Generate everything up-front so that both runs below see bit-identical inputs.
+    torch.manual_seed(1337)
+    p_init = (torch.randn(dim1, dim2, dtype=gtype) * 0.1).to(device)
+    warmup_grads = [(torch.randn(dim1, dim2, dtype=gtype) * 0.01).to(device) for _ in range(k)]
+    zeros = (torch.rand(dim1, dim2) < 0.5).to(device)
+    g = (torch.randn(dim1, dim2, dtype=gtype) * 0.01).to(device)
+    g[zeros] = 0.0
+
+    def run(skip_zeros):
+        mng = bnb.optim.GlobalOptimManager.get_instance()
+        mng.initialize()
+        p = p_init.clone()
+        if skip_zeros:
+            mng.override_config(p, "skip_zeros", True)
+        optimizer = skip_zeros_optimizers[optim_name]([p])
+
+        # Warm up with dense gradients so the states are populated and non-trivial.
+        for warmup_grad in warmup_grads:
+            p.grad = warmup_grad.clone()
+            optimizer.step()
+
+        before = p.clone()
+        p.grad = g.clone()
+        optimizer.step()
+        return before, p.clone()
+
+    try:
+        before_ref, p_ref = run(skip_zeros=False)
+        before_skip, p_skip = run(skip_zeros=True)
+    except NotImplementedError as e:
+        pytest.skip(f"skip_zeros is not supported on {device}: {e}")
+
+    assert torch.equal(before_ref, before_skip), "warm-up is not deterministic"
+
+    # Guard against a vacuous test: without skip_zeros the zero-gradient elements do move.
+    assert not torch.equal(p_ref[zeros], before_ref[zeros]), "test is vacuous"
+
+    torch.testing.assert_close(p_skip[zeros], before_skip[zeros], rtol=0, atol=0)
+    torch.testing.assert_close(p_skip[~zeros], p_ref[~zeros], rtol=0, atol=0)
+
+
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=describe_dtype)
