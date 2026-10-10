@@ -107,7 +107,10 @@ __device__ __forceinline__ float simt_warp_reduce_sum(float v) {
 /// @tparam T           Input/output dtype (`bnb_bfloat16`, `half`, or `float`)
 /// @tparam M_BLOCK     M rows per block
 /// @tparam SHARE_NARROW_SCALE  Share a nested NF4 scale between adjacent lanes on sm120
-template <typename T, int M_BLOCK = 1, bool SHARE_NARROW_SCALE = false>
+/// @tparam STAGE_ABSMAX_CODE   Stage the nested absmax codebook in shared memory on sm120
+/// @tparam DUAL_BF16_ACCUM     Alternate BF16 pair sums between two fp32 accumulators on sm120
+template <typename T, int M_BLOCK = 1, bool SHARE_NARROW_SCALE = false, bool STAGE_ABSMAX_CODE = false,
+          bool DUAL_BF16_ACCUM = false>
 __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
     // clang-format off
     const T*       __restrict__ A,             // inputs [M, K]
@@ -150,6 +153,11 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
     constexpr bool BF16_UNSCALED_CENTROID =
         BNB_HIP && BNB_SIMT_BF16_UNSCALED_CENTROID && !HIP_BF16_VDOT2 && std::is_same_v<T, bnb_bfloat16>;
     constexpr bool FP16_UNSCALED_CENTROID = BNB_HIP && BNB_SIMT_FP16_UNSCALED_CENTROID && std::is_same_v<T, half>;
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+    constexpr bool USE_DUAL_BF16_ACCUM = DUAL_BF16_ACCUM && M_BLOCK == 1 && std::is_same_v<T, bnb_bfloat16>;
+#else
+    constexpr bool USE_DUAL_BF16_ACCUM = false;
+#endif
 
     // Stage the fp16/fp32 centroid LUT in LDS on HIP instead of warp shuffle
     // (ds_bpermute). bf16 uses the VDOT2 LDS LUT above.
@@ -203,6 +211,16 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
         __syncthreads();
     }
 #endif
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+    __shared__ float shared_absmax_code[256];
+    if constexpr (STAGE_ABSMAX_CODE) {
+        // All four warps load the table before the warp_n bounds check below.
+        shared_absmax_code[threadIdx.x] = __ldg(&absmax_code[threadIdx.x]);
+        shared_absmax_code[threadIdx.x + WARPS_PER_BLOCK * 32] =
+            __ldg(&absmax_code[threadIdx.x + WARPS_PER_BLOCK * 32]);
+        __syncthreads();
+    }
+#endif
     if (warp_n >= N)
         return;
 
@@ -213,6 +231,7 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
 #pragma unroll
     for (int m = 0; m < M_BLOCK; m++)
         acc[m] = 0.f;
+    [[maybe_unused]] float acc_alternate = 0.f;
 
     const int m_valid = min(M_BLOCK, max(0, M - base_m));
 
@@ -288,6 +307,17 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
     }
 #endif
 
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
+    uint8_t pref_scale_code_idx = 0;
+    float pref_scale_code_value = 0.0f;
+    if constexpr (SHARE_NARROW_SCALE) {
+        if ((lane_id & 1) == 0 && lane_id * NUM_VAL < K) {
+            pref_scale_code_idx = __ldg(&absmax_8bit[(warp_n << 6) + (lane_id >> 1)]);
+            pref_scale_code_value = __ldg(&absmax_code[pref_scale_code_idx]);
+        }
+    }
+#endif
+
     for (int g = 0; g < num_groups; g++) {
         const int inner_k = g * K_STRIDE + lane_id * NUM_VAL;
 
@@ -321,18 +351,22 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
             if constexpr (SHARE_NARROW_SCALE) {
                 // K=4096 and blocksize=64: 64 compressed scales per column,
                 // with one scale shared by each pair of lanes in a K group.
-                const int scale_idx = (warp_n << 6) + (g << 4) + (lane_id >> 1);
-                scale_f = __ldg(&absmax_code[__ldg(&absmax_8bit[scale_idx])]) * hoisted_state2_scale + absmax_offset_f;
+                scale_f = pref_scale_code_value * hoisted_state2_scale + absmax_offset_f;
             } else
 #endif
             {
                 const int blk_idx = warp_n * blk_per_row + (inner_k >> blocksize_log2);
-                if (absmax_8bit) {
+                if (STAGE_ABSMAX_CODE || absmax_8bit) {
                     // absmax_8bit[blk_idx] is a uint8 index into absmax_code.
                     // absmax[blk_idx >> 8] is the fp32 state2 scale (one per 256 blocks).
                     // absmax_offset is subtracted at quantize time and re-added here.
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
-                    scale_f = __ldg(&absmax_code[absmax_8bit[blk_idx]]) *
+                    float scale_code_value;
+                    if constexpr (STAGE_ABSMAX_CODE)
+                        scale_code_value = shared_absmax_code[absmax_8bit[blk_idx]];
+                    else
+                        scale_code_value = __ldg(&absmax_code[absmax_8bit[blk_idx]]);
+                    scale_f = scale_code_value *
                                   (hoist_long_state2_scale
                                        ? ((blk_idx >> 8) == first_state2_idx ? hoisted_state2_scale : last_state2_scale)
                                        : (hoist_state2_scale ? hoisted_state2_scale : __ldg(&absmax[blk_idx >> 8]))) +
@@ -393,7 +427,7 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
         for (int sub = 0; sub < 4; sub++) {
 #if defined(__CUDA_ARCH__) && __CUDA_ARCH__ == 1200
             if constexpr (M_BLOCK == 1) {
-                if (sub == 2) {
+                if (sub == 1) {
                     const int next_inner_k = (g + 1) * K_STRIDE + lane_id * NUM_VAL;
                     pref_b_packed4 = {0u, 0u, 0u, 0u};
                     if ((g + 1 < num_groups) && (next_inner_k < K)) {
@@ -407,6 +441,17 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                         );
                         // clang-format on
                     }
+                    if constexpr (SHARE_NARROW_SCALE) {
+                        if ((lane_id & 1) == 0 && (g + 1 < num_groups) && (next_inner_k < K)) {
+                            const int next_scale_idx = (warp_n << 6) + ((g + 1) << 4) + (lane_id >> 1);
+                            pref_scale_code_idx = __ldg(&absmax_8bit[next_scale_idx]);
+                        }
+                    }
+                }
+                if constexpr (SHARE_NARROW_SCALE) {
+                    if (sub == 2 && (lane_id & 1) == 0 && (g + 1 < num_groups) &&
+                        (g + 1) * K_STRIDE + lane_id * NUM_VAL < K)
+                        pref_scale_code_value = __ldg(&absmax_code[pref_scale_code_idx]);
                 }
             }
 #endif
@@ -433,7 +478,14 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
                     const T2 b_pair = vec2_mul(vec2_from_u16bits<T>(hi, lo), scale_x2);
                     if (lane_active) {
                         const float2 p = vec2_to_float2(vec2_mul(a_pairs[j], b_pair));
-                        acc[0] += p.x + p.y;
+                        if constexpr (USE_DUAL_BF16_ACCUM) {
+                            if (j & 1)
+                                acc_alternate += p.x + p.y;
+                            else
+                                acc[0] += p.x + p.y;
+                        } else {
+                            acc[0] += p.x + p.y;
+                        }
                     }
                 }
             } else {
@@ -595,6 +647,9 @@ __global__ void __launch_bounds__(WARPS_PER_BLOCK * 32) gemm_4bit_simt(
         }
     }
 
+    if constexpr (USE_DUAL_BF16_ACCUM)
+        acc[0] += acc_alternate;
+
 #pragma unroll
     // Warp reduce: sum acc[m] across all 32 lanes.
     for (int m = 0; m < M_BLOCK; m++) {
@@ -654,6 +709,18 @@ void launch_gemm_4bit_simt(
                 gemm_4bit_simt<T, MB, true><<<dim3(n_blocks, grid_y), WARPS_PER_BLOCK * 32, 0, stream>>>(
                     A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type
                 );
+                return;
+            }
+            if (M == 1 && N <= 4096 && K == 14336 && blocksize == 64 && absmax_8bit && quant_type == 2) {
+                if constexpr (std::is_same_v<T, bnb_bfloat16>) {
+                    gemm_4bit_simt<T, MB, false, true, true><<<dim3(n_blocks, grid_y), WARPS_PER_BLOCK * 32, 0, stream>>>(
+                        A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type
+                    );
+                } else {
+                    gemm_4bit_simt<T, MB, false, true><<<dim3(n_blocks, grid_y), WARPS_PER_BLOCK * 32, 0, stream>>>(
+                        A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type
+                    );
+                }
                 return;
             }
         }
