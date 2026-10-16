@@ -165,6 +165,7 @@ using bnb_blasLt_preference_t = hipblasLtMatmulPreference_t;
 #define bnb_blasLtMatmul hipblasLtMatmul
 #define bnb_blasLtPrefCreate hipblasLtMatmulPreferenceCreate
 #define bnb_blasLtPrefSetAttr hipblasLtMatmulPreferenceSetAttribute
+#define bnb_blasLtPrefDestroy hipblasLtMatmulPreferenceDestroy
 #define bnb_blasLtAlgoGetHeuristic hipblasLtMatmulAlgoGetHeuristic
 
 #define BNB_BLASLT_DESC_TRANSA HIPBLASLT_MATMUL_DESC_TRANSA
