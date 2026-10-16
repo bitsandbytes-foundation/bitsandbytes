@@ -13,6 +13,9 @@
 #if BNB_HIP
 #include <atomic>
 #include <hip/hip_runtime.h>
+#include <map>
+#include <mutex>
+#include <tuple>
 
 // NOTE: This queries device 0 once and caches the result. On mixed RDNA+CDNA
 // systems (warp size 32 vs 64) this will return the wrong value for whichever
@@ -279,6 +282,20 @@ void strided_gemmex(
 
 int roundoff(int v, int d) { return (v + d - 1) / d * d; }
 
+#if BNB_HIP && !defined(NO_HIPBLASLT)
+// hipBLASLt's heuristic query takes hundreds of milliseconds per call on MI300X, far longer than the matmul
+// itself, so the algo that ran successfully is cached per problem. A missing algo (has_algo = false) means no
+// workspace-free algo ran for that problem and the fp32 fallback is used.
+struct igemmlt_algo_entry {
+    bool has_algo;
+    hipblasLtMatmulAlgo_t algo;
+};
+
+using igemmlt_algo_key = std::tuple<bnb_blasLt_handle_t, int, int, int, int, int, int>;
+static std::map<igemmlt_algo_key, igemmlt_algo_entry> igemmlt_algo_cache;
+static std::mutex igemmlt_algo_cache_mutex;
+#endif
+
 template <int DTYPE_OUT, int SCALE_ROWS>
 int igemmlt(
     bnb_blasLt_handle_t ltHandle, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale,
@@ -318,50 +335,73 @@ int igemmlt(
 
     if (DTYPE_OUT == 32) {
 #if BNB_HIP
-        // HIP requires heuristic algo selection
-        const int64_t max_workspace_size = 0; // set to 0 to avoid choosing GSU kernel
-
-        bnb_blasLt_preference_t pref;
-        checkBlasLtStatus(bnb_blasLtPrefCreate(&pref));
-        checkBlasLtStatus(
-            bnb_blasLtPrefSetAttr(pref, BNB_BLASLT_PREF_MAX_WORKSPACE, &max_workspace_size, sizeof(max_workspace_size))
-        );
-
-        // hipBLASLt's first heuristic algo can be unusable for small-n int8 gemms
-        // (e.g. n=4 on MI300X) and fails at matmul time with INVALID_VALUE. Request
-        // several candidates and use the first one that actually runs successfully.
-        const int request_solutions = 8;
-        bnb_blasLt_heuristic_t heuristicResult[request_solutions];
-        int returnedAlgoCount = 0;
-        checkBlasLtStatus(bnb_blasLtAlgoGetHeuristic(
-            ltHandle, matmulDesc, aDesc, bDesc, cDesc, cDesc, pref, request_solutions, heuristicResult,
-            &returnedAlgoCount
-        ));
-
-        if (returnedAlgoCount == 0) {
-            has_error = 1;
-            fprintf(stderr, "Error: Matmul Algo Heuristic didn't return algorithms\n");
-        } else {
-            int alpha = 1, beta = 0;
-            bnb_blas_status_t matmul_status = BNB_BLAS_STATUS_SUCCESS;
-            for (int i = 0; i < returnedAlgoCount; ++i) {
-                matmul_status = bnb_blasLtMatmul(
-                    ltHandle, matmulDesc, &alpha, A, aDesc, B, bDesc, &beta, (int32_t*)C, cDesc, (int32_t*)C, cDesc,
-                    &heuristicResult[i].algo, NULL, 0, stream
-                );
-                if (matmul_status == BNB_BLAS_STATUS_SUCCESS)
-                    break;
-            }
-            if (matmul_status != BNB_BLAS_STATUS_SUCCESS) {
-                // Every workspace-free algo hipBLASLt offered failed at runtime
-                // (seen on MI300X for some small-n int8 gemms). Drain the HIP
-                // last-error flag the failed launches set, otherwise the next
-                // unrelated HIP call will inherit it. Then signal the Python
-                // wrapper to take the fp32 fallback via ERR_NOT_IMPLEMENTED.
-                (void)hipGetLastError();
-                return ERR_NOT_IMPLEMENTED;
-            }
+        int alpha = 1, beta = 0;
+        const igemmlt_algo_key key{ltHandle, m, n, k, lda, ldb, ldc};
+        igemmlt_algo_entry entry{};
+        bool cached;
+        {
+            std::lock_guard<std::mutex> lock(igemmlt_algo_cache_mutex);
+            auto it = igemmlt_algo_cache.find(key);
+            cached = it != igemmlt_algo_cache.end();
+            if (cached)
+                entry = it->second;
         }
+
+        if (!cached) {
+            // HIP requires heuristic algo selection
+            const int64_t max_workspace_size = 0; // set to 0 to avoid choosing GSU kernel
+
+            bnb_blasLt_preference_t pref;
+            checkBlasLtStatus(bnb_blasLtPrefCreate(&pref));
+            checkBlasLtStatus(bnb_blasLtPrefSetAttr(
+                pref, BNB_BLASLT_PREF_MAX_WORKSPACE, &max_workspace_size, sizeof(max_workspace_size)
+            ));
+
+            // hipBLASLt's first heuristic algo can be unusable for small-n int8 gemms
+            // (e.g. n=4 on MI300X) and fails at matmul time with INVALID_VALUE. Request
+            // several candidates and use the first one that actually runs successfully.
+            const int request_solutions = 8;
+            bnb_blasLt_heuristic_t heuristicResult[request_solutions];
+            int returnedAlgoCount = 0;
+            checkBlasLtStatus(bnb_blasLtAlgoGetHeuristic(
+                ltHandle, matmulDesc, aDesc, bDesc, cDesc, cDesc, pref, request_solutions, heuristicResult,
+                &returnedAlgoCount
+            ));
+            checkBlasLtStatus(bnb_blasLtPrefDestroy(pref));
+
+            if (returnedAlgoCount == 0) {
+                has_error = 1;
+                fprintf(stderr, "Error: Matmul Algo Heuristic didn't return algorithms\n");
+            } else {
+                for (int i = 0; i < returnedAlgoCount; ++i) {
+                    if (bnb_blasLtMatmul(
+                            ltHandle, matmulDesc, &alpha, A, aDesc, B, bDesc, &beta, (int32_t*)C, cDesc, (int32_t*)C,
+                            cDesc, &heuristicResult[i].algo, NULL, 0, stream
+                        ) == BNB_BLAS_STATUS_SUCCESS) {
+                        entry = {true, heuristicResult[i].algo};
+                        break;
+                    }
+                }
+                if (!entry.has_algo) {
+                    // Every workspace-free algo hipBLASLt offered failed at runtime
+                    // (seen on MI300X for some small-n int8 gemms). Drain the HIP
+                    // last-error flag the failed launches set, otherwise the next
+                    // unrelated HIP call will inherit it.
+                    (void)hipGetLastError();
+                }
+                std::lock_guard<std::mutex> lock(igemmlt_algo_cache_mutex);
+                igemmlt_algo_cache[key] = entry;
+            }
+        } else if (entry.has_algo) {
+            has_error |= checkBlasLtStatus(bnb_blasLtMatmul(
+                ltHandle, matmulDesc, &alpha, A, aDesc, B, bDesc, &beta, (int32_t*)C, cDesc, (int32_t*)C, cDesc,
+                &entry.algo, NULL, 0, stream
+            ));
+        }
+
+        // Signal the Python wrapper to take the fp32 fallback via ERR_NOT_IMPLEMENTED.
+        if (!has_error && !entry.has_algo)
+            has_error = ERR_NOT_IMPLEMENTED;
 #else
         int alpha = 1, beta = 0;
         has_error |= checkBlasLtStatus(bnb_blasLtMatmul(
