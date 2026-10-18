@@ -14,15 +14,33 @@
 #include <atomic>
 #include <hip/hip_runtime.h>
 
-// NOTE: This queries device 0 once and caches the result. On mixed RDNA+CDNA
-// systems (warp size 32 vs 64) this will return the wrong value for whichever
-// device doesn't match device 0.
+// Queried and cached PER DEVICE. The quantization launch configuration below has
+// to match the wavefront width of the device the kernel will actually run on:
+// kQuantizeBlockwiseSmall derives its NUM_QB from BNB_WARP_SIZE while this derives
+// the grid and block size from the runtime value, so a mismatch makes the launched
+// block size disagree with the kernel's NUM_QB and indexes smem_absmax_value[] /
+// warp_reduce[] out of bounds. Caching a single value taken from device 0 returns
+// the wrong width on mixed RDNA (32) + CDNA (64) systems.
+//
+// A cached value of 0 means "not queried yet". Any failure falls back to the
+// compile-time width rather than to 32: the kernel's NUM_QB is derived from that
+// same constant, so it is the only value guaranteed to agree with the launch. On
+// gfx9 that constant is 64, and falling back to 32 there would reproduce exactly
+// the mismatch described above.
+static constexpr int BNB_MAX_CACHED_DEVICES = 16;
+
 static int bnb_host_warp_size() {
-    static std::atomic<int> warp_size{0};
-    int ws = warp_size.load(std::memory_order_relaxed);
+    static std::atomic<int> warp_sizes[BNB_MAX_CACHED_DEVICES] = {};
+    int device = 0;
+    if (hipGetDevice(&device) != hipSuccess || device < 0 || device >= BNB_MAX_CACHED_DEVICES) {
+        return BNB_WARP_SIZE;
+    }
+    int ws = warp_sizes[device].load(std::memory_order_relaxed);
     if (ws == 0) {
-        (void)hipDeviceGetAttribute(&ws, hipDeviceAttributeWarpSize, 0);
-        warp_size.store(ws, std::memory_order_relaxed);
+        if (hipDeviceGetAttribute(&ws, hipDeviceAttributeWarpSize, device) != hipSuccess || ws <= 0) {
+            ws = BNB_WARP_SIZE;
+        }
+        warp_sizes[device].store(ws, std::memory_order_relaxed);
     }
     return ws;
 }
