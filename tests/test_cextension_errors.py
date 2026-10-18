@@ -45,6 +45,21 @@ def test_windows_module_not_found_is_a_missing_dependency():
     assert cextension._is_missing_dependency_error("[WinError 126] The specified module could not be found")
 
 
+def test_ctypes_file_not_found_is_also_a_missing_dependency():
+    """The form ctypes actually raises.
+
+    Reproduced on Windows by copying the built extension somewhere without the ROCm
+    DLLs reachable: ``ct.cdll.LoadLibrary`` raises FileNotFoundError with ``winerror``
+    unset (None) and this exact text. The "[WinError 126]" form does not appear, so
+    matching only on that string would miss the failure this whole path exists for.
+    """
+    real = (
+        "Could not find module 'C:\\Temp\\libbitsandbytes_rocm72.dll' "
+        "(or one of its dependencies). Try using the full path with constructor syntax."
+    )
+    assert cextension._is_missing_dependency_error(real)
+
+
 def test_unrelated_error_is_not_a_missing_dependency():
     assert not cextension._is_missing_dependency_error("something else went wrong")
 
