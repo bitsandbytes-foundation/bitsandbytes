@@ -1,9 +1,6 @@
 import dataclasses
 from functools import lru_cache
 import logging
-import platform
-import re
-import subprocess
 from typing import Optional
 
 import torch
@@ -17,7 +14,13 @@ class CUDASpecs:
 
     @property
     def has_imma(self) -> bool:
-        return torch.version.hip or self.highest_compute_capability >= (7, 5)
+        if torch.version.hip:
+            # ROCm: int8 matrix cores (MFMA) start at CDNA1 (gfx908). The GCN5 parts
+            # (gfx900/gfx906/gfx90c) have none. This previously returned
+            # `torch.version.hip` -- a version *string* -- which is always truthy, so
+            # every AMD GPU was reported as IMMA-capable.
+            return not get_rocm_gpu_arch().startswith(("gfx900", "gfx906", "gfx90c"))
+        return self.highest_compute_capability >= (7, 5)
 
 
 def get_compute_capabilities() -> list[tuple[int, int]]:
@@ -79,33 +82,21 @@ def get_cuda_specs() -> Optional[CUDASpecs]:
         return None
 
 
-def get_rocm_gpu_arch() -> str:
-    """Get ROCm GPU architecture."""
-    logger = logging.getLogger(__name__)
-    try:
-        if torch.version.hip:
-            # On Windows, use hipinfo.exe; on Linux, use rocminfo
-            if platform.system() == "Windows":
-                cmd = ["hipinfo.exe"]
-                arch_pattern = r"gcnArchName:\s+gfx([a-zA-Z\d]+)"
-            else:
-                cmd = ["rocminfo"]
-                arch_pattern = r"Name:\s+gfx([a-zA-Z\d]+)"
+def get_rocm_gpu_arch(device_index: int = 0) -> str:
+    """Get the gfx architecture of a ROCm device, e.g. 'gfx1201'.
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            match = re.search(arch_pattern, result.stdout)
-            if match:
-                return "gfx" + match.group(1)
-            else:
-                return "unknown"
-        else:
-            return "unknown"
+    Reads the device property torch already exposes rather than shelling out to
+    hipinfo.exe/rocminfo: the subprocess is not on PATH for pip-installed ROCm SDKs
+    (TheRock), its output format differs per platform, and the result is available
+    directly from the runtime.
+    """
+    logger = logging.getLogger(__name__)
+    if not torch.version.hip or not torch.cuda.is_available():
+        return "unknown"
+    try:
+        # gcnArchName carries feature suffixes, e.g. 'gfx90a:sramecc+:xnack-'.
+        name = getattr(torch.cuda.get_device_properties(device_index), "gcnArchName", "") or ""
+        return name.split(":")[0] or "unknown"
     except Exception as e:
         logger.error(f"Could not detect ROCm GPU architecture: {e}")
-        if torch.cuda.is_available():
-            logger.warning(
-                """
-ROCm GPU architecture detection failed despite ROCm being available.
-                """,
-            )
         return "unknown"

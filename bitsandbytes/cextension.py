@@ -19,6 +19,59 @@ from bitsandbytes.cuda_specs import (
 logger = logging.getLogger(__name__)
 
 
+def _is_missing_dependency_error(error_msg: str) -> bool:
+    """True when loading failed because a *dependency* of the native library is missing.
+
+    Windows surfaces this two ways. A raw ERROR_MOD_NOT_FOUND arrives as
+    "[WinError 126] The specified module could not be found", but ctypes' own loader
+    raises FileNotFoundError with ``winerror`` unset and the text "Could not find module
+    '<path>' (or one of its dependencies)". Both mean the same thing -- the ROCm/CUDA
+    runtime is not on the loader search path -- so both must reach the same advice.
+    """
+    lowered = error_msg.lower()
+    return (
+        "winerror 126" in lowered
+        or "specified module could not be found" in lowered
+        or "could not find module" in lowered
+        or "(or one of its dependencies)" in lowered
+    )
+
+
+def _dependency_search_path_hint(backend: str, major_version: str) -> str:
+    """Platform-appropriate instructions for making the runtime libraries findable."""
+    if os.name == "nt":
+        if backend == "ROCm":
+            return (
+                f"{backend} {major_version}.x runtime libraries were not found on the DLL search path.\n\n"
+                f"To fix this, make sure that:\n"
+                f"1. You have installed the {backend} {major_version}.x SDK (the ROCm/HIP SDK installer,\n"
+                f"   or the `rocm[libraries,devel]` wheels from the AMD nightly index)\n"
+                f"2. The runtime DLLs (amdhip64*.dll, rocblas.dll, hipblas.dll) are in the SDK's `bin`\n"
+                f"   directory, which bitsandbytes registers with os.add_dll_directory\n\n"
+                f"You can point bitsandbytes at the SDK root explicitly:\n"
+                f"   set ROCM_PATH=C:\\path\\to\\rocm-{major_version}.x\n\n"
+            )
+        return (
+            f"{backend} {major_version}.x runtime DLLs (cudart64*.dll, cublas64*.dll) were not found on\n"
+            f"the DLL search path.\n\n"
+            f"To fix this, make sure that:\n"
+            f"1. You have installed the CUDA {major_version}.x toolkit\n"
+            f"2. Its `bin` directory is on PATH, or CUDA_PATH is set to the toolkit root\n\n"
+            f"You can check what Windows can see with:\n"
+            f"   where cudart64*.dll\n\n"
+        )
+
+    lib_dir = "lib64" if not HIP_ENVIRONMENT else "lib"
+    return (
+        f"{backend} {major_version}.x runtime libraries were not found in the LD_LIBRARY_PATH.\n\n"
+        f"To fix this, make sure that:\n"
+        f"1. You have installed {backend} {major_version}.x toolkit on your system\n"
+        f"2. The {backend} runtime libraries are in your LD_LIBRARY_PATH\n\n"
+        f"You can add them with (and persist the change by adding the line to your .bashrc):\n"
+        f"   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/{backend.lower()}-{major_version}.x/{lib_dir}\n\n"
+    )
+
+
 def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
     """
     Get the path to the best matching CUDA/ROCm BNB native library for the given specs.
@@ -40,8 +93,18 @@ def get_cuda_bnb_library_path(cuda_specs: CUDASpecs) -> Path:
     override_value = os.environ.get(override_var)
 
     if override_value is not None:
+        # Accept the dotted spelling users naturally reach for ('12.4', '7.2') as well
+        # as the compact one that appears in the library filename ('124', '72').
+        override_value = override_value.strip()
         if not override_value.isdigit():
-            raise RuntimeError(f"{override_var}={override_value!r}: value must be digits only (e.g. '124' for 12.4).")
+            dotted = override_value.split(".")
+            if len(dotted) >= 2 and all(part.isdigit() for part in dotted[:2]):
+                override_value = "".join(dotted[:2])
+            else:
+                raise RuntimeError(
+                    f"{override_var}={override_value!r}: value must be digits only "
+                    f"(e.g. '124' for 12.4), or a dotted version (e.g. '12.4')."
+                )
         library_name = f"libbitsandbytes_{prefix}{override_value}{DYNAMIC_LIBRARY_SUFFIX}"
         logger.warning(
             f"WARNING: {override_var}={override_value} environment variable detected; loading {library_name}.\n"
@@ -96,8 +159,11 @@ class BNBNativeLibrary:
 
         def throw_on_call(*args, **kwargs):
             raise RuntimeError(
-                f"Method '{name}' not available in CPU-only version of bitsandbytes.\n"
-                "Reinstall with GPU support or use CUDA-enabled hardware."
+                f"Method '{name}' is not exported by the loaded bitsandbytes native library "
+                f"(backend: {BNB_BACKEND}).\n"
+                "This usually means a CPU-only library was loaded, or the prebuilt binary for "
+                "your backend was built without this kernel. Run `python -m bitsandbytes` for "
+                "the backend, versions and library path that were actually resolved."
             )
 
         return throw_on_call
@@ -197,8 +263,9 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
         user_version_str = f"{user_version[0]}.{user_version[1]}" if user_version else "unknown"
         self.requested_version = parse_cuda_version(override_value) if override_value else user_version_str
 
-        # Pre-generate the error message based on error type
-        if "cannot open shared object file" in error_msg:
+        # Pre-generate the error message based on error type. A missing *dependency*
+        # surfaces as a dlerror() string on Linux and as WinError 126 on Windows.
+        if "cannot open shared object file" in error_msg or _is_missing_dependency_error(error_msg):
             self.formatted_error = self._format_dependency_error()
         else:  # lib loading errors
             self.formatted_error = self._format_lib_error_message(
@@ -217,8 +284,9 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
     ) -> str:
         """Format detailed error message for library loading failures"""
         analysis = ""
-        no_cpu_lib_found = "libbitsandbytes_cpu.so: cannot open" in original_error
-        no_cuda_lib_found = f"{BNB_BACKEND} binary not found" in original_error
+        no_cpu_lib_found = f"libbitsandbytes_cpu{DYNAMIC_LIBRARY_SUFFIX}" in original_error
+        # get_native_library() raises "No compatible {backend} binary found at <path>".
+        no_cuda_lib_found = f"{BNB_BACKEND} binary found at" in original_error
 
         if no_cpu_lib_found:
             analysis = "\n🚨 Failed to load CPU-only bitsandbytes library 🚨\n\n"
@@ -302,13 +370,7 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
 
         return (
             f"\n🚨 {BNB_BACKEND} SETUP ERROR: Missing dependency: {missing_lib} 🚨\n\n"
-            f"{BNB_BACKEND} {cuda_major_version}.x runtime libraries were not found in the LD_LIBRARY_PATH.\n\n"
-            f"To fix this, make sure that:\n"
-            f"1. You have installed {BNB_BACKEND} {cuda_major_version}.x toolkit on your system\n"
-            f"2. The {BNB_BACKEND} runtime libraries are in your LD_LIBRARY_PATH\n\n"
-            f"You can add them with (and persist the change by adding the line to your .bashrc):\n"
-            f"   export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/path/to/{BNB_BACKEND.lower()}-{cuda_major_version}.x/"
-            f"{'lib64' if not HIP_ENVIRONMENT else 'lib'}\n\n"
+            f"{_dependency_search_path_hint(BNB_BACKEND, cuda_major_version)}"
             f"Original error: {self.error_msg}\n\n"
             f"🔍 Run this command for detailed diagnostics:\n"
             f"python -m bitsandbytes\n\n"
@@ -345,6 +407,48 @@ def get_xpu_bnb_library_path() -> Path:
     return PACKAGE_DIR / f"libbitsandbytes_xpu{DYNAMIC_LIBRARY_SUFFIX}"
 
 
+# Handles returned by os.add_dll_directory(). They must stay alive for the process
+# lifetime: releasing a handle removes the directory from the search path again.
+_DLL_DIR_HANDLES: list = []
+
+
+def _register_windows_dll_directories() -> None:
+    """Register the directories holding the CUDA/ROCm runtime DLLs on Windows.
+
+    ctypes loads with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which searches the
+    application directory, System32 and explicitly registered directories -- but
+    *not* PATH and not the loaded DLL's own directory. Without this, a Windows ROCm
+    install whose amdhip64*.dll / rocblas.dll live in the SDK's `bin` directory can
+    only be resolved by accident, e.g. when torch happens to have already loaded a
+    module with the same base name.
+    """
+    if os.name != "nt" or _DLL_DIR_HANDLES:
+        return
+
+    candidates = []
+    for var in ("ROCM_PATH", "HIP_PATH", "ROCM_HOME", "CONDA_PREFIX"):
+        root = os.environ.get(var)
+        if root:
+            candidates += [Path(root) / "bin", Path(root) / "lib"]
+    # torch ships the runtime it was built against, which on a ROCm build is a
+    # reliable source of amdhip64*.dll.
+    candidates.append(Path(torch.__file__).parent / "lib")
+    candidates += [Path(entry) for entry in os.environ.get("PATH", "").split(os.pathsep) if entry]
+
+    seen = set()
+    for directory in candidates:
+        try:
+            if directory in seen or not directory.is_dir():
+                continue
+            seen.add(directory)
+            if not any(directory.glob("amdhip64*.dll")) and not any(directory.glob("cudart64*.dll")):
+                continue
+            _DLL_DIR_HANDLES.append(os.add_dll_directory(str(directory)))
+            logger.debug(f"Registered DLL search directory: {directory}")
+        except OSError as exc:
+            logger.warning(f"Could not register DLL search directory {directory}: {exc}")
+
+
 def get_native_library() -> BNBNativeLibrary:
     """
     Load CUDA library XOR CPU, as the latter contains a subset of symbols of the former.
@@ -364,6 +468,8 @@ def get_native_library() -> BNBNativeLibrary:
         binary_path = get_xpu_bnb_library_path()
 
     logger.debug(f"Loading bitsandbytes native library from: {binary_path}")
+
+    _register_windows_dll_directories()
 
     # Try to load the library - any errors will propagate up
     dll = ct.cdll.LoadLibrary(str(binary_path))
