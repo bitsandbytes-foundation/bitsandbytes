@@ -22,12 +22,19 @@ logger = logging.getLogger(__name__)
 def _is_missing_dependency_error(error_msg: str) -> bool:
     """True when loading failed because a *dependency* of the native library is missing.
 
-    Linux reports this through dlerror() ("cannot open shared object file"); Windows
-    reports ERROR_MOD_NOT_FOUND as "[WinError 126] The specified module could not be
-    found". Both mean the same thing to the user, so both must reach the same advice.
+    Windows surfaces this two ways. A raw ERROR_MOD_NOT_FOUND arrives as
+    "[WinError 126] The specified module could not be found", but ctypes' own loader
+    raises FileNotFoundError with ``winerror`` unset and the text "Could not find module
+    '<path>' (or one of its dependencies)". Both mean the same thing -- the ROCm/CUDA
+    runtime is not on the loader search path -- so both must reach the same advice.
     """
     lowered = error_msg.lower()
-    return "winerror 126" in lowered or "specified module could not be found" in lowered
+    return (
+        "winerror 126" in lowered
+        or "specified module could not be found" in lowered
+        or "could not find module" in lowered
+        or "(or one of its dependencies)" in lowered
+    )
 
 
 def _dependency_search_path_hint(backend: str, major_version: str) -> str:
