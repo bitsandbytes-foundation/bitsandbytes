@@ -22,21 +22,23 @@
 // warp_reduce[] out of bounds. Caching a single value taken from device 0 returns
 // the wrong width on mixed RDNA (32) + CDNA (64) systems.
 //
-// A cached value of 0 means "not queried yet"; any failure falls back to the
-// narrowest width so a failed query degrades to a conservative launch rather than
-// an out-of-range one.
+// A cached value of 0 means "not queried yet". Any failure falls back to the
+// compile-time width rather than to 32: the kernel's NUM_QB is derived from that
+// same constant, so it is the only value guaranteed to agree with the launch. On
+// gfx9 that constant is 64, and falling back to 32 there would reproduce exactly
+// the mismatch described above.
 static constexpr int BNB_MAX_CACHED_DEVICES = 16;
 
 static int bnb_host_warp_size() {
     static std::atomic<int> warp_sizes[BNB_MAX_CACHED_DEVICES] = {};
     int device = 0;
     if (hipGetDevice(&device) != hipSuccess || device < 0 || device >= BNB_MAX_CACHED_DEVICES) {
-        return 32;
+        return BNB_WARP_SIZE;
     }
     int ws = warp_sizes[device].load(std::memory_order_relaxed);
     if (ws == 0) {
         if (hipDeviceGetAttribute(&ws, hipDeviceAttributeWarpSize, device) != hipSuccess || ws <= 0) {
-            ws = 32;
+            ws = BNB_WARP_SIZE;
         }
         warp_sizes[device].store(ws, std::memory_order_relaxed);
     }
