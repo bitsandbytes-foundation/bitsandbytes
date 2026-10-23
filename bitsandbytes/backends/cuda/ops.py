@@ -217,6 +217,9 @@ def _(A: torch.Tensor, threshold=0.0):
     if threshold < 0.0:
         raise ValueError("threshold must be non-negative")
 
+    # The CUDA kernel reads rows directly without accounting for tensor strides.
+    A = A.contiguous()
+
     rows = A.numel() // A.shape[-1]
     cols = A.shape[-1]
 
