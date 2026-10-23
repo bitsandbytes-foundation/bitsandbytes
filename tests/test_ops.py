@@ -63,6 +63,43 @@ class TestLLMInt8Ops:
         opcheck(torch.ops.bitsandbytes.int8_vectorwise_quant, (A, threshold))
 
     @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("threshold", [0.0, 6.0])
+    @pytest.mark.parametrize("layout", ["transpose", "row_slice", "column_slice"])
+    @pytest.mark.parametrize("double_quant", TRUE_FALSE)
+    def test_int8_quant_non_contiguous(self, device, threshold, layout, double_quant):
+        if double_quant and device != "cuda":
+            pytest.skip("int8_double_quant is only implemented for CUDA/ROCm")
+
+        if layout == "transpose":
+            A = torch.randn(64, 8, device=device, dtype=torch.float16).t()
+        elif layout == "row_slice":
+            A = torch.randn(16, 64, device=device, dtype=torch.float16)[1::2]
+        else:
+            A = torch.randn(8, 128, device=device, dtype=torch.float16)[:, 1::2]
+        A[1, 3] = 10.0
+        A[6, 17] = -10.0
+        assert not A.is_contiguous()
+        original = A.clone()
+
+        quantize = (
+            bitsandbytes.functional.int8_double_quant
+            if double_quant
+            else bitsandbytes.functional.int8_vectorwise_quant
+        )
+        expected = quantize(A.contiguous(), threshold=threshold)
+        actual = quantize(A, threshold=threshold)
+
+        for result, reference in zip(actual, expected):
+            if reference is None:
+                assert result is None
+            else:
+                torch.testing.assert_close(result, reference, rtol=0, atol=0)
+        torch.testing.assert_close(A, original, rtol=0, atol=0)
+
+        if device == "cuda" and not double_quant:
+            opcheck(torch.ops.bitsandbytes.int8_vectorwise_quant, (A, threshold))
+
+    @pytest.mark.parametrize("device", get_available_devices())
     def test_int8_mm_dequant(self, device):
         A = torch.randint(-128, 127, (256, 256), dtype=torch.int32, device=device)
         row_stats = torch.randn(256, dtype=torch.float32, device=device)

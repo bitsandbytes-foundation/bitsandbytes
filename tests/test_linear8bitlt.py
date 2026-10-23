@@ -22,6 +22,32 @@ from tests.helpers import (
 HAS_FP16_WEIGHTS_NON_DEPRECATED = [False]
 
 
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("threshold", [0.0, 6.0])
+@pytest.mark.parametrize("layout", ["transpose", "column_slice"])
+@pytest.mark.parametrize("requires_grad", TRUE_FALSE)
+def test_linear8bit_non_contiguous_input(device, threshold, layout, requires_grad):
+    linear = Linear8bitLt(64, 32, has_fp16_weights=False, threshold=threshold).half().to(device).eval()
+    if layout == "transpose":
+        x = torch.randn(64, 4, device=device, dtype=torch.float16).t()
+    else:
+        x = torch.randn(4, 128, device=device, dtype=torch.float16)[:, 1::2]
+    x[1, 3] = 10.0
+    assert not x.is_contiguous()
+    x_ref = x.contiguous().requires_grad_(requires_grad)
+    x.requires_grad_(requires_grad)
+
+    expected = linear(x_ref)
+    actual = linear(x)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+    if requires_grad:
+        grad = torch.randn_like(actual)
+        expected.backward(grad)
+        actual.backward(grad)
+        torch.testing.assert_close(x.grad, x_ref.grad, rtol=0, atol=0)
+
+
 # contributed by Alex Borzunov, see:
 # https://github.com/bigscience-workshop/petals/blob/main/tests/test_linear8bitlt.py
 @pytest.mark.parametrize("device", get_available_devices())
