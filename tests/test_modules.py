@@ -310,6 +310,34 @@ def test_kbit_backprop(device, module, dtype):
 
 
 @pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("input_shape", [(32,), (2, 3, 32), (2, 2, 2, 32)], ids=str)
+def test_linear8bitlt_cpu_backprop_non_2d(device, input_shape):
+    """MatMul8bitFp backward must flatten inputs with rank != 2 before computing weight grads."""
+    if device != "cpu":
+        pytest.skip("MatMul8bitFp is only used for CPU/XPU training.")
+
+    dtype = torch.float32
+    torch.manual_seed(0)
+
+    ref = nn.Linear(32, 64, bias=False, dtype=dtype, device=device)
+    kbit = bnb.nn.Linear8bitLt(32, 64, bias=False, has_fp16_weights=True).to(device=device, dtype=dtype)
+    kbit.weight.data.copy_(ref.weight.data)
+
+    x = torch.randn(input_shape, device=device, dtype=dtype, requires_grad=True)
+    x_ref = x.detach().clone().requires_grad_(True)
+
+    out = kbit(x)
+    out_ref = ref(x_ref)
+    assert out.shape == out_ref.shape
+
+    out.sum().backward()
+    out_ref.sum().backward()
+
+    torch.testing.assert_close(kbit.weight.grad, ref.weight.grad, atol=0.02, rtol=0.05)
+    torch.testing.assert_close(x.grad, x_ref.grad, atol=0.02, rtol=0.05)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("embedding_dim", [64, 65])
 @pytest.mark.parametrize("input_shape", [(10,), (10, 10), (10, 10, 10)], ids=str)
 @pytest.mark.parametrize(
