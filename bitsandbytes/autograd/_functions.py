@@ -212,7 +212,7 @@ class MatMul8bitLt(torch.autograd.Function):
 
         if req_gradBias:
             # compute grad_bias first before changing grad_output dtype
-            grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
+            grad_bias = grad_output.reshape(-1, grad_output.shape[-1]).sum(0, dtype=ctx.dtype_bias)
 
         # Cast grad_output to fp16
         if len(grad_output.shape) == 3:
@@ -278,7 +278,7 @@ class MatMul8bitFp(torch.autograd.Function):
         grad_A = grad_B = grad_bias = None
         if req_gradBias:
             # compute grad_bias first before changing grad_output dtype
-            grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
+            grad_bias = grad_output.reshape(-1, grad_output.shape[-1]).sum(0, dtype=ctx.dtype_bias)
 
         # Cast grad_output to fp16
         if len(grad_output.shape) == 3:
@@ -374,7 +374,7 @@ class MatMul4Bit(torch.autograd.Function):
 
         if req_gradBias:
             # compute grad_bias first before changing grad_output dtype
-            grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
+            grad_bias = grad_output.reshape(-1, grad_output.shape[-1]).sum(0, dtype=ctx.dtype_bias)
 
         # not supported by PyTorch. TODO: create work-around
         # if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
