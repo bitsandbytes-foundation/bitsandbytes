@@ -168,7 +168,7 @@ def _optimizer_update_2state_32bit_triton_kernel(
     beta2_step,
     lr,
     gnorm_scale: tl.constexpr,
-    skip_zeros,
+    SKIP_ZEROS: tl.constexpr,
     n_elements,
     OPTIMIZER_ID: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
@@ -187,8 +187,16 @@ def _optimizer_update_2state_32bit_triton_kernel(
 
     if OPTIMIZER_ID == 5:  # ADEMAMIX
         s3_vals = tl.load(state1_ptr + n_elements + offsets, mask=mask, other=0.0)
+        s3_prev = s3_vals
 
     g_vals = gnorm_scale * g_vals
+
+    # skip_zeros: Triton has no per-lane early exit, so keep the pre-update values and
+    # select them back in before storing. Compiled away when SKIP_ZEROS is False.
+    nonzero_grad = g_vals != 0.0
+    p_prev = p_vals
+    s1_prev = s1_vals
+    s2_prev = s2_vals
 
     update_scale = 1.0
     if max_unorm > 0.0:
@@ -225,6 +233,13 @@ def _optimizer_update_2state_32bit_triton_kernel(
         adaptive_term = (tl.sqrt(s2_vals) / correction2) + eps
         p_vals = p_vals - lr * (mixed_momentum / adaptive_term)
 
+    if SKIP_ZEROS:
+        p_vals = tl.where(nonzero_grad, p_vals, p_prev)
+        s1_vals = tl.where(nonzero_grad, s1_vals, s1_prev)
+        s2_vals = tl.where(nonzero_grad, s2_vals, s2_prev)
+        if OPTIMIZER_ID == 5:  # ADEMAMIX
+            s3_vals = tl.where(nonzero_grad, s3_vals, s3_prev)
+
     tl.store(p_ptr + offsets, p_vals, mask=mask)
     tl.store(state1_ptr + offsets, s1_vals, mask=mask)
     tl.store(state2_ptr + offsets, s2_vals, mask=mask)
@@ -253,7 +268,7 @@ def _optimizer_update_1state_32bit_triton_kernel(
     beta2_step,
     lr,
     gnorm_scale: tl.constexpr,
-    skip_zeros,
+    SKIP_ZEROS: tl.constexpr,
     n_elements,
     OPTIMIZER_ID: tl.constexpr,
     BLOCK_SIZE: tl.constexpr,
@@ -270,6 +285,12 @@ def _optimizer_update_1state_32bit_triton_kernel(
     s1_vals = tl.load(state1_ptr + offsets, mask=mask, other=0.0)
 
     g_vals = gnorm_scale * g_vals
+
+    # skip_zeros: test the raw gradient, before weight decay is folded in below.
+    nonzero_grad = g_vals != 0.0
+    p_prev = p_vals
+    s1_prev = s1_vals
+
     # Coupled (L2) weight decay: fold wd into the gradient. This is correct for
     # MOMENTUM/RMSPROP/ADAGRAD, but NOT for LION (id 4), which uses *decoupled*
     # (AdamW-style) weight decay applied to the param directly (see the LION branch
@@ -316,6 +337,10 @@ def _optimizer_update_1state_32bit_triton_kernel(
 
         update_val = lr * g_vals / (tl.sqrt(s1_vals) + eps)
         p_vals = p_vals - update_val
+
+    if SKIP_ZEROS:
+        p_vals = tl.where(nonzero_grad, p_vals, p_prev)
+        s1_vals = tl.where(nonzero_grad, s1_vals, s1_prev)
 
     tl.store(p_ptr + offsets, p_vals, mask=mask)
     tl.store(state1_ptr + offsets, s1_vals, mask=mask)
@@ -380,9 +405,6 @@ def optimizer_update_32bit_impl(
     """
     32-bit optimizer implemented by Triton
     """
-    if skip_zeros:
-        raise NotImplementedError("skip_zeros is not supported on XPU yet")
-
     BLOCK_SIZE = 256
     N_PER_TH = 1  # Number of blocks processed per thread.
     grid = (triton.cdiv(p.numel(), BLOCK_SIZE * N_PER_TH),)
@@ -900,6 +922,7 @@ def _optimizer_update_1state_8bit_blockwise_triton_kernel(
     BLOCK_SIZE_N: tl.constexpr,
     N_PER_TH: tl.constexpr,
     OPTIMIZER_ID: tl.constexpr,
+    SKIP_ZEROS: tl.constexpr,
 ):
     """
     Triton kernel for 8-bit optimizers that use one momentum state.
@@ -915,6 +938,11 @@ def _optimizer_update_1state_8bit_blockwise_triton_kernel(
     g = tl.load(g_ptr + offsets, mask=mask, other=0.0).to(tl.float32) * gnorm_scale
     p = tl.load(p_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
     s1 = dequant_8bit_blockwise_kernel_util(state1_ptr, offsets, qmap1_ptr, absmax1_ptr, mask, BLOCK_SIZE_N)
+
+    # skip_zeros: test the raw gradient, before weight decay is folded in below.
+    nonzero_grad = g != 0.0
+    p_prev = p
+    s1_prev = s1
 
     # 3. Optimizer-specific updates
     # LION
@@ -950,6 +978,10 @@ def _optimizer_update_1state_8bit_blockwise_triton_kernel(
         s1 = s1 * beta2 + (1.0 - beta2) * g
 
     # 4. Store updated parameter and requantized state
+    if SKIP_ZEROS:
+        p = tl.where(nonzero_grad, p, p_prev)
+        s1 = tl.where(nonzero_grad, s1, s1_prev)
+
     tl.store(p_ptr + offsets, p.to(p_ptr.dtype.element_ty), mask=mask)
     s1_codes, new_absmax1 = quantize_8bit_blockwise_kernel_util(s1, qmap1_ptr, 256, BLOCK_SIZE_N, N_PER_TH)
     tl.store(state1_ptr + offsets, s1_codes, mask=mask)
@@ -985,6 +1017,7 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
     BLOCK_SIZE_N: tl.constexpr,
     N_PER_TH: tl.constexpr,
     OPTIMIZER_ID: tl.constexpr,
+    SKIP_ZEROS: tl.constexpr,
 ):
     """
     Triton kernel for 8-bit optimizers that use two momentum states.
@@ -1000,10 +1033,15 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
     g = tl.load(g_ptr + offsets, mask=mask, other=0.0).to(tl.float32) * gnorm_scale
     p = tl.load(p_ptr + offsets, mask=mask, other=0.0).to(tl.float32)
 
+    nonzero_grad = g != 0.0
+    p_prev = p
+
     # 3. Optimizer-specific updates
     if OPTIMIZER_ID == 3:  # ADAM
         s1 = dequant_8bit_blockwise_kernel_util(state1_ptr, offsets, qmap1_ptr, absmax1_ptr, mask, BLOCK_SIZE_N)
         s2 = dequant_8bit_blockwise_kernel_util(state2_ptr, offsets, qmap2_ptr, absmax2_ptr, mask, BLOCK_SIZE_N)
+        s1_prev = s1
+        s2_prev = s2
 
         s1 = s1 * beta1 + (1.0 - beta1) * g
         s2 = s2 * beta2 + (1.0 - beta2) * g * g
@@ -1020,6 +1058,11 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
 
         denom = tl.sqrt(s2) / tl.sqrt(bias_correction2) + eps
         p -= (lr / bias_correction1) * (s1 / denom)
+
+        if SKIP_ZEROS:
+            p = tl.where(nonzero_grad, p, p_prev)
+            s1 = tl.where(nonzero_grad, s1, s1_prev)
+            s2 = tl.where(nonzero_grad, s2, s2_prev)
 
         # Store updated parameter
         tl.store(p_ptr + offsets, p.to(p_ptr.dtype.element_ty), mask=mask)
@@ -1045,6 +1088,9 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
             BLOCK_SIZE_N,
         )
         nu = dequant_8bit_blockwise_kernel_util(state2_ptr, offsets, qmap2_ptr, absmax2_ptr, mask, BLOCK_SIZE_N)
+        m1_prev = m1
+        m2_prev = m2
+        nu_prev = nu
 
         m1 = m1 * beta1 + (1.0 - beta1) * g
         m2 = m2 * beta3 + (1.0 - beta3) * g
@@ -1063,6 +1109,12 @@ def _optimizer_update_2state_8bit_blockwise_triton_kernel(
             p *= 1.0 - lr * weight_decay
 
         p -= lr * update
+
+        if SKIP_ZEROS:
+            p = tl.where(nonzero_grad, p, p_prev)
+            m1 = tl.where(nonzero_grad, m1, m1_prev)
+            m2 = tl.where(nonzero_grad, m2, m2_prev)
+            nu = tl.where(nonzero_grad, nu, nu_prev)
 
         # Store updated parameter
         tl.store(p_ptr + offsets, p.to(p_ptr.dtype.element_ty), mask=mask)
@@ -1117,9 +1169,6 @@ def optimizer_update_8bit_blockwise_impl(
     gnorm_scale: float = 1.0,
     skip_zeros=False,
 ) -> None:
-    if skip_zeros:
-        raise NotImplementedError("skip_zeros is not supported on XPU yet")
-
     if optimizer_name == "ademamix":
         # Handle AdEMAMIX's stacked state tensors
         if state1.dim() < 2 or state1.shape[0] != 2:
@@ -1166,6 +1215,7 @@ def optimizer_update_8bit_blockwise_impl(
         BLOCK_SIZE_N=BLOCK_SIZE,
         N_PER_TH=N_PER_TH,
         OPTIMIZER_ID=optimizer_id,
+        SKIP_ZEROS=skip_zeros,
         num_warps=2,
     )
 
