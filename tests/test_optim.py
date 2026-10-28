@@ -319,6 +319,11 @@ def test_skip_zeros(optim_name, gtype, device):
     (no weight decay, no state update), while all other elements get exactly the same
     update as with `skip_zeros=False`.
     """
+    if device != "xpu":
+        # CUDA only honors skip_zeros in some kernels (e.g. it is ignored by AdEMAMix and the 8-bit
+        # 2-state kernels), and CPU raises NotImplementedError. Only the Triton kernels implement it fully.
+        pytest.skip(f"skip_zeros is not fully supported on {device}")
+
     dim1, dim2 = 1024, 32
 
     # Generate everything up-front so that both runs below see bit-identical inputs.
@@ -347,11 +352,8 @@ def test_skip_zeros(optim_name, gtype, device):
         optimizer.step()
         return before, p.clone()
 
-    try:
-        before_ref, p_ref = run(skip_zeros=False)
-        before_skip, p_skip = run(skip_zeros=True)
-    except NotImplementedError as e:
-        pytest.skip(f"skip_zeros is not supported on {device}: {e}")
+    before_ref, p_ref = run(skip_zeros=False)
+    before_skip, p_skip = run(skip_zeros=True)
 
     assert torch.equal(before_ref, before_skip), "warm-up is not deterministic"
 
