@@ -22,6 +22,7 @@ k = 20
 
 _GEMM_4BIT_SHAPES = [
     (1, 256, 128),  # SIMT path on all GPUs
+    (1, 256, 320),  # K not a multiple of 128: unaligned fallback at M=1
     (40, 2048, 128),  # 64x32-128 + sm75 tile
     (9, 5120, 128),  # 32x64-128 on L40S/4090
     (40, 5120, 128),  # 32x64-64 on A10/L40S/4090
