@@ -916,6 +916,14 @@ class TestQuantize4BitFunctional:
                 },
             }[dim_key]
 
+        # ROCm/HIP 4-bit GEMV has slightly different FMA reduction order, producing
+        # higher fp32 numerical error than CUDA. Only fp32 is affected.
+        if torch.version.hip and dtype == torch.float32 and not cpu_bf16_cast:
+            thresholds = {
+                "le512": {"err1": (4e-8, 4e-9), "relerr1": (1.6e-6, 2.4e-6), "maxerr1": (1.2e-7, 4e-8)},
+                "gt512": {"err1": (2.5e-8, 4e-9), "relerr1": (1e-6, 3.2e-7), "maxerr1": (3.5e-7, 5e-8)},
+            }[dim_key]
+
         for metric_name, metric_val in [("err1", err1), ("relerr1", relerr1), ("maxerr1", maxerr1)]:
             mean_val, std_val = thresholds[metric_name]
             limit = mean_val + N_SIGMA * std_val
