@@ -741,3 +741,50 @@ def test_adagrad8bit_rejects_non_8_optim_bits():
         bnb.optim.Adagrad8bit(p, optim_bits=32)
     # default (optim_bits=8) still constructs
     bnb.optim.Adagrad8bit(p)
+
+
+@pytest.mark.parametrize(
+    "optim_cls",
+    [bnb.optim.SGD, bnb.optim.SGD8bit, bnb.optim.SGD32bit, bnb.optim.LARS, bnb.optim.LARS8bit, bnb.optim.LARS32bit],
+    ids=id_formatter("opt"),
+)
+def test_sgd_lars_reject_nesterov(optim_cls):
+    # These constructors accepted a `nesterov` argument that the base optimizer never
+    # reads, so nesterov=True silently produced plain heavy-ball momentum. Reject it
+    # instead; mirrors the Adam8bit/AdamW8bit guards (relates to #1261).
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        optim_cls(p, lr=1e-3, momentum=0.9, nesterov=True)
+    # default (nesterov=False) still constructs
+    optim_cls(p, lr=1e-3, momentum=0.9)
+
+
+@pytest.mark.parametrize(
+    "optim_cls",
+    [bnb.optim.SGD, bnb.optim.SGD8bit, bnb.optim.SGD32bit, bnb.optim.LARS, bnb.optim.LARS8bit, bnb.optim.LARS32bit],
+    ids=id_formatter("opt"),
+)
+def test_sgd_lars_reject_dampening(optim_cls):
+    # `dampening` was passed to the base optimizer as betas[1], which no momentum path
+    # reads, so a non-zero value had no effect on the update.
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        optim_cls(p, lr=1e-3, momentum=0.9, dampening=0.5)
+    # default (dampening=0) still constructs
+    optim_cls(p, lr=1e-3, momentum=0.9)
+
+
+def test_pytorch_lars_still_supports_nesterov():
+    # PytorchLARS implements nesterov itself and validates it, so it keeps the argument.
+    # Guards the boundary of this change: a tight and a loose setting must still differ.
+    def one_step(nesterov):
+        torch.manual_seed(0)
+        p = torch.nn.Parameter(torch.randn(32, 32))
+        opt = bnb.optim.PytorchLARS([p], lr=1e-1, momentum=0.9, nesterov=nesterov)
+        torch.manual_seed(123)
+        for _ in range(2):
+            p.grad = torch.randn(32, 32)
+            opt.step()
+        return p.detach().clone()
+
+    assert not torch.allclose(one_step(False), one_step(True))

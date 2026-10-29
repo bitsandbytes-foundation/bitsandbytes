@@ -33,11 +33,12 @@ class LARS(Optimizer1State):
             momentum (`float`, defaults to 0):
                 The momentum value speeds up the optimizer by taking bigger steps.
             dampening (`float`, defaults to 0):
-                The dampening value reduces the momentum of the optimizer.
+                The dampening value reduces the momentum of the optimizer. Not supported; only
+                the default of 0 is accepted.
             weight_decay (`float`, defaults to 1e-2):
                 The weight decay value for the optimizer.
             nesterov (`bool`, defaults to `False`):
-                Whether to use Nesterov momentum.
+                Whether to use Nesterov momentum. Not supported; only the default of `False` is accepted.
             optim_bits (`int`, defaults to 32):
                 The number of bits of the optimizer state.
             args (`object`, defaults to `None`):
@@ -47,6 +48,13 @@ class LARS(Optimizer1State):
             max_unorm (`float`, defaults to 0.02):
                 The maximum gradient norm.
         """
+        # Validate unsupported parameters
+        if nesterov:
+            raise ValueError("LARS does not support nesterov=True")
+
+        if dampening != 0:
+            raise ValueError("LARS does not support dampening != 0")
+
         if momentum == 0:
             raise NotImplementedError("LARS without momentum is not supported!")
         super().__init__(
@@ -87,11 +95,12 @@ class LARS8bit(Optimizer1State):
             momentum (`float`, defaults to 0):
                 The momentum value speeds up the optimizer by taking bigger steps.
             dampening (`float`, defaults to 0):
-                The dampening value reduces the momentum of the optimizer.
+                The dampening value reduces the momentum of the optimizer. Not supported; only
+                the default of 0 is accepted.
             weight_decay (`float`, defaults to 1e-2):
                 The weight decay value for the optimizer.
             nesterov (`bool`, defaults to `False`):
-                Whether to use Nesterov momentum.
+                Whether to use Nesterov momentum. Not supported; only the default of `False` is accepted.
             args (`object`, defaults to `None`):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
@@ -99,6 +108,13 @@ class LARS8bit(Optimizer1State):
             max_unorm (`float`, defaults to 0.02):
                 The maximum gradient norm.
         """
+        # Validate unsupported parameters
+        if nesterov:
+            raise ValueError("LARS8bit does not support nesterov=True")
+
+        if dampening != 0:
+            raise ValueError("LARS8bit does not support dampening != 0")
+
         if momentum == 0:
             raise NotImplementedError("LARS without momentum is not supported!")
         super().__init__(
@@ -139,11 +155,12 @@ class LARS32bit(Optimizer1State):
             momentum (`float`, defaults to 0):
                 The momentum value speeds up the optimizer by taking bigger steps.
             dampening (`float`, defaults to 0):
-                The dampening value reduces the momentum of the optimizer.
+                The dampening value reduces the momentum of the optimizer. Not supported; only
+                the default of 0 is accepted.
             weight_decay (`float`, defaults to 1e-2):
                 The weight decay value for the optimizer.
             nesterov (`bool`, defaults to `False`):
-                Whether to use Nesterov momentum.
+                Whether to use Nesterov momentum. Not supported; only the default of `False` is accepted.
             args (`object`, defaults to `None`):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
@@ -151,6 +168,13 @@ class LARS32bit(Optimizer1State):
             max_unorm (`float`, defaults to 0.02):
                 The maximum gradient norm.
         """
+        # Validate unsupported parameters
+        if nesterov:
+            raise ValueError("LARS32bit does not support nesterov=True")
+
+        if dampening != 0:
+            raise ValueError("LARS32bit does not support dampening != 0")
+
         if momentum == 0:
             raise NotImplementedError("LARS without momentum is not supported!")
         super().__init__(
