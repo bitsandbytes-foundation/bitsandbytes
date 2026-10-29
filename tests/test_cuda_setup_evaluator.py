@@ -108,7 +108,10 @@ def test_version_selection(monkeypatch, caplog, spec, fake_libs, hip_version, ex
 def test_override(monkeypatch, cuda120_spec, caplog):
     """BNB_CUDA_VERSION overrides path selection."""
     monkeypatch.setenv("BNB_CUDA_VERSION", "110")
-    with patch("bitsandbytes.cextension._find_cuda_libs", return_value={}):
+    with (
+        patch("torch.version.hip", None),
+        patch("bitsandbytes.cextension._find_cuda_libs", return_value={}),
+    ):
         with caplog.at_level("WARNING"):
             result = get_cuda_bnb_library_path(cuda120_spec)
     assert result.stem == "libbitsandbytes_cuda110"
@@ -131,5 +134,6 @@ def test_rocm_override(monkeypatch, rocm70_spec, caplog):
 def test_override_invalid_format(monkeypatch, cuda120_spec):
     """Override value must be digits only (e.g. '124'), not dotted or alphanumeric."""
     monkeypatch.setenv("BNB_CUDA_VERSION", "12.4")
-    with pytest.raises(RuntimeError, match="digits only"):
-        get_cuda_bnb_library_path(cuda120_spec)
+    with patch("torch.version.hip", None):
+        with pytest.raises(RuntimeError, match="digits only"):
+            get_cuda_bnb_library_path(cuda120_spec)
