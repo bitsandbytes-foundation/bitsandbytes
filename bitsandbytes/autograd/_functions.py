@@ -219,11 +219,11 @@ class MatMul8bitLt(torch.autograd.Function):
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
         if req_gradB:
-            Cgrad, _, _, SCgradt, _ = F.int8_double_quant(grad_output.to(torch.float16))
+            _, Cgradt, _, SCgradt, _ = F.int8_double_quant(grad_output.to(torch.float16))
 
             grad_B = torch.ops.bitsandbytes.int8_scaled_mm.default(
-                Cgrad.t().contiguous(),
-                CAt.t(),
+                Cgradt.t().contiguous(),
+                CAt.t().contiguous(),
                 SCgradt,
                 SCAt,
                 dtype=torch.float16,

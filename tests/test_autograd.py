@@ -17,6 +17,36 @@ TRANSPOSE_VALS = [(False, True), (False, False)]
 REQ_GRAD_NO_B_WEIGHT = [flags for flags in BOOLEAN_TRIPLES if not flags[1]]
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="int8_double_quant requires CUDA")
+@pytest.mark.parametrize("input_shape", [(128, 256), (2, 64, 256)])
+@pytest.mark.parametrize("threshold", [0.0, 6.0])
+@pytest.mark.parametrize("requires_input_grad", TRUE_FALSE)
+@pytest.mark.parametrize("use_module", TRUE_FALSE)
+def test_matmullt_weight_grad_column_scales(input_shape, threshold, requires_input_grad, use_module):
+    torch.manual_seed(0)
+    layer = bnb.nn.Linear8bitLt(256, 64, bias=False, has_fp16_weights=True, threshold=threshold).cuda().half()
+    inputs = torch.randn(input_shape, device="cuda", dtype=torch.float16, requires_grad=requires_input_grad)
+    if threshold > 0:
+        with torch.no_grad():
+            inputs[..., 0] = 8.0
+
+    # Distinct output-column scales expose pairing row-quantized gradients with column statistics.
+    grad_output = torch.randn((*input_shape[:-1], 64), device="cuda", dtype=torch.float16)
+    grad_output *= torch.logspace(-2, 1, 64, device="cuda", dtype=torch.float16)
+    expected = grad_output.reshape(-1, 64).float().t() @ inputs.detach().reshape(-1, 256).float()
+
+    if use_module:
+        output = layer(inputs)
+    else:
+        state = bnb.MatmulLtState()
+        state.threshold = threshold
+        output = bnb.matmul(inputs, layer.weight, state=state)
+    output.backward(grad_output)
+
+    relative_error = (layer.weight.grad.float() - expected).norm() / expected.norm()
+    assert relative_error < 0.02
+
+
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("dim1", [40], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [64, 0], ids=id_formatter("dim2"))
