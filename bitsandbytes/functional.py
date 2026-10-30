@@ -1049,6 +1049,21 @@ def dequantize_4bit(
     if quant_state.dtype not in (torch.bfloat16, torch.float16, torch.float32):
         raise ValueError(f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {quant_state.dtype}")
 
+    if quant_state.shape is not None:
+        n = prod(quant_state.shape)
+        packed_slots = A.numel() * A.element_size() * 2
+        if packed_slots < n:
+            raise ValueError(
+                f"Packed 4-bit tensor holds {packed_slots} values but quant_state.shape implies "
+                f"{n} {tuple(quant_state.shape)}; the quantization state is inconsistent with the packed data."
+            )
+        expected_absmax = -(n // -quant_state.blocksize)
+        if quant_state.absmax.numel() < expected_absmax:
+            raise ValueError(
+                f"absmax has {quant_state.absmax.numel()} entries but quant_state.shape implies "
+                f"{expected_absmax} blocks; the quantization state is inconsistent with the packed data."
+            )
+
     if quant_state.nested:
         absmax = dequantize_blockwise(quant_state.absmax, quant_state.state2)
         absmax += quant_state.offset
