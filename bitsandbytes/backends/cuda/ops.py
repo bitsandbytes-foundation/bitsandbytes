@@ -388,8 +388,9 @@ def _(
     A = A.contiguous()
     n = A.numel()
     blocks = -(n // -blocksize)
+    packed_bytes = -(n // -2)
     absmax = torch.empty((blocks,), device=A.device, dtype=torch.float32)
-    out = torch.empty(((n + 1) // (quant_storage.itemsize * 2), 1), device=A.device, dtype=quant_storage)
+    out = torch.empty((-(packed_bytes // -quant_storage.itemsize), 1), device=A.device, dtype=quant_storage)
 
     if A.dtype == torch.bfloat16:
         if quant_type == "fp4":
