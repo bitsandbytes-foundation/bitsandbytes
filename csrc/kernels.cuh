@@ -23,6 +23,14 @@ template <typename T, int BLOCK_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE
 __global__ void
     kDequantizeBlockwise(float* code, unsigned char* A, float* absmax, T* out, const int blocksize, const int n);
 
+#if BUILD_CUDA
+template <typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
+__global__ void kDequantizeBlockwiseNested(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, T* out,
+    const int blocksize, const int n
+);
+#endif
+
 template <typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 __global__ void kPreconditionOptimizer32bit2State(
     T* g, T* p, float* state1, float* state2, float* unorm, const float beta1, const float beta2, const float eps,

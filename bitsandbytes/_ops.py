@@ -212,6 +212,114 @@ def _(
     torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
 
 
+def _check_dequantize_4bit_nested(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    nested_blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+    out: Optional[torch.Tensor] = None,
+) -> None:
+    torch._check(blocksize in (32, 64, 128, 256, 512, 1024, 2048, 4096), lambda: f"invalid blocksize {blocksize}")
+    torch._check(nested_blocksize > 0, lambda: f"nested_blocksize must be positive, got {nested_blocksize}")
+    torch._check(quant_type in ("nf4", "fp4"), lambda: f"quant_type must be 'nf4' or 'fp4', got {quant_type!r}")
+    torch._check(
+        dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}",
+    )
+    torch._check(
+        absmax_8bit.device == A.device,
+        lambda: f"Expected absmax_8bit.device == {A.device}, got {absmax_8bit.device}",
+    )
+    torch._check(
+        nested_absmax.device == A.device,
+        lambda: f"Expected nested_absmax.device == {A.device}, got {nested_absmax.device}",
+    )
+    torch._check(
+        nested_code.device == A.device,
+        lambda: f"Expected nested_code.device == {A.device}, got {nested_code.device}",
+    )
+    torch._check(offset.device == A.device, lambda: f"Expected offset.device == {A.device}, got {offset.device}")
+    if out is not None:
+        torch._check(out.shape == tuple(shape), lambda: f"Expected out.shape == {shape}, got {out.shape}")
+        torch._check(out.device == A.device, lambda: f"Expected out.device == {A.device}, got {out.device}")
+        torch._check(out.dtype == dtype, lambda: f"Expected out.dtype == {dtype}, got {out.dtype}")
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_4bit_nested",
+    "(Tensor A, Tensor absmax_8bit, Tensor nested_absmax, Tensor nested_code, Tensor offset, int blocksize, int nested_blocksize, str quant_type, int[] shape, ScalarType dtype) -> Tensor",
+)
+
+
+@register_fake("bitsandbytes::dequantize_4bit_nested")
+def _(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    nested_blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    _check_dequantize_4bit_nested(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        nested_blocksize,
+        quant_type,
+        shape,
+        dtype,
+    )
+    return torch.empty(shape, dtype=dtype, device=A.device)
+
+
+torch.library.define(
+    "bitsandbytes::dequantize_4bit_nested.out",
+    "(Tensor A, Tensor absmax_8bit, Tensor nested_absmax, Tensor nested_code, Tensor offset, int blocksize, int nested_blocksize, str quant_type, int[] shape, ScalarType dtype, Tensor! out) -> ()",
+)
+
+
+@register_fake("bitsandbytes::dequantize_4bit_nested.out")
+def _(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    nested_blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    _check_dequantize_4bit_nested(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        nested_blocksize,
+        quant_type,
+        shape,
+        dtype,
+        out,
+    )
+
+
 torch.library.define(
     "bitsandbytes::quantize_4bit",
     "(Tensor A, int blocksize, str quant_type, ScalarType quant_storage) -> (Tensor, Tensor)",

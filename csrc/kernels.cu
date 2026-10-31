@@ -528,6 +528,61 @@ __global__ void
     }
 }
 
+#if BUILD_CUDA
+template <typename T, int TILE_SIZE, int THREADS, int NUM_PER_TH, int DATA_TYPE>
+__global__ void kDequantizeBlockwiseNested(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, T* out,
+    const int blocksize, const int n
+) {
+    const int n_load = gridDim.x * TILE_SIZE;
+    const int base_idx = blockIdx.x * TILE_SIZE;
+
+    T vals[NUM_PER_TH * 2];
+    unsigned char qvals[NUM_PER_TH];
+
+    typedef bnb_cub::BlockLoad<unsigned char, THREADS, NUM_PER_TH, bnb_cub::BLOCK_LOAD_WARP_TRANSPOSE> LoadChar;
+    typedef bnb_cub::BlockStore<T, THREADS, NUM_PER_TH * 2, bnb_cub::BLOCK_STORE_WARP_TRANSPOSE> StoreT;
+
+    __shared__ typename LoadChar::TempStorage loadchar;
+    __shared__ typename StoreT::TempStorage storet;
+
+    const int packed_blocksize = blocksize / 2;
+    const int block_shift = 31 - __clz(packed_blocksize);
+    const float nested_offset = __ldg(offset);
+
+    for (int i = base_idx; i < n_load; i += gridDim.x * TILE_SIZE) {
+        const int valid_items_load = min(TILE_SIZE, static_cast<int>((static_cast<int64_t>(n) + 1) / 2) - i);
+        const int valid_items_store = min(TILE_SIZE * 2, n - i * 2);
+        const int packed_n = static_cast<int>((static_cast<int64_t>(n) + 1) / 2);
+        const int packed_index = min(i + threadIdx.x * NUM_PER_TH, packed_n - 1);
+        const int outer_block = packed_index >> block_shift;
+        const unsigned char scale_code = __ldg(&absmax_8bit[outer_block]);
+        const float scale_product = __fmul_rn(__ldg(&nested_code[scale_code]), __ldg(&nested_absmax[outer_block >> 8]));
+        const float local_abs_max = __fadd_rn(scale_product, nested_offset);
+
+        __syncthreads();
+        LoadChar(loadchar).Load(&(A[i]), qvals, valid_items_load, 128);
+
+        if (DATA_TYPE == FP4) {
+#pragma unroll NUM_PER_TH
+            for (int j = 0; j < NUM_PER_TH; j++) {
+                vals[j * 2] = dDequantizeFP4Tree(qvals[j] >> 4) * local_abs_max;
+                vals[j * 2 + 1] = dDequantizeFP4Tree(qvals[j] & 0x0F) * local_abs_max;
+            }
+        } else {
+#pragma unroll NUM_PER_TH
+            for (int j = 0; j < NUM_PER_TH; j++) {
+                vals[j * 2] = dDequantizeNF4(qvals[j] >> 4) * local_abs_max;
+                vals[j * 2 + 1] = dDequantizeNF4(qvals[j] & 0x0F) * local_abs_max;
+            }
+        }
+
+        __syncthreads();
+        StoreT(storet).Store(&(out[i * 2]), vals, valid_items_store);
+    }
+}
+#endif
+
 template <typename T, int OPTIMIZER, int BLOCK_SIZE, int NUM_VALS>
 __launch_bounds__(BLOCK_SIZE / NUM_VALS, 1) __global__ void kPreconditionOptimizer32bit2State(
     T* g, T* p, float* state1, float* state2, float* unorm, const float beta1, const float beta2, const float eps,
@@ -1826,6 +1881,33 @@ template __global__ void kDequantizeBlockwise<bnb_bfloat16, 512, 64, 8, General8
 template __global__ void kDequantizeBlockwise<bnb_bfloat16, 512, 64, 8, NF4>(
     float* code, unsigned char* A, float* absmax, bnb_bfloat16* out, const int blocksize, const int n
 );
+
+#if BUILD_CUDA
+template __global__ void kDequantizeBlockwiseNested<half, 512, 64, 8, FP4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, half* out,
+    const int blocksize, const int n
+);
+template __global__ void kDequantizeBlockwiseNested<half, 512, 64, 8, NF4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, half* out,
+    const int blocksize, const int n
+);
+template __global__ void kDequantizeBlockwiseNested<float, 512, 64, 8, FP4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, float* out,
+    const int blocksize, const int n
+);
+template __global__ void kDequantizeBlockwiseNested<float, 512, 64, 8, NF4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset, float* out,
+    const int blocksize, const int n
+);
+template __global__ void kDequantizeBlockwiseNested<bnb_bfloat16, 512, 64, 8, FP4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset,
+    bnb_bfloat16* out, const int blocksize, const int n
+);
+template __global__ void kDequantizeBlockwiseNested<bnb_bfloat16, 512, 64, 8, NF4>(
+    unsigned char* A, unsigned char* absmax_8bit, float* nested_absmax, float* nested_code, float* offset,
+    bnb_bfloat16* out, const int blocksize, const int n
+);
+#endif
 
 #define MAKE_OptimizerStatic8bit2StateBlockwise(oname, gtype, block_size, num_per_thread)                              \
     template __global__ void kOptimizerStatic8bit2StateBlockwise<gtype, oname, block_size, num_per_thread>(            \

@@ -9,7 +9,7 @@ import torch
 
 from bitsandbytes.functional import CUBLAS_Context, _cuda_device_of, get_ptr
 
-from ..._ops import register_kernel
+from ..._ops import _check_dequantize_4bit_nested, register_kernel
 from ...cextension import lib
 
 
@@ -26,6 +26,13 @@ _setup_ctypes(
     + [f"cdequantize_blockwise_{d}" for d in ("fp32", "bf16", "fp16")],
     [ct.c_void_p] * 4 + [ct.c_int32, ct.c_int32, ct.c_void_p],
 )
+
+if torch.version.hip is None:
+    # Nested 4-bit dequantize: (A, scale codes, nested absmax, nested code, offset, out, blocksize, numel, stream)
+    _setup_ctypes(
+        [f"cdequantize_blockwise_nested_{d}_{q}" for d in ("fp32", "bf16", "fp16") for q in ("nf4", "fp4")],
+        [ct.c_void_p] * 6 + [ct.c_int32, ct.c_int32, ct.c_void_p],
+    )
 
 # 4-bit GEMM: (A, B, absmax, absmax_8bit, absmax_code, absmax_offset, out, bias, M, N, K, blocksize, quant_type, stream)
 _setup_ctypes(
@@ -491,6 +498,179 @@ def _dequantize_4bit_impl(
         )
 
 
+def _dequantize_4bit_nested_supported(device_index: int) -> bool:
+    if torch.version.hip is not None:
+        return False
+    _, major, minor = _gpu_dispatch_props(device_index)
+    return (major, minor) == (10, 3)
+
+
+def _dequantize_4bit_nested_impl(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    quant_type: str,
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    _check_dequantize_4bit_nested(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        256,
+        quant_type,
+        out.shape,
+        dtype,
+        out,
+    )
+    A = A.contiguous()
+    offset_f32 = offset.to(dtype=torch.float32)
+
+    if dtype == torch.bfloat16:
+        dtype_name = "bf16"
+    elif dtype == torch.float16:
+        dtype_name = "fp16"
+    elif dtype == torch.float32:
+        dtype_name = "fp32"
+    else:
+        raise ValueError(f"Blockwise 4bit dequantization only supports 16/32-bit floats, but got {dtype}")
+
+    fn = getattr(lib, f"cdequantize_blockwise_nested_{dtype_name}_{quant_type}")
+    with _cuda_device_of(A):
+        fn(
+            A.data_ptr(),
+            absmax_8bit.data_ptr(),
+            nested_absmax.data_ptr(),
+            nested_code.data_ptr(),
+            offset_f32.data_ptr(),
+            out.data_ptr(),
+            blocksize,
+            out.numel(),
+            _get_raw_stream(A.device.index),
+        )
+
+
+def _dequantize_4bit_nested_dispatch(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    nested_blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    _check_dequantize_4bit_nested(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        nested_blocksize,
+        quant_type,
+        shape,
+        dtype,
+        out,
+    )
+    if nested_blocksize == 256 and _dequantize_4bit_nested_supported(A.device.index):
+        _dequantize_4bit_nested_impl(
+            A,
+            absmax_8bit,
+            nested_absmax,
+            nested_code,
+            offset,
+            blocksize,
+            quant_type,
+            dtype,
+            out,
+        )
+        return
+
+    absmax = torch.empty_like(absmax_8bit, dtype=torch.float32)
+    _dequantize_blockwise_impl(
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        nested_blocksize,
+        torch.float32,
+        out=absmax,
+    )
+    _dequantize_4bit_impl(A, absmax + offset, blocksize, quant_type, dtype, out=out)
+
+
+@register_kernel("bitsandbytes::dequantize_4bit_nested", "cuda")
+def _(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    nested_blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    out = torch.empty(shape, dtype=dtype, device=A.device)
+    _dequantize_4bit_nested_dispatch(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        nested_blocksize,
+        quant_type,
+        shape,
+        dtype,
+        out,
+    )
+    return out
+
+
+@register_kernel("bitsandbytes::dequantize_4bit_nested.out", "cuda")
+def _(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    nested_blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    if out.shape != tuple(shape):
+        raise ValueError(f"Expected out.shape == {shape}, got {out.shape}")
+    if out.dtype != dtype:
+        raise ValueError(f"Expected out.dtype == {dtype}, got {out.dtype}")
+    _dequantize_4bit_nested_dispatch(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        nested_blocksize,
+        quant_type,
+        shape,
+        dtype,
+        out,
+    )
+
+
 @register_kernel("bitsandbytes::gemv_4bit", "cuda")
 def _(
     A: torch.Tensor, B: torch.Tensor, shapeB: Sequence[int], absmax: torch.Tensor, code: torch.Tensor, blocksize: int
@@ -907,12 +1087,25 @@ def _dequant_linear_fallback(
     """Unfused fallback shared by CUDA and ROCm: reconstruct the (optionally nested)
     absmax, dequantize the 4-bit weight via the backend dequant impls (reusing
     preallocated buffers), then F.linear."""
-    if absmax_8bit is not None:
-        absmax_dq = torch.empty_like(absmax_8bit, dtype=torch.float32)
-        _dequantize_blockwise_impl(absmax_8bit, absmax, absmax_code, 256, torch.float32, out=absmax_dq)
-        absmax = absmax_dq + absmax_offset
     B_dq = torch.empty(shapeB, dtype=A.dtype, device=A.device)
-    _dequantize_4bit_impl(B, absmax, blocksize, quant_type, A.dtype, out=B_dq)
+    if absmax_8bit is not None and _dequantize_4bit_nested_supported(A.device.index):
+        _dequantize_4bit_nested_impl(
+            B,
+            absmax_8bit,
+            absmax,
+            absmax_code,
+            absmax_offset,
+            blocksize,
+            quant_type,
+            A.dtype,
+            B_dq,
+        )
+    else:
+        if absmax_8bit is not None:
+            absmax_dq = torch.empty_like(absmax_8bit, dtype=torch.float32)
+            _dequantize_blockwise_impl(absmax_8bit, absmax, absmax_code, 256, torch.float32, out=absmax_dq)
+            absmax = absmax_dq + absmax_offset
+        _dequantize_4bit_impl(B, absmax, blocksize, quant_type, A.dtype, out=B_dq)
     return torch.nn.functional.linear(A, B_dq, bias)
 
 
