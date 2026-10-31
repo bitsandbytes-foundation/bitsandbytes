@@ -219,6 +219,82 @@ class Test4bitBlockwiseQuantOps:
             (A, absmax, blocksize, quant_type, shape, dtype),
         )
 
+    @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize(
+        ("quant_type", "numel", "blocksize"),
+        [
+            ("general8", 512, 256),
+            ("general8", 513, 256),
+            ("nf4", 1024, 64),
+            ("nf4", 1025, 64),
+            ("fp4", 1024, 64),
+            ("fp4", 1025, 64),
+        ],
+    )
+    def test_dequantize_blockwise_repeated_full_and_tail(self, dtype, quant_type, numel, blocksize):
+        source = torch.randn(numel, device="cuda", dtype=dtype)
+        if quant_type == "general8":
+            quantized, state = bitsandbytes.functional.quantize_blockwise(source, blocksize=blocksize)
+
+            def dequantize(out=None):
+                if out is None:
+                    return torch.ops.bitsandbytes.dequantize_blockwise.default(
+                        quantized,
+                        state.absmax,
+                        state.code,
+                        state.blocksize,
+                        state.dtype,
+                    )
+                torch.ops.bitsandbytes.dequantize_blockwise.out(
+                    quantized,
+                    state.absmax,
+                    state.code,
+                    state.blocksize,
+                    state.dtype,
+                    out=out,
+                )
+                return out
+
+        else:
+            quantized, state = bitsandbytes.functional.quantize_4bit(
+                source,
+                blocksize=blocksize,
+                quant_type=quant_type,
+            )
+
+            def dequantize(out=None):
+                if out is None:
+                    return torch.ops.bitsandbytes.dequantize_4bit.default(
+                        quantized,
+                        state.absmax,
+                        state.blocksize,
+                        state.quant_type,
+                        state.shape,
+                        state.dtype,
+                    )
+                torch.ops.bitsandbytes.dequantize_4bit.out(
+                    quantized,
+                    state.absmax,
+                    state.blocksize,
+                    state.quant_type,
+                    state.shape,
+                    state.dtype,
+                    out=out,
+                )
+                return out
+
+        quantized_before = quantized.clone()
+        absmax_before = state.absmax.clone()
+        expected = dequantize()
+        out = torch.empty_like(expected)
+        for _ in range(5):
+            assert torch.equal(dequantize(), expected)
+            assert torch.equal(dequantize(out), expected)
+
+        assert torch.equal(quantized, quantized_before)
+        assert torch.equal(state.absmax, absmax_before)
+
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
