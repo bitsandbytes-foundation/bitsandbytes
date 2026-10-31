@@ -50,7 +50,7 @@ def _(
     if col_stats.dtype != torch.float32:
         raise ValueError(f"col_stats must be float32, got {col_stats.dtype}")
 
-    A_calc = A.view(-1, A.shape[-1])
+    A_calc = A.reshape(-1, A.shape[-1])
     row_stats = row_stats.reshape(-1).unsqueeze(-1)
     col_stats = col_stats.reshape(-1).unsqueeze(0)
 
@@ -58,7 +58,8 @@ def _(
     if bias is not None:
         out += bias
 
-    return out.to(dtype or torch.float16)
+    # The op contract preserves the shape of A, which may have more than 2 dimensions.
+    return out.to(dtype or torch.float16).reshape(A.shape)
 
 
 @register_kernel("bitsandbytes::int8_mixed_scaled_mm", "default")
@@ -141,30 +142,32 @@ def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: Optional[tor
 
 @register_kernel("bitsandbytes::int8_vectorwise_quant", "default")
 def _(A: torch.Tensor, threshold=0.0):
-    rows = A.numel() // A.shape[-1]
+    # Rows are the leading dimensions flattened together; A may have more than 2 dimensions.
+    A_calc = A.reshape(-1, A.shape[-1])
+    rows = A_calc.shape[0]
     outlier_cols = None
 
     outlier_restore = None
 
     if threshold > 0.0:
-        outliers = A.abs() >= threshold
+        outliers = A_calc.abs() >= threshold
 
         if outliers.any():
             # Determine which columns contain outliers, and zero out the
             # outliers ahead of quantization. We need to keep a backup of these
             # outliers to restore them after quantization.
             outlier_cols = torch.argwhere(outliers.any(dim=0)).view(-1)
-            outlier_restore = A[outliers].clone()
-            A[outliers] = 0
+            outlier_restore = A_calc[outliers].clone()
+            A_calc[outliers] = 0
         else:
             # Needed for torch.compile support.
             outlier_cols = torch.empty(0, device=A.device, dtype=torch.int64)
 
     # Get absmax for each row.
-    row_stats = torch.max(A.abs(), dim=1).values.float()
+    row_stats = torch.max(A_calc.abs(), dim=-1).values.float()
 
     # Quantize row-wise to int8.
-    out_row = torch.round(A * (127.0 / row_stats.unsqueeze(-1))).to(torch.int8)
+    out_row = torch.round(A_calc * (127.0 / row_stats.unsqueeze(-1))).to(torch.int8)
 
     # Zero out values from outlier columns across all rows.
     if rows > 1 and outlier_cols is not None:
@@ -172,9 +175,9 @@ def _(A: torch.Tensor, threshold=0.0):
 
     # Restore outliers.
     if outlier_restore is not None:
-        A[outliers] = outlier_restore
+        A_calc[outliers] = outlier_restore
 
-    return out_row, row_stats, outlier_cols
+    return out_row.reshape(A.shape), row_stats, outlier_cols
 
 
 @register_kernel("bitsandbytes::quantize_blockwise", "default")
