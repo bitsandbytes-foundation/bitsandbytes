@@ -245,7 +245,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             from kernels import get_kernel
 
             gemm_4bit_forward_kernel = get_kernel(
-                "kernels-community/quantization-bitsandbytes", version=1
+                "kernels-community/quantization-bitsandbytes", version=1, backend="cpu"
             ).gemm_4bit_forward
         except Exception as exc:  # pragma: no cover - best effort fallback
             gemm_4bit_forward_kernel = None
