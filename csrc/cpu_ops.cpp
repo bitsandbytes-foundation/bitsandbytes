@@ -360,7 +360,7 @@ void dequantizeBlockwise4bitCpu(
         long long absmax_dim_1 = dim_1 / blocksize;
         using Tcomp = float;
         constexpr auto VEC_LEN = sizeof(__m512i) / sizeof(Tcomp); // 16
-        if (dim_1 % VEC_LEN == 0 && blocksize >= VEC_LEN) {
+        if (dim_1 % VEC_LEN == 0 && blocksize >= VEC_LEN && dim_1 % blocksize == 0) {
             __m512 lut = DATA_TYPE == 1 ? set_fp4_lut() : set_nf4_lut();
             constexpr auto k_step = VEC_LEN / 2; // 8
             BNB_OMP_PARALLEL_FOR
