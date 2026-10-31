@@ -1,6 +1,7 @@
 import dataclasses
 from functools import lru_cache
 import logging
+import os
 import platform
 import re
 import subprocess
@@ -84,6 +85,19 @@ def get_rocm_gpu_arch() -> str:
     logger = logging.getLogger(__name__)
     try:
         if torch.version.hip:
+            override = os.environ.get("BNB_ROCM_ARCH")
+            if override:
+                # gcnArchName may include feature flags, e.g.
+                # "gfx90a:sramecc+:xnack-". Only the architecture is used here.
+                arch = override.strip().lower().split(":", 1)[0]
+                if re.fullmatch(r"gfx[a-z\d]+", arch):
+                    return arch
+                logger.warning(
+                    "Ignoring invalid BNB_ROCM_ARCH=%r; expected a value such as 'gfx90a'.",
+                    override,
+                )
+                return "unknown"
+
             # On Windows, use hipinfo.exe; on Linux, use rocminfo
             if platform.system() == "Windows":
                 cmd = ["hipinfo.exe"]
