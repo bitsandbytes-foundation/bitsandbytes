@@ -690,11 +690,11 @@ __launch_bounds__(TH, 1) __global__ void kOptimizer32bit2State(
                 // nu update: nu = beta2 * nu + (1-beta2) * g^2
                 s2_vals[j] = (s2_vals[j] * beta2) + ((1.0f - beta2) * (float)g_vals[j] * (float)g_vals[j]);
 
-                p_vals[j] = (float)p_vals[j] - lr * (((s1_vals[j] / correction1) + (alpha * s3_vals[j])) /
-                                                     ((sqrtf(s2_vals[j]) / correction2) + eps));
-
                 if (weight_decay > 0.0f)
                     p_vals[j] = ((float)p_vals[j]) * (1.0f - (lr * weight_decay));
+
+                p_vals[j] = (float)p_vals[j] - lr * (((s1_vals[j] / correction1) + (alpha * s3_vals[j])) /
+                                                     ((sqrtf(s2_vals[j]) / correction2) + eps));
 
                 break;
             case ADAM:
@@ -702,11 +702,12 @@ __launch_bounds__(TH, 1) __global__ void kOptimizer32bit2State(
                 if (!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f))) {
                     s1_vals[j] = s1_vals[j] * beta1 + ((1.0f - beta1) * ((float)g_vals[j]));
                     s2_vals[j] = s2_vals[j] * beta2 + ((1.0f - beta2) * (((float)g_vals[j]) * ((float)g_vals[j])));
-                    p_vals[j] = ((float)p_vals[j]) +
-                                (update_scale * step_size * (s1_vals[j] / (sqrtf(s2_vals[j]) + (eps * correction2))));
 
                     if (weight_decay > 0.0f)
                         p_vals[j] = ((float)p_vals[j]) * (1.0f - (lr * weight_decay));
+
+                    p_vals[j] = ((float)p_vals[j]) +
+                                (update_scale * step_size * (s1_vals[j] / (sqrtf(s2_vals[j]) + (eps * correction2))));
                 }
                 break;
             }
@@ -1090,6 +1091,9 @@ __launch_bounds__(256, 3) __global__ void kOptimizerStatic8bit2StateBlockwise(
         for (unsigned int j = 0; j < N_PER_TH; j++) {
             // if(!skip_zeros || (skip_zeros && ((float)g_vals[j] != 0.0f)))
             if (!isnan((float)g_vals[j]) && !isinf((float)g_vals[j])) {
+                if (weight_decay > 0.0f)
+                    p_vals[j] = ((float)p_vals[j]) * (1.0f - (lr * weight_decay));
+
                 if (OPTIMIZER == ADEMAMIX) {
                     p_vals[j] =
                         T((float)p_vals[j] - lr * (((s1_vals[j] / correction1) + (alpha * s3_vals[j])) /
@@ -1099,9 +1103,6 @@ __launch_bounds__(256, 3) __global__ void kOptimizerStatic8bit2StateBlockwise(
                         (T)(((float)p_vals[j]) +
                             ((step_size * (__fdividef(s1_vals[j], (sqrtf(s2_vals[j]) + (correction2 * eps)))))));
                 }
-
-                if (weight_decay > 0.0f)
-                    p_vals[j] = ((float)p_vals[j]) * (1.0f - (lr * weight_decay));
             }
         }
 

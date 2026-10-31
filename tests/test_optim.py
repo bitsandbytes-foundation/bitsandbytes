@@ -292,6 +292,107 @@ def test_lion32bit_weight_decay(dim1, dim2, gtype, device):
             p2.copy_(p1.data)
 
 
+# Decoupled weight decay multiplies the *previous* parameter and leaves the
+# gradient-based update unscaled: p_new = p_old*(1 - lr*wd) + step_size*update.
+# See Loshchilov & Hutter, arXiv:1711.05101 Algorithm 2 for AdamW and
+# Pagliardini et al., arXiv:2409.03137 for AdEMAMix; torch.optim.AdamW does the same.
+str2optimizers_weight_decay = {
+    "adamw": (torch.optim.AdamW, bnb.optim.AdamW),
+    "ademamix": (bnb.optim.ademamix._ReferenceAdEMAMix, bnb.optim.AdEMAMix),
+}
+
+str2optimizers_weight_decay_8bit = {
+    "adamw8bit_blockwise": bnb.optim.AdamW8bit,
+    "ademamix8bit_blockwise": bnb.optim.AdEMAMix8bit,
+}
+
+
+@pytest.mark.parametrize("optim_name", list(str2optimizers_weight_decay), ids=id_formatter("opt"))
+@pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [32, 1024], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("device", get_available_devices(), ids=id_formatter("device"))
+def test_optimizer32bit_weight_decay(dim1, dim2, optim_name, device):
+    """AdamW/AdEMAMix must apply decoupled weight decay to the previous parameter, not to
+    the parameter after the update has been added.
+
+    The two orderings differ by lr*wd*|update| per step, so the separation grows with
+    lr*lr*wd while the kernel's own arithmetic error only grows with lr. test_optimizer32bit
+    runs these optimizers at the default weight_decay of 0, and at the lr=1e-3, wd=0.01 an
+    Adam user would typically pick the orderings stay 1.7e-7 apart, inside its 1e-6
+    tolerance. At lr=0.1, wd=0.1 they are ~1e-3 apart while agreement with the reference
+    stays at 3.9e-5 on CUDA, which is the gap this tolerance sits in.
+
+    fp32 only: the ordering is a property of the float math inside the kernel and does not
+    depend on the parameter storage dtype, and the 16-bit variants of test_optimizer32bit
+    resynchronise the parameters after every step, so at most one step of divergence is
+    ever visible and it stays inside the looser 16-bit tolerances.
+    """
+    lr, weight_decay = 0.1, 0.1
+
+    p1 = torch.randn(dim1, dim2, device=device) * 0.1
+    p2 = p1.clone()
+
+    ref_cls, bnb_cls = str2optimizers_weight_decay[optim_name]
+    torch_optimizer = ref_cls([p1], lr=lr, weight_decay=weight_decay)
+    bnb_optimizer = bnb_cls([p2], lr=lr, weight_decay=weight_decay)
+
+    for _ in range(k):
+        g = torch.randn(dim1, dim2, device=device) * 0.01
+        p1.grad = g.clone()
+        p2.grad = g.clone()
+
+        bnb_optimizer.step()
+        torch_optimizer.step()
+
+        assert_most_approx_close(p1, p2, atol=1e-4, rtol=1e-3, max_error_count=0)
+
+
+@pytest.mark.parametrize("optim_name", list(str2optimizers_weight_decay_8bit), ids=id_formatter("opt"))
+@pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [32, 1024], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("device", get_available_devices(), ids=id_formatter("device"))
+def test_optimizer8bit_weight_decay(dim1, dim2, optim_name, device):
+    """Same decoupled weight decay requirement for the 8-bit blockwise kernels.
+
+    Comparing a full run against a 32-bit reference cannot see this: the state
+    quantization error is ~6.6e-4 per step while the two decay orderings differ by
+    ~1.6e-6. The first step is exempt, because the optimizer state is still zero and
+    therefore quantizes exactly, so one step from a fresh optimizer has a closed form:
+
+        m = (1-b1)g, v = (1-b2)g^2  =>  update = -lr*g/(|g| + eps)
+
+    and AdEMAMix also mixes in alpha*(1-b3)*g. Decoupled decay then gives
+    p1 = p0*(1 - lr*wd) + update, while applying decay afterwards scales the update
+    term by an extra (1 - lr*wd), which at these hyperparameters is 1.0e-3 away.
+
+    The tolerance is set above the 3.0e-6 the CUDA kernels leave against the closed form,
+    which comes from their fast intrinsics (__powf, __fdividef) rather than from the decay.
+    """
+    if device == "mps":
+        pytest.skip("8-bit optimizers are not implemented for MPS")
+
+    lr, weight_decay, eps = 0.1, 0.1, 1e-8
+
+    p0 = torch.randn(dim1, dim2, device=device) * 0.1
+    p = p0.clone()
+    g = torch.randn(dim1, dim2, device=device) * 0.01
+
+    bnb_optimizer = str2optimizers_weight_decay_8bit[optim_name]([p], lr=lr, weight_decay=weight_decay, eps=eps)
+    p.grad = g.clone()
+    bnb_optimizer.step()
+
+    update = -lr * g / (g.abs() + eps)
+    if optim_name.startswith("ademamix"):
+        group = bnb_optimizer.param_groups[0]
+        alpha = group["alpha"]
+        beta3 = group["betas"][2]
+        update = update * (1.0 + alpha * (1.0 - beta3))
+
+    expected = p0 * (1.0 - lr * weight_decay) + update
+
+    torch.testing.assert_close(p, expected, atol=1e-5, rtol=1e-4)
+
+
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=describe_dtype)
