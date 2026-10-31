@@ -60,7 +60,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Define included source files
-set(CPP_FILES csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
+set(CPP_FILES csrc/cpu_ops.cpp csrc/cpu_ops_avx2.cpp csrc/pythonInterface.cpp)
 set(GPU_FILES csrc/ops.cu csrc/kernels.cu)
 set(XPU_FILES csrc/xpu_ops.cpp csrc/xpu_kernels.cpp)
 # C++ sources are always included
@@ -388,9 +388,20 @@ if (BUILD_CPU)
                     -mavx512dq
                     -mavx512vl
                 )
+                # cpu_ops_avx2.cpp holds the kernels for CPUs without AVX-512. Compile it
+                # without the AVX-512 flags so the compiler cannot emit EVEX-encoded
+                # instructions that would SIGILL on those CPUs. Source-level options are
+                # appended after the target options above, so these take precedence.
+                set_source_files_properties(csrc/cpu_ops_avx2.cpp PROPERTIES
+                    COMPILE_OPTIONS "-mno-avx512f;-mno-avx512bw;-mno-avx512dq;-mno-avx512vl"
+                )
             endif()
             if (HAS_AVX512BF16_FLAG)
                 target_compile_options(bitsandbytes PRIVATE -mavx512bf16)
+                get_source_file_property(_avx2_opts csrc/cpu_ops_avx2.cpp COMPILE_OPTIONS)
+                set_source_files_properties(csrc/cpu_ops_avx2.cpp PROPERTIES
+                    COMPILE_OPTIONS "${_avx2_opts};-mno-avx512bf16"
+                )
             endif()
             target_compile_options(
                 bitsandbytes PRIVATE

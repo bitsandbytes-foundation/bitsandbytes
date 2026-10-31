@@ -6,13 +6,6 @@
 #include <thread>
 #include <vector>
 
-#ifdef HAS_OPENMP
-#include <omp.h>
-#define BNB_OMP_PARALLEL_FOR _Pragma("omp parallel for")
-#else
-#define BNB_OMP_PARALLEL_FOR
-#endif
-
 namespace {
 
 constexpr int kCodebookSize = 256;
@@ -396,6 +389,15 @@ void dequantizeBlockwise4bitCpu(
         }
     }
 #endif
+
+#if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__)
+    // The vector loop assumes every block starts on a byte boundary.
+    if (has_avx2() && blocksize % 2 == 0) {
+        dequantize_4bit_avx2<T, DATA_TYPE>(A, absmax, out, blocksize, m * n);
+        return;
+    }
+#endif
+
     // Scalar fallback branch
     const float* lut = DATA_TYPE == 1 ? fp4_lut : nf4_lut;
     long long total = m * n;

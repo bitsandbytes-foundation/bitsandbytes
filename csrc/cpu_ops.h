@@ -17,6 +17,13 @@
 #include <immintrin.h>
 #endif
 
+#ifdef HAS_OPENMP
+#include <omp.h>
+#define BNB_OMP_PARALLEL_FOR _Pragma("omp parallel for")
+#else
+#define BNB_OMP_PARALLEL_FOR
+#endif
+
 // amx-bf16
 #define TILE_M 16
 #define TILE_N 16
@@ -369,6 +376,47 @@ static inline bool has_avx512bf16() {
 }
 #endif
 #endif
+#endif
+
+// Runtime check for the AVX2 dequantization path. The kernel also uses FMA-era
+// F16C conversions, so require the full AVX2 + FMA + F16C set that every AVX2
+// CPU since Haswell / Excavator provides.
+#if defined(__x86_64__) || defined(_M_X64)
+#ifdef _MSC_VER
+#include <intrin.h>
+
+static inline bool has_avx2() {
+    static const bool v = [] {
+        int info[4];
+        __cpuid(info, 0);
+        if (info[0] < 7)
+            return false;
+        __cpuid(info, 1);
+        const bool has_fma = (info[2] & (1 << 12)) != 0;     // ECX bit12 FMA
+        const bool has_osxsave = (info[2] & (1 << 27)) != 0; // ECX bit27 OSXSAVE
+        const bool has_f16c = (info[2] & (1 << 29)) != 0;    // ECX bit29 F16C
+        if (!has_fma || !has_osxsave || !has_f16c)
+            return false;
+        // The OS must have enabled XMM and YMM state saving (XCR0 bits 1 and 2).
+        if ((_xgetbv(0) & 0x6) != 0x6)
+            return false;
+        __cpuidex(info, 7, 0);
+        return (info[1] & (1 << 5)) != 0; // EBX bit5 AVX2
+    }();
+    return v;
+}
+#else
+static inline bool has_avx2() {
+    static const bool supported_avx2 =
+        __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma") && __builtin_cpu_supports("f16c");
+    return supported_avx2;
+}
+#endif
+
+// Defined in cpu_ops_avx2.cpp, which is compiled without AVX-512 flags.
+// Only call after checking has_avx2(). `total` is the number of 4-bit values.
+template <typename T, int DATA_TYPE>
+void dequantize_4bit_avx2(const unsigned char* A, const float* absmax, T* out, long long blocksize, long long total);
 #endif
 
 #if defined(__AVX512F__) && defined(__AVX512BF16__)
