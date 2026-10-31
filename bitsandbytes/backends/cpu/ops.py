@@ -245,12 +245,14 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             from kernels import get_kernel
 
             gemm_4bit_forward_kernel = get_kernel(
-                "kernels-community/quantization-bitsandbytes", version=1
+                "kernels-community/quantization-bitsandbytes",
+                version=1,
+                backend="cpu",
             ).gemm_4bit_forward
         except Exception as exc:  # pragma: no cover - best effort fallback
             gemm_4bit_forward_kernel = None
             logger.warning(
-                "Failed to load CPU gemm_4bit_forward from kernels-community: %s. Please make sure you already `pip install kernels` and the kernels >= 0.11.1",
+                "Failed to load CPU gemm_4bit_forward from kernels-community: %s. Please make sure you already `pip install kernels` and the kernels >= 0.13.0",
                 exc,
             )
 
