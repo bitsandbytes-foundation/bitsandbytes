@@ -108,7 +108,10 @@ class GlobalOptimManager:
                 if id(p) in self.pid2config:
                     self.pid2config[id(p)].update(key_value_dict)
                 else:
-                    self.pid2config[id(p)] = key_value_dict
+                    # Copy per parameter. Storing the same dict for several parameters means a
+                    # later single-parameter override lands on all of them, and storing a
+                    # caller-supplied `key_value_dict` by reference mutates their dict too.
+                    self.pid2config[id(p)] = dict(key_value_dict)
 
     def register_module_override(self, module, param_name, config):
         self.module_weight_config_triple.append((module, param_name, config))

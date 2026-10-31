@@ -369,6 +369,43 @@ def test_override_config_after_register(device):
     assert adam.state[p2]["state1"].dtype == torch.uint8
 
 
+def test_override_config_does_not_share_one_dict_across_parameters():
+    """A per-parameter override must not land on the other parameters of the same call.
+
+    Parameters that had no config yet were all assigned the same dict object, so a later
+    `override_config(p1, ...)` took the update branch and mutated the config every one of them
+    was pointing at.
+    """
+    mng = bnb.optim.GlobalOptimManager.get_instance()
+    mng.initialize()
+
+    p1 = torch.nn.Parameter(torch.zeros(2))
+    p2 = torch.nn.Parameter(torch.zeros(2))
+
+    mng.override_config([p1, p2], "optim_bits", 32)
+    assert mng.pid2config[id(p1)] is not mng.pid2config[id(p2)]
+
+    mng.override_config(p1, "lr", 0.01)
+
+    assert mng.pid2config[id(p1)] == {"optim_bits": 32, "lr": 0.01}
+    assert mng.pid2config[id(p2)] == {"optim_bits": 32}
+
+
+def test_override_config_does_not_mutate_the_callers_dict():
+    """A `key_value_dict` passed in by the caller is theirs, not the manager's to extend."""
+    mng = bnb.optim.GlobalOptimManager.get_instance()
+    mng.initialize()
+
+    p = torch.nn.Parameter(torch.zeros(2))
+    config = {"optim_bits": 8}
+
+    mng.override_config(p, key_value_dict=config)
+    mng.override_config(p, "lr", 0.5)
+
+    assert config == {"optim_bits": 8}
+    assert mng.pid2config[id(p)] == {"optim_bits": 8, "lr": 0.5}
+
+
 optimizer_names_8bit = [
     "adam8bit_blockwise",
     "lion8bit_blockwise",
