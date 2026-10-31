@@ -525,21 +525,33 @@ int cigemmlt_32(
     Context* context, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale, int lda,
     int ldb, int ldc, cudaStream_t stream
 ) {
-    return igemmlt_32((cublasLtHandle_t)context->m_handle, m, n, k, A, B, C, row_scale, lda, ldb, ldc, stream);
+#if BUILD_HIP && defined(NO_HIPBLASLT)
+    return igemmlt_32_gemmex_fallback(context, m, n, k, A, B, C, lda, ldb, ldc, stream);
+#else
+    return igemmlt_32(context->m_lt_handle, m, n, k, A, B, C, row_scale, lda, ldb, ldc, stream);
+#endif
 }
 
 int cigemmlt_8(
     Context* context, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale, int lda,
     int ldb, int ldc, cudaStream_t stream
 ) {
-    return igemmlt_8((cublasLtHandle_t)context->m_handle, m, n, k, A, B, C, row_scale, lda, ldb, ldc, stream);
+#if BUILD_HIP && defined(NO_HIPBLASLT)
+    return ERR_NOT_IMPLEMENTED;
+#else
+    return igemmlt_8(context->m_lt_handle, m, n, k, A, B, C, row_scale, lda, ldb, ldc, stream);
+#endif
 }
 
 int cigemmlt_8_rowscale(
     Context* context, int m, int n, int k, const int8_t* A, const int8_t* B, void* C, float* row_scale, int lda,
     int ldb, int ldc, cudaStream_t stream
 ) {
-    return igemmlt_8_rowscale((cublasLtHandle_t)context->m_handle, m, n, k, A, B, C, row_scale, lda, ldb, ldc, stream);
+#if BUILD_HIP && defined(NO_HIPBLASLT)
+    return ERR_NOT_IMPLEMENTED;
+#else
+    return igemmlt_8_rowscale(context->m_lt_handle, m, n, k, A, B, C, row_scale, lda, ldb, ldc, stream);
+#endif
 }
 
 void cdequant_mm_int32_fp16(
