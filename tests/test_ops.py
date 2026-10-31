@@ -375,6 +375,68 @@ class Test4bitBlockwiseQuantOps:
         torch.testing.assert_close(out, ref)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+@pytest.mark.skipif(torch.version.hip is not None, reason="This regression test uses torch.cuda._sleep")
+class TestBlockwiseQuantizeCurrentStream:
+    @staticmethod
+    def _quantize(kind, A):
+        if kind == "general8":
+            return bitsandbytes.functional.quantize_blockwise(A, blocksize=64)
+        if kind == "general8_nested":
+            return bitsandbytes.functional.quantize_blockwise(A, blocksize=64, nested=True)
+        if kind == "nf4":
+            return bitsandbytes.functional.quantize_4bit(A, blocksize=64, quant_type="nf4")
+        if kind == "nf4_nested":
+            return bitsandbytes.functional.quantize_4bit(A, blocksize=64, quant_type="nf4", compress_statistics=True)
+        raise ValueError(kind)
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
+    @pytest.mark.parametrize("kind", ["general8", "general8_nested", "nf4", "nf4_nested"])
+    def test_quantize_respects_current_stream(self, dtype, kind):
+        stale = torch.zeros(4096 + 17, device="cuda", dtype=dtype)
+        expected_input = torch.linspace(-3.0, 5.0, stale.numel(), device="cuda", dtype=torch.float32).to(dtype)
+        torch.cuda.synchronize()
+
+        expected_output, expected_state = self._quantize(kind, expected_input)
+        torch.cuda.synchronize()
+
+        blocker = torch.cuda.Stream()
+        stream = torch.cuda.Stream()
+        gate = torch.cuda.Event()
+        with torch.cuda.stream(blocker):
+            torch.cuda._sleep(200_000_000)
+            gate.record()
+
+        assert not gate.query()
+        with torch.cuda.stream(stream):
+            stream.wait_event(gate)
+            stale.copy_(expected_input)
+            output, state = self._quantize(kind, stale)
+
+        torch.cuda.synchronize()
+        assert torch.equal(stale, expected_input)
+        assert torch.equal(output, expected_output)
+        assert torch.equal(state.absmax, expected_state.absmax)
+        if expected_state.offset is None:
+            assert state.offset is None
+        else:
+            assert torch.equal(state.offset, expected_state.offset)
+        if expected_state.state2 is None:
+            assert state.state2 is None
+        else:
+            assert torch.equal(state.state2.absmax, expected_state.state2.absmax)
+
+    def test_quantize_stream_symbols_preserve_legacy_abi(self):
+        for dtype in ("fp16", "bf16", "fp32"):
+            for suffix in ("", "_fp4", "_nf4"):
+                legacy_name = f"cquantize_blockwise_{dtype}{suffix}"
+                stream_name = f"{legacy_name}_with_stream"
+                getattr(bitsandbytes.cextension.lib._lib, legacy_name)
+                getattr(bitsandbytes.cextension.lib._lib, stream_name)
+                assert len(getattr(bitsandbytes.cextension.lib, legacy_name).argtypes) == 6
+                assert len(getattr(bitsandbytes.cextension.lib, stream_name).argtypes) == 7
+
+
 class TestNonContiguousInputs:
     """Regression tests for #1342 and #1690: quantization must handle non-contiguous tensors correctly."""
 
