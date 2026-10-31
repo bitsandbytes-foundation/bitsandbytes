@@ -332,7 +332,8 @@ class Optimizer8bit(torch.optim.Optimizer):
 
                 self.prefetch_state(p)
                 self.update_step(group, p, gindex, pindex)
-                sync_gpu(p)
+                if self.is_paged or p.device.type != "cuda" or torch.version.hip is not None:
+                    sync_gpu(p)
         if self.is_paged and p is not None:
             # all paged operations are asynchronous, we need
             # to sync to make sure all tensors are in the right state
