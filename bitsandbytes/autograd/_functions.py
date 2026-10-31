@@ -124,20 +124,16 @@ class MatMul8bitLt(torch.autograd.Function):
 
         input_shape = A.shape
 
-        # Cast A to fp16
-        if A.dtype != torch.float16 and not _is_compiling():
-            logger.warning("MatMul8bitLt: inputs will be cast from %s to float16 during quantization", A.dtype)
-
         if len(A.shape) == 3:
             A = A.reshape(-1, A.shape[-1])
 
         # 1. Quantize A. Note that as a side-effect, outliers are suppressed in CA/CAt.
         if ctx.needs_input_grad[1]:
             # Slower path
-            CA, CAt, SCA, SCAt, outlier_cols = F.int8_double_quant(A.to(torch.float16), threshold=state.threshold)
+            CA, CAt, SCA, SCAt, outlier_cols = F.int8_double_quant(A, threshold=state.threshold)
         else:
             # Fast path
-            CA, SCA, outlier_cols = F.int8_vectorwise_quant(A.to(torch.float16), threshold=state.threshold)
+            CA, SCA, outlier_cols = F.int8_vectorwise_quant(A, threshold=state.threshold)
             CAt = SCAt = None
 
         has_grad = False
@@ -152,7 +148,7 @@ class MatMul8bitLt(torch.autograd.Function):
                 state.reset_grads()
 
                 # 2. Quantize B
-                state.CB, state.SCB, _ = F.int8_vectorwise_quant(B.to(torch.float16))
+                state.CB, state.SCB, _ = F.int8_vectorwise_quant(B)
 
         # Handle sparse decomposition
         if state.threshold > 0.0:
@@ -258,7 +254,7 @@ class MatMul8bitFp(torch.autograd.Function):
 
             if (state.is_training and not has_grad) or state.CB is None or state.SCB is None:
                 state.reset_grads()
-                state.CB, state.SCB, _ = F.int8_vectorwise_quant(B.to(torch.float16))
+                state.CB, state.SCB, _ = F.int8_vectorwise_quant(B)
                 B = state.CB
 
         CB = state.CB.data.to(A.dtype).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))

@@ -1331,40 +1331,35 @@ __launch_bounds__(256, 3) __global__ void kOptimizerStatic8bit1StateBlockwise(
 template <typename T, int THREADS, int SPARSE_DECOMP>
 __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     void kInt8VectorQuant(T* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols) {
-
-    using BlockReduceT = bnb_cub::BlockReduce<T, THREADS>;
-
     // One block per row.
     // Threads load column values in a striped arrangement.
     // e.g. t0 reads row[0], row[0+nthreads], ..
     // and  t1 reads row[1], row[1+nthreads], ..
     // Each thread will determine its local absmax.
     // We then do a blockwise reduction to determine the row's absmax.
-
+    using BlockReduceT = bnb_cub::BlockReduce<float, THREADS>;
     __shared__ typename BlockReduceT::TempStorage temp_storage;
-    __shared__ T smem_row_absmax;
+    __shared__ float smem_row_absmax;
 
     const int row_id = blockIdx.x;
     const T* row_data = A + (row_id * cols);
 
     // Threads will read the row values in a striped access pattern and find a local absmax.
-    T row_local_absmax = -FLT_MIN;
+    float row_local_absmax = -FLT_MIN;
     for (int i = threadIdx.x; i < cols; i += THREADS) {
-        const T absval = fabsf(__ldcs(&(row_data[i])));
-
+        const float absval = fabsf((float)__ldcs(&(row_data[i])));
         // For sparse decomposition, values outside of the threshold are not to be
         // included when calculating the row's absmax.
         if constexpr (SPARSE_DECOMP) {
-            row_local_absmax = fmaxf(row_local_absmax, absval < T(threshold) ? absval : row_local_absmax);
+            row_local_absmax = fmaxf(row_local_absmax, absval < threshold ? absval : row_local_absmax);
         } else {
             row_local_absmax = fmaxf(row_local_absmax, absval);
         }
     }
 
     // Reduce thread-local absmax across the block.
-    const T row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, BNB_MAX_OP, cols);
+    const float row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, BNB_MAX_OP, cols);
     if (threadIdx.x == 0) {
-        // Save our block's absmax to shared memory for the quantization step.
         rowStats[row_id] = smem_row_absmax = row_absmax;
     }
     __syncthreads();
@@ -1372,12 +1367,11 @@ __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     // Quantize row-wise.
     const float scale = __fdividef(127.0f, smem_row_absmax);
     for (int i = threadIdx.x; i < cols; i += THREADS) {
-        float val = row_data[i];
-
+        float val = (float)row_data[i];
         if constexpr (SPARSE_DECOMP) {
             // For sparse decomposition, we do not want to quantize the outliers.
             // Instead they're zeroed out.
-            out[row_id * cols + i] = fabs(val) < threshold ? __float2int_rn(val * scale) : 0;
+            out[row_id * cols + i] = fabsf(val) < threshold ? __float2int_rn(val * scale) : 0;
         } else {
             out[row_id * cols + i] = __float2int_rn(val * scale);
         }
@@ -1390,13 +1384,18 @@ template __global__ void kInt8VectorQuant<half, 1024, 0>(
 template __global__ void kInt8VectorQuant<half, 1024, 1>(
     half* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols
 );
-
+template __global__ void kInt8VectorQuant<bnb_bfloat16, 1024, 0>(
+    bnb_bfloat16* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols
+);
+template __global__ void kInt8VectorQuant<bnb_bfloat16, 1024, 1>(
+    bnb_bfloat16* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols
+);
 #define MM_DEQUANT_CONST 6.200012e-05f // 1.0f/(127.0f*127.0f)
 
-template <int ITEMS_PER_THREAD, int THREADS>
+template <typename T, int ITEMS_PER_THREAD, int THREADS>
 __global__ void kdequant_mm_int32_fp16(
-    int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats, half* out,
-    half* __restrict__ const bias, const int numRows, const int numCols, const int n
+    int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats, T* out,
+    T* __restrict__ const bias, const int numRows, const int numCols, const int n
 ) {
     const int n_out = numRows * numCols;
 
@@ -1404,7 +1403,7 @@ __global__ void kdequant_mm_int32_fp16(
     int thread_offset = threadIdx.x * ITEMS_PER_THREAD;
 
     int local_values[ITEMS_PER_THREAD];
-    half local_output[ITEMS_PER_THREAD];
+    T local_output[ITEMS_PER_THREAD];
 
     float local_rowStats[ITEMS_PER_THREAD];
     float local_colStats[ITEMS_PER_THREAD];
@@ -1423,7 +1422,7 @@ __global__ void kdequant_mm_int32_fp16(
 
         local_colStats[j] = col_idx >= numCols ? 0.0f : __ldg(&colStats[col_idx]);
         local_rowStats[j] = row_idx >= numRows ? 0.0f : __ldg(&rowStats[row_idx]);
-        local_biasValue[j] = ((bias == nullptr) || col_idx >= numCols) ? 0.0f : __half2float(bias[col_idx]);
+        local_biasValue[j] = ((bias == nullptr) || col_idx >= numCols) ? 0.0f : (float)(bias[col_idx]);
     }
 
     // Each block loads THREADS * ITEMS_PER_THREAD values from A
@@ -1433,9 +1432,8 @@ __global__ void kdequant_mm_int32_fp16(
 
 #pragma unroll ITEMS_PER_THREAD
     for (int j = 0; j < ITEMS_PER_THREAD; ++j) {
-        local_output[j] = __float2half(
-            fmaf(local_values[j] * local_rowStats[j] * local_colStats[j], MM_DEQUANT_CONST, local_biasValue[j])
-        );
+        local_output[j] =
+            (T)(fmaf(local_values[j] * local_rowStats[j] * local_colStats[j], MM_DEQUANT_CONST, local_biasValue[j]));
     }
 
 #pragma unroll ITEMS_PER_THREAD
@@ -1604,9 +1602,13 @@ template __global__ void kgemm_4bit_inference_naive<float, 128, 32>(
     float* out, int lda, int ldb, int ldc, int blocksize
 );
 
-template __global__ void kdequant_mm_int32_fp16<4, 512>(
+template __global__ void kdequant_mm_int32_fp16<half, 4, 512>(
     int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats, half* out,
     half* __restrict__ const bias, const int numRows, const int numCols, const int n
+);
+template __global__ void kdequant_mm_int32_fp16<bnb_bfloat16, 4, 512>(
+    int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats,
+    bnb_bfloat16* out, bnb_bfloat16* __restrict__ const bias, const int numRows, const int numCols, const int n
 );
 
 template __device__ unsigned char dQuantize<0>(float* smem_code, const float rand, float x);
