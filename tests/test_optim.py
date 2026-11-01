@@ -713,6 +713,32 @@ def test_lamb_max_unorm_changes_update():
     assert not torch.allclose(tight, loose)
 
 
+@pytest.mark.parametrize(
+    "optim_factory",
+    [
+        lambda p: bnb.optim.LAMB(p, lr=1e-2),
+        lambda p: bnb.optim.LAMB32bit(p, lr=1e-2),
+        lambda p: bnb.optim.LAMB8bit(p, lr=1e-2),
+        lambda p: bnb.optim.LARS(p, lr=1e-2, momentum=0.9),
+        lambda p: bnb.optim.PytorchLARS(p, lr=1e-2, momentum=0.9),
+    ],
+    ids=["LAMB", "LAMB32bit", "LAMB8bit", "LARS", "PytorchLARS"],
+)
+@pytest.mark.parametrize("device", get_available_devices(), ids=id_formatter("device"))
+def test_trust_ratio_updates_zero_norm_param(optim_factory, device):
+    # A parameter whose norm is 0 (zero-initialised bias, LoRA up-projection, zero-init residual gain)
+    # must still be updated. The trust-ratio clip max_unorm * ||p|| / ||u|| is 0 when ||p|| == 0, so
+    # such parameters used to stay exactly 0 forever. LAMB8bit is covered because tensors smaller than
+    # min_8bit_size take the 32-bit path.
+    torch.manual_seed(0)
+    p = torch.nn.Parameter(torch.zeros(64, device=device))
+    opt = optim_factory([p])
+    for _ in range(3):
+        p.grad = torch.randn(64, device=device)
+        opt.step()
+    assert p.detach().norm() > 0
+
+
 def test_lamb8bit_rejects_amsgrad():
     # amsgrad is unused by the base optimizer; mirror the Adam8bit/AdamW8bit guard (relates to #1261).
     p = [torch.nn.Parameter(torch.randn(8, 8))]

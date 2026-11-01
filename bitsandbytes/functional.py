@@ -1142,6 +1142,8 @@ def optimizer_update_32bit(
     param_norm = 0.0
     if max_unorm > 0.0:
         param_norm = torch.norm(p.data.float())
+        if param_norm == 0:  # zero-norm tensor: trust ratio 1, i.e. do not clip
+            max_unorm = 0.0
 
     is_on_gpu([g, p, state1, state2, unorm_vec])
     torch.ops.bitsandbytes.optimizer_update_32bit(
