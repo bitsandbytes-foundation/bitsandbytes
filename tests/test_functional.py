@@ -168,6 +168,18 @@ class Test8BitBlockwiseQuantizeFunctional:
             assert relerr < 0.012
         assert A2.dtype == dtype
 
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("signed", TRUE_FALSE, ids=id_formatter("signed"))
+    def test_blockwise_quantization_nearest_code(self, device, signed):
+        """Every element must get the nearest code; in particular 0.0 must round-trip to 0.0."""
+        code = F.create_dynamic_map(signed=signed).to(device)
+        # Each code value, plus a block maximum of 1.0 so absmax does not rescale them.
+        A = torch.cat([code, torch.ones(1, device=device)])
+        q, state = F.quantize_blockwise(A, code=code, blocksize=256)
+        expected = (A[:, None] - code[None, :]).abs().argmin(dim=1)
+        torch.testing.assert_close(q.long(), expected)
+        assert F.dequantize_blockwise(q, state)[(code == 0).nonzero()].eq(0).all()
+
     @pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
     @pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No accelerator device")
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)

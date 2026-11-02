@@ -571,6 +571,20 @@ static inline uint16_t norm_to_lut_index(float val) {
     return static_cast<uint16_t>((val + 1.0f) * 0.5f * (kLUTSize - 1) + 0.5f);
 }
 
+// The LUT has a fixed resolution of 2/65535 in normalized units, which is coarser than the spacing of codes
+// near zero in the dynamic map (and of any custom code). Use the LUT entry only as a starting point and walk to
+// the exact nearest code with the same midpoint rule as the reference (bucketize on midpoints: ties go to the
+// lower index). This usually takes zero or one step.
+static inline unsigned char lut_quantize(const unsigned char* lut, const float* code, float val) {
+    val = std::clamp(val, -1.0f, 1.0f);
+    int idx = lut[norm_to_lut_index(val)];
+    while (idx < kCodebookSize - 1 && val > 0.5f * (code[idx] + code[idx + 1]))
+        ++idx;
+    while (idx > 0 && val <= 0.5f * (code[idx - 1] + code[idx]))
+        --idx;
+    return static_cast<unsigned char>(idx);
+}
+
 template <typename T>
 void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* out, long long blocksize, long long n) {
     if (blocksize <= 0 || n <= 0)
@@ -630,13 +644,12 @@ void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* ou
                 else
                     v = neon_fp16x4_to_f32(A + block_start + i);
                 v = vmulq_f32(v, vinv);
-                uint16x4_t indices = neon_norm_to_lut_index_x4(v);
-                uint16_t idx_arr[4];
-                vst1_u16(idx_arr, indices);
-                out[block_start + i] = lut[idx_arr[0]];
-                out[block_start + i + 1] = lut[idx_arr[1]];
-                out[block_start + i + 2] = lut[idx_arr[2]];
-                out[block_start + i + 3] = lut[idx_arr[3]];
+                float v_arr[4];
+                vst1q_f32(v_arr, v);
+                out[block_start + i] = lut_quantize(lut, code, v_arr[0]);
+                out[block_start + i + 1] = lut_quantize(lut, code, v_arr[1]);
+                out[block_start + i + 2] = lut_quantize(lut, code, v_arr[2]);
+                out[block_start + i + 3] = lut_quantize(lut, code, v_arr[3]);
             }
             for (; i < block_len; ++i) {
                 float val;
@@ -646,7 +659,7 @@ void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* ou
                     val = bf16_to_float(A[block_start + i].v);
                 else
                     val = fp16_to_float(A[block_start + i].v);
-                out[block_start + i] = lut[norm_to_lut_index(val * inv_absmax)];
+                out[block_start + i] = lut_quantize(lut, code, val * inv_absmax);
             }
         }
 #else
@@ -658,7 +671,7 @@ void quantize_cpu_impl(float* code, const T* A, float* absmax, unsigned char* ou
                 val = bf16_to_float(A[i].v);
             else
                 val = fp16_to_float(A[i].v);
-            out[i] = lut[norm_to_lut_index(val * inv_absmax)];
+            out[i] = lut_quantize(lut, code, val * inv_absmax);
         }
 #endif
     }
