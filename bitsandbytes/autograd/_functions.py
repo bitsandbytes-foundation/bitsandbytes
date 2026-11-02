@@ -98,6 +98,11 @@ class MatmulLtState:
         self.CBt = None
 
 
+def _to_16bit(t: torch.Tensor) -> torch.Tensor:
+    """Pass fp16/bf16 tensors through unchanged; cast anything else to fp16 for the int8 quantization kernels."""
+    return t if t.dtype in (torch.float16, torch.bfloat16) else t.to(torch.float16)
+
+
 class MatMul8bitLt(torch.autograd.Function):
     @staticmethod
     def forward(
@@ -124,16 +129,20 @@ class MatMul8bitLt(torch.autograd.Function):
 
         input_shape = A.shape
 
+        # fp16 and bf16 are quantized natively; other dtypes (e.g. fp32) are cast to fp16 for quantization only.
+        if A.dtype not in (torch.float16, torch.bfloat16) and not _is_compiling():
+            logger.warning("MatMul8bitLt: inputs will be cast from %s to float16 during quantization", A.dtype)
+
         if len(A.shape) == 3:
             A = A.reshape(-1, A.shape[-1])
 
         # 1. Quantize A. Note that as a side-effect, outliers are suppressed in CA/CAt.
         if ctx.needs_input_grad[1]:
             # Slower path
-            CA, CAt, SCA, SCAt, outlier_cols = F.int8_double_quant(A, threshold=state.threshold)
+            CA, CAt, SCA, SCAt, outlier_cols = F.int8_double_quant(_to_16bit(A), threshold=state.threshold)
         else:
             # Fast path
-            CA, SCA, outlier_cols = F.int8_vectorwise_quant(A, threshold=state.threshold)
+            CA, SCA, outlier_cols = F.int8_vectorwise_quant(_to_16bit(A), threshold=state.threshold)
             CAt = SCAt = None
 
         has_grad = False
@@ -148,7 +157,7 @@ class MatMul8bitLt(torch.autograd.Function):
                 state.reset_grads()
 
                 # 2. Quantize B
-                state.CB, state.SCB, _ = F.int8_vectorwise_quant(B)
+                state.CB, state.SCB, _ = F.int8_vectorwise_quant(_to_16bit(B))
 
         # Handle sparse decomposition
         if state.threshold > 0.0:
@@ -210,19 +219,19 @@ class MatMul8bitLt(torch.autograd.Function):
             # compute grad_bias first before changing grad_output dtype
             grad_bias = grad_output.sum(0, dtype=ctx.dtype_bias)
 
-        # Cast grad_output to fp16
         if len(grad_output.shape) == 3:
             grad_output = grad_output.reshape(-1, grad_output.shape[-1]).contiguous()
 
         if req_gradB:
-            Cgrad, _, _, SCgradt, _ = F.int8_double_quant(grad_output.to(torch.float16))
+            grad_output_16 = _to_16bit(grad_output)
+            Cgrad, _, _, SCgradt, _ = F.int8_double_quant(grad_output_16)
 
             grad_B = torch.ops.bitsandbytes.int8_scaled_mm.default(
                 Cgrad.t().contiguous(),
                 CAt.t(),
                 SCgradt,
                 SCAt,
-                dtype=torch.float16,
+                dtype=grad_output_16.dtype,
             )
 
             if state.threshold > 0.0 and subA is not None and subA.numel() > 0:
@@ -254,7 +263,7 @@ class MatMul8bitFp(torch.autograd.Function):
 
             if (state.is_training and not has_grad) or state.CB is None or state.SCB is None:
                 state.reset_grads()
-                state.CB, state.SCB, _ = F.int8_vectorwise_quant(B)
+                state.CB, state.SCB, _ = F.int8_vectorwise_quant(_to_16bit(B))
                 B = state.CB
 
         CB = state.CB.data.to(A.dtype).mul_(state.SCB.unsqueeze(1).mul(1.0 / 127.0))

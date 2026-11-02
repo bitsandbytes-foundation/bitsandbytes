@@ -135,7 +135,7 @@ void cutlass_igemm(
 );
 
 template <typename T>
-void dequant_mm_int32_fp16(
+void dequant_mm_int32(
     int* A, float* rowStats, float* colStats, T* out, T* bias, int numRows, int numCols, bnb_stream_t stream
 );
 

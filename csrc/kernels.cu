@@ -7,6 +7,8 @@
 #include "compat_device.cuh"
 #include "kernels.cuh"
 
+#include <type_traits>
+
 #define HLF_MAX 65504
 #define TH 1024
 #define NUM 4
@@ -1328,6 +1330,24 @@ __launch_bounds__(256, 3) __global__ void kOptimizerStatic8bit1StateBlockwise(
 // Outputs:
 //  rowStats [rows]
 //  out [rows, cols]
+// Streaming (evict-first) load of a 16-bit float, widened to fp32.
+// CUDA < 12.4 only declares the __nv_bfloat16 overload of __ldcs for sm_80+. The half overload is available on
+// every architecture, so for bf16 we issue the streaming load through it and reinterpret the 16 raw bits.
+template <typename T> __device__ __forceinline__ float ldcs_as_float(const T* ptr) {
+    if constexpr (std::is_same_v<T, half>) {
+        return __half2float(__ldcs(ptr));
+    } else {
+#if BNB_HIP
+        return (float)(*ptr);
+#else
+        const __half_raw bits = __ldcs(reinterpret_cast<const half*>(ptr));
+        __nv_bfloat16_raw raw;
+        raw.x = bits.x;
+        return __bfloat162float(__nv_bfloat16(raw));
+#endif
+    }
+}
+
 template <typename T, int THREADS, int SPARSE_DECOMP>
 __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     void kInt8VectorQuant(T* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols) {
@@ -1347,7 +1367,8 @@ __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     // Threads will read the row values in a striped access pattern and find a local absmax.
     float row_local_absmax = -FLT_MIN;
     for (int i = threadIdx.x; i < cols; i += THREADS) {
-        const float absval = fabsf((float)__ldcs(&(row_data[i])));
+        const float absval = fabsf(ldcs_as_float(&row_data[i]));
+
         // For sparse decomposition, values outside of the threshold are not to be
         // included when calculating the row's absmax.
         if constexpr (SPARSE_DECOMP) {
@@ -1360,6 +1381,7 @@ __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     // Reduce thread-local absmax across the block.
     const float row_absmax = BlockReduceT(temp_storage).Reduce(row_local_absmax, BNB_MAX_OP, cols);
     if (threadIdx.x == 0) {
+        // Save our block's absmax to shared memory for the quantization step.
         rowStats[row_id] = smem_row_absmax = row_absmax;
     }
     __syncthreads();
@@ -1368,6 +1390,7 @@ __launch_bounds__(1024, BNB_MAX_THREADS_PER_SM / 1024) __global__
     const float scale = __fdividef(127.0f, smem_row_absmax);
     for (int i = threadIdx.x; i < cols; i += THREADS) {
         float val = (float)row_data[i];
+
         if constexpr (SPARSE_DECOMP) {
             // For sparse decomposition, we do not want to quantize the outliers.
             // Instead they're zeroed out.
@@ -1390,10 +1413,11 @@ template __global__ void kInt8VectorQuant<bnb_bfloat16, 1024, 0>(
 template __global__ void kInt8VectorQuant<bnb_bfloat16, 1024, 1>(
     bnb_bfloat16* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols
 );
+
 #define MM_DEQUANT_CONST 6.200012e-05f // 1.0f/(127.0f*127.0f)
 
 template <typename T, int ITEMS_PER_THREAD, int THREADS>
-__global__ void kdequant_mm_int32_fp16(
+__global__ void kdequant_mm_int32(
     int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats, T* out,
     T* __restrict__ const bias, const int numRows, const int numCols, const int n
 ) {
@@ -1602,11 +1626,11 @@ template __global__ void kgemm_4bit_inference_naive<float, 128, 32>(
     float* out, int lda, int ldb, int ldc, int blocksize
 );
 
-template __global__ void kdequant_mm_int32_fp16<half, 4, 512>(
+template __global__ void kdequant_mm_int32<half, 4, 512>(
     int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats, half* out,
     half* __restrict__ const bias, const int numRows, const int numCols, const int n
 );
-template __global__ void kdequant_mm_int32_fp16<bnb_bfloat16, 4, 512>(
+template __global__ void kdequant_mm_int32<bnb_bfloat16, 4, 512>(
     int* __restrict__ const A, float* __restrict__ const rowStats, float* __restrict__ const colStats,
     bnb_bfloat16* out, bnb_bfloat16* __restrict__ const bias, const int numRows, const int numCols, const int n
 );

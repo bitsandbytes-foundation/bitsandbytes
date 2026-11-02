@@ -47,7 +47,6 @@ _setup_ctypes(
 )
 
 # int8 mm dequant: (A, row_stats, col_stats, out, bias, numRows, numCols, stream)
-# int8 mm dequant: (A, row_stats, col_stats, out, bias, numRows, numCols, stream)
 _setup_ctypes(
     ["cdequant_mm_int32_fp16", "cdequant_mm_int32_bf16"],
     [ct.c_void_p] * 5 + [ct.c_int32, ct.c_int32, ct.c_void_p],
@@ -58,6 +57,7 @@ _setup_ctypes(
     ["cint8_vector_quant", "cint8_vector_quant_bf16"],
     [ct.c_void_p] * 3 + [ct.c_float, ct.c_int32, ct.c_int32, ct.c_void_p],
 )
+
 # 4-bit/8-bit blockwise quantize: (code, A, absmax, out, blocksize, n)
 _setup_ctypes(
     [f"cquantize_blockwise_{d}_{q}" for d in ("fp32", "bf16", "fp16") for q in ("nf4", "fp4")]
@@ -183,17 +183,15 @@ def _(
     if col_stats.dtype != torch.float32:
         raise ValueError(f"col_stats must be float32, got {col_stats.dtype}")
 
-    # Note: cuda kernel only currently supports fp16 output.
-    # We'll later cast to desired dtype if needed.
+    # The kernel writes fp16 or bf16 directly. Any other requested dtype (e.g. fp32) is computed
+    # in fp16 and cast afterwards, matching the previous behavior.
     out_dtype = dtype or torch.float16
-    if out_dtype not in (torch.float16, torch.bfloat16):
-        raise ValueError(f"dtype must be float16 or bfloat16, got {out_dtype}")
+    kernel_dtype = torch.bfloat16 if out_dtype == torch.bfloat16 else torch.float16
+    out = torch.empty_like(A, dtype=kernel_dtype)
 
-    out = torch.empty_like(A, dtype=out_dtype)
-
-    # Fuse bias in the kernel when it already matches the output dtype; otherwise add it afterward.
-    bias_ptr = bias.data_ptr() if bias is not None and bias.dtype == out_dtype else None
-    fn = lib.cdequant_mm_int32_bf16 if out_dtype == torch.bfloat16 else lib.cdequant_mm_int32_fp16
+    # Fuse bias in the kernel when it already matches the kernel dtype; otherwise add it afterward.
+    fuse_bias = bias is not None and bias.dtype == kernel_dtype
+    fn = lib.cdequant_mm_int32_bf16 if kernel_dtype == torch.bfloat16 else lib.cdequant_mm_int32_fp16
 
     with _cuda_device_of(A):
         fn(
@@ -201,17 +199,17 @@ def _(
             row_stats.data_ptr(),
             col_stats.data_ptr(),
             out.data_ptr(),
-            bias_ptr,
+            bias.data_ptr() if fuse_bias else None,
             A.numel() // A.shape[-1],
             A.shape[-1],
             _get_raw_stream(A.device.index),
         )
 
     # Add bias separately if not fused in kernel
-    if bias is not None and bias.dtype != out_dtype:
+    if bias is not None and not fuse_bias:
         out.add_(bias)
 
-    return out
+    return out.to(out_dtype)
 
 
 @register_kernel("bitsandbytes::int8_vectorwise_quant", "cuda")

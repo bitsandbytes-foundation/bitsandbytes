@@ -496,7 +496,7 @@ int fill_up_to_nearest_multiple(int value, int multiple) {
 }
 
 template <typename T>
-void dequant_mm_int32_fp16(
+void dequant_mm_int32(
     int* A, float* rowStats, float* colStats, T* out, T* bias, int numRows, int numCols, bnb_stream_t stream
 ) {
     const int threads = 512;
@@ -505,7 +505,7 @@ void dequant_mm_int32_fp16(
     const int n = numRows * numCols;
     const int num_blocks = (n + num_per_block - 1) / num_per_block;
 
-    kdequant_mm_int32_fp16<T, num_per_thread, threads>
+    kdequant_mm_int32<T, num_per_thread, threads>
         <<<num_blocks, threads, 0, stream>>>(A, rowStats, colStats, out, bias, numRows, numCols, n);
     BNB_CHECK_RETURN(BNB_PEEK_LAST_ERROR());
 }
@@ -578,10 +578,10 @@ template void int8VectorQuant<bnb_bfloat16>(
     bnb_bfloat16* __restrict__ A, int8_t* out, float* rowStats, float threshold, int rows, int cols, bnb_stream_t stream
 );
 
-template void dequant_mm_int32_fp16<half>(
+template void dequant_mm_int32<half>(
     int* A, float* rowStats, float* colStats, half* out, half* bias, int numRows, int numCols, bnb_stream_t stream
 );
-template void dequant_mm_int32_fp16<bnb_bfloat16>(
+template void dequant_mm_int32<bnb_bfloat16>(
     int* A, float* rowStats, float* colStats, bnb_bfloat16* out, bnb_bfloat16* bias, int numRows, int numCols,
     bnb_stream_t stream
 );
