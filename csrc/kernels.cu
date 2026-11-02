@@ -858,7 +858,11 @@ __launch_bounds__(TH, 1) __global__ void kOptimizer32bit1State(
 #pragma unroll 4
         for (unsigned int j = 0; j < NUM_PER_THREAD; j++) {
             g_vals[j] = gnorm_scale * ((float)g_vals[j]);
-            if (weight_decay > 0.0f)
+            // Coupled (L2) weight decay folds decay into the gradient. Correct for
+            // MOMENTUM/RMSPROP/ADAGRAD, but NOT for LION, which uses decoupled
+            // (AdamW-style) decay applied to the param directly (see the LION branch
+            // below and Chen et al. 2023). This matches the CUDA 8-bit blockwise kernel.
+            if (weight_decay > 0.0f && OPTIMIZER != LION)
                 g_vals[j] = (float)g_vals[j] + (((float)p_vals[j]) * weight_decay);
         }
 
@@ -875,6 +879,10 @@ __launch_bounds__(TH, 1) __global__ void kOptimizer32bit1State(
                     p_vals[j] = ((float)p_vals[j]) + update_scale * (-lr * (s1_vals[j]));
                     break;
                 case LION:
+                    // Decoupled weight decay: shrink the param directly, outside the
+                    // sign update (Chen et al. 2023), matching the 8-bit blockwise kernel.
+                    if (weight_decay > 0.0f)
+                        p_vals[j] = ((float)p_vals[j]) * (1.0f - lr * weight_decay);
                     p_vals[j] =
                         ((float)p_vals[j]) -
                         update_scale * (lr * sgn(((float)s1_vals[j]) * beta1 + ((1.0f - beta1) * ((float)g_vals[j]))));

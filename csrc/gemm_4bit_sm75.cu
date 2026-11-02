@@ -5,6 +5,7 @@
 #include <type_traits>
 
 #include "gemm_4bit_common.cuh"
+#include "gemm_4bit_mma.cuh"
 #include "gemm_4bit_sm75.cuh"
 
 static constexpr int K_CHUNK = 64;

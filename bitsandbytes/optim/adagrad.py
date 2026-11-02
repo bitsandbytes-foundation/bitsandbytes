@@ -95,6 +95,7 @@ class Adagrad8bit(Optimizer1State):
                 The epsilon value prevents division by zero in the optimizer.
             optim_bits (`int`, defaults to 8):
                 The number of bits of the optimizer state.
+                Note: This parameter is not used in Adagrad8bit as it always uses 8-bit optimization.
             args (`object`, defaults to `None`):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
@@ -110,6 +111,10 @@ class Adagrad8bit(Optimizer1State):
             raise ValueError("Initial accumulator value != 0.0 not supported!")
         if lr_decay != 0.0:
             raise ValueError("Lr Decay != 0.0 not supported!")
+        if optim_bits != 8:
+            # We allow the default value of 8 to maintain compatibility with the function signature,
+            # but any other value is invalid since Adagrad8bit always uses 8-bit optimization
+            raise ValueError("Adagrad8bit only supports optim_bits=8 (default value for compatibility)")
         super().__init__(
             "adagrad",
             params,

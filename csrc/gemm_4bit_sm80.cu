@@ -7,6 +7,7 @@
 #include <type_traits>
 
 #include "gemm_4bit_common.cuh"
+#include "gemm_4bit_mma.cuh"
 #include "gemm_4bit_sm80.cuh"
 
 [[maybe_unused]] static constexpr int MMA_M = 16;

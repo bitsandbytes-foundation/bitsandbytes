@@ -331,6 +331,20 @@ class ErrorHandlerMockBNBNativeLibrary(BNBNativeLibrary):
         return self.__getattr__(name)
 
 
+def get_xpu_bnb_library_path() -> Path:
+    """Get the path to the XPU native library matching the oneAPI toolchain.
+
+    Prefers the versioned library (e.g. libbitsandbytes_xpu2026) matching the first
+    4 digits of torch.version.xpu, falling back to an unversioned libbitsandbytes_xpu.
+    """
+    xpu_version = getattr(torch.version, "xpu", None)
+    if xpu_version:
+        versioned = PACKAGE_DIR / f"libbitsandbytes_xpu{xpu_version[:4]}{DYNAMIC_LIBRARY_SUFFIX}"
+        if versioned.exists():
+            return versioned
+    return PACKAGE_DIR / f"libbitsandbytes_xpu{DYNAMIC_LIBRARY_SUFFIX}"
+
+
 def get_native_library() -> BNBNativeLibrary:
     """
     Load CUDA library XOR CPU, as the latter contains a subset of symbols of the former.
@@ -347,7 +361,7 @@ def get_native_library() -> BNBNativeLibrary:
         binary_path = cuda_binary_path
 
     if torch._C._has_xpu:
-        binary_path = PACKAGE_DIR / f"libbitsandbytes_xpu{DYNAMIC_LIBRARY_SUFFIX}"
+        binary_path = get_xpu_bnb_library_path()
 
     logger.debug(f"Loading bitsandbytes native library from: {binary_path}")
 

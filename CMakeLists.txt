@@ -3,7 +3,7 @@
 #   For  GCC: `cmake -B build . && cmake --build build`
 #   For MSVC: `cmake -B build . && cmake --build build --config Release`
 # You can also use the following options and variables
-#  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, or `mps` to select the backend
+#  - COMPUTE_BACKEND: Set to `cpu`, `cuda`, `hip`, or `xpu` to select the backend
 #  - CUDA_VERSION: The expected CUDA version, for sanity checking. The actual version
 #                  is whatever CMake finds on your path.
 #  - COMPUTE_CAPABILITY: Which GPU Arch/Compute codes to provide to NVCC.
@@ -62,14 +62,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Define included source files
 set(CPP_FILES csrc/cpu_ops.cpp csrc/pythonInterface.cpp)
 set(GPU_FILES csrc/ops.cu csrc/kernels.cu)
-set(MPS_FILES csrc/mps_ops.mm)
-set(METAL_FILES csrc/mps_kernels.metal)
 set(XPU_FILES csrc/xpu_ops.cpp csrc/xpu_kernels.cpp)
 # C++ sources are always included
 list(APPEND SRC_FILES ${CPP_FILES})
 
-set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, hip, mps, xpu)")
-set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip mps xpu)
+set(COMPUTE_BACKEND "cpu" CACHE STRING "The compute backend to use (cpu, cuda, hip, xpu)")
+set_property(CACHE COMPUTE_BACKEND PROPERTY STRINGS cpu cuda hip xpu)
 option(PTXAS_VERBOSE "Pass through -v flag to PTX Assembler" OFF)
 
 if(APPLE)
@@ -86,33 +84,22 @@ if(${COMPUTE_BACKEND} STREQUAL "cuda")
     endif()
     set(BUILD_CUDA ON)
     set(BUILD_HIP OFF)
-    set(BUILD_MPS OFF)
 elseif(${COMPUTE_BACKEND} STREQUAL "hip")
     if(APPLE)
         message(FATAL_ERROR "HIP is not supported on macOS" )
     endif()
     set(BUILD_CUDA OFF)
     set(BUILD_HIP ON)
-    set(BUILD_MPS OFF)
-elseif(${COMPUTE_BACKEND} STREQUAL "mps")
-    if(NOT APPLE)
-        message(FATAL_ERROR "MPS is only supported on macOS" )
-    endif()
-    set(BUILD_CUDA OFF)
-    set(BUILD_HIP OFF)
-    set(BUILD_MPS ON)
 elseif(${COMPUTE_BACKEND} STREQUAL "xpu")
     if(APPLE)
         message(FATAL_ERROR "XPU is not supported on macOS" )
     endif()
     set(BUILD_CUDA OFF)
     set(BUILD_HIP OFF)
-    set(BUILD_MPS OFF)
     set(BUILD_XPU ON)
 else()
     set(BUILD_CUDA OFF)
     set(BUILD_HIP OFF)
-    set(BUILD_MPS OFF)
     set(BUILD_XPU OFF)
     set(BUILD_CPU ON)
 endif()
@@ -280,7 +267,7 @@ elseif(BUILD_HIP)
     elseif(AMDGPU_TARGETS AND NOT CMAKE_HIP_ARCHITECTURES)
       set(CMAKE_HIP_ARCHITECTURES ${AMDGPU_TARGETS})
     elseif(NOT CMAKE_HIP_ARCHITECTURES)
-      set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+      set(CMAKE_HIP_ARCHITECTURES "gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
     endif()
 
     enable_language(HIP)
@@ -288,6 +275,10 @@ elseif(BUILD_HIP)
     message(STATUS "HIP Targets: ${CMAKE_HIP_ARCHITECTURES}")
 
     list(APPEND SRC_FILES ${GPU_FILES})
+
+    # 4-bit GEMM: build the SIMT kernel + C dispatch on ROCm.
+    set_source_files_properties(csrc/gemm_4bit_simt.cu csrc/gemm_4bit.cu PROPERTIES LANGUAGE HIP)
+    list(APPEND SRC_FILES csrc/gemm_4bit_simt.cu csrc/gemm_4bit.cu)
 
     string(APPEND BNB_OUTPUT_NAME "_rocm")
 
@@ -308,33 +299,30 @@ elseif(BUILD_HIP)
     add_compile_definitions(__HIP_PLATFORM_AMD__)
     add_compile_definitions(__HIP_PLATFORM_HCC__)
     add_compile_definitions(BUILD_HIP)
-elseif(BUILD_MPS)
-    if(NOT APPLE)
-        message(FATAL_ERROR "MPS is only supported on macOS" )
-    endif()
-
-    enable_language(OBJCXX)
-
-    list(APPEND SRC_FILES ${MPS_FILES})
-
-    string(APPEND BNB_OUTPUT_NAME "_mps")
-    add_compile_definitions(BUILD_MPS)
-    file(MAKE_DIRECTORY "build")
-    add_custom_command(OUTPUT "bitsandbytes/bitsandbytes.metallib"
-                COMMAND xcrun metal -c -o "build/bitsandbytes.air" ${METAL_FILES}
-                COMMAND xcrun metallib "build/bitsandbytes.air" -o "bitsandbytes/bitsandbytes.metallib"
-                DEPENDS "${METAL_FILES}"
-                COMMENT "Compiling Metal kernels"
-                VERBATIM)
-    add_custom_target(metallib DEPENDS "bitsandbytes/bitsandbytes.metallib")
 elseif(BUILD_XPU)
     list(APPEND SRC_FILES ${XPU_FILES})
-    string(APPEND BNB_OUTPUT_NAME "_xpu")
     add_compile_definitions(BUILD_XPU)
     set(CMAKE_C_COMPILER icx)
     set(CMAKE_CXX_COMPILER icpx)
     if(WIN32)
         set(CMAKE_CXX_COMPILER icx)
+    endif()
+
+    # Get the oneAPI year (2025, 2026, ...) so we can name the library with it.
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} --version
+        OUTPUT_VARIABLE _XPU_COMPILER_VERSION_OUTPUT
+        ERROR_VARIABLE _XPU_COMPILER_VERSION_OUTPUT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    string(REGEX MATCH "20[0-9][0-9]" XPU_VERSION "${_XPU_COMPILER_VERSION_OUTPUT}")
+
+    if(XPU_VERSION)
+        message(STATUS "XPU oneAPI Version: ${XPU_VERSION}")
+        string(APPEND BNB_OUTPUT_NAME "_xpu${XPU_VERSION}")
+    else()
+        message(WARNING "Could not detect oneAPI version from icpx; building unversioned libbitsandbytes_xpu.")
+        string(APPEND BNB_OUTPUT_NAME "_xpu")
     endif()
 else()
     string(APPEND BNB_OUTPUT_NAME "_cpu")
@@ -350,12 +338,18 @@ if(WIN32)
 endif()
 
 if(MSVC)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast")
+
+    # Only real cl.exe needs (and accepts) the conformant preprocessor switch;
+    # clang-cl / icx are already conformant and warn on it.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor")
+    endif()
+
     # /arch:AVX2 is only valid for x86/x64 targets, not ARM64
     string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _msvc_arch)
     if(_msvc_arch MATCHES "x86|x64|amd64")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2 /fp:fast")
-    else()
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /fp:fast")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2")
     endif()
 endif()
 
@@ -464,10 +458,6 @@ if(BUILD_HIP)
 	find_package(hipblaslt)
         target_link_libraries(bitsandbytes PUBLIC roc::hipblaslt)
     endif()
-endif()
-if(BUILD_MPS)
-    add_dependencies(bitsandbytes metallib)
-    target_link_libraries(bitsandbytes objc "-framework Foundation" "-framework Metal" "-framework MetalPerformanceShaders" "-framework MetalPerformanceShadersGraph")
 endif()
 if(BUILD_XPU)
     set(SYCL_LINK_FLAGS "-fsycl;--offload-compress;-fsycl-targets=spir64_gen,spir64;-Xs;-device pvc,xe-lpg,ats-m150 -options ' -cl-intel-enable-auto-large-GRF-mode -cl-poison-unsupported-fp64-kernels -cl-intel-greater-than-4GB-buffer-required'")

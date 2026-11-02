@@ -270,7 +270,11 @@ def _optimizer_update_1state_32bit_triton_kernel(
     s1_vals = tl.load(state1_ptr + offsets, mask=mask, other=0.0)
 
     g_vals = gnorm_scale * g_vals
-    if weight_decay > 0.0:
+    # Coupled (L2) weight decay: fold wd into the gradient. This is correct for
+    # MOMENTUM/RMSPROP/ADAGRAD, but NOT for LION (id 4), which uses *decoupled*
+    # (AdamW-style) weight decay applied to the param directly (see the LION branch
+    # below and Chen et al. 2023). LION is intentionally excluded here.
+    if OPTIMIZER_ID != 4 and weight_decay > 0.0:
         g_vals = g_vals + p_vals * weight_decay
 
     update_scale = 1.0
@@ -289,6 +293,12 @@ def _optimizer_update_1state_32bit_triton_kernel(
         p_vals = p_vals + update_val
 
     elif OPTIMIZER_ID == 4:  # LION
+        # Lion uses decoupled weight decay: shrink the param directly (p *= 1 - lr*wd)
+        # rather than folding wd into the gradient. Matches the 8-bit blockwise kernel,
+        # the default/cpu backends, and the Lion paper (Chen et al. 2023).
+        if weight_decay > 0.0:
+            p_vals = p_vals * (1.0 - lr * weight_decay)
+
         momentum_update = s1_vals * beta1 + (1.0 - beta1) * g_vals
         update_val = update_scale * lr * tl.where(momentum_update > 0, 1.0, tl.where(momentum_update < 0, -1.0, 0.0))
         p_vals = p_vals - update_val

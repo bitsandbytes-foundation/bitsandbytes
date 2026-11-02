@@ -127,7 +127,11 @@ def replace_parameter_4bit(
 
 
 def _disable_parametrization_cache(module: nn.Module, inputs: tuple[Any, ...], output: Any):
-    P._cache_enabled -= 1
+    # Clamp instead of a bare decrement: with ``always_call=True`` this hook also runs
+    # when the forward raised before the pre-hook incremented (e.g. an earlier pre-hook
+    # failed), and the counter must never go negative — a negative value is truthy, so
+    # ``if not P._cache_enabled`` would stop clearing the cache forever.
+    P._cache_enabled = max(0, P._cache_enabled - 1)
     if not P._cache_enabled:
         P._cache = {}
 
@@ -149,8 +153,18 @@ def _register_parametrization_hooks(module: nn.Module, param_name: str):
     # Register hooks to enable caching for the dequantization parametrization.
     # This helps preserve time and memory when the same quantized parameter
     # is accessed multiple times in the forward computation.
+    #
+    # ``always_call=True`` is load-bearing: activation checkpointing with
+    # ``use_reentrant=False`` aborts its backward recompute mid-forward by design
+    # (early stop, via an internal exception) once the last needed activation has
+    # been rematerialized. A plain forward hook is skipped in that case, so the
+    # global ``parametrize._cache_enabled`` counter leaks upward once per
+    # checkpointed region per step, after which the cache is enabled (and never
+    # cleared) for the remainder of training — every dequantized parameter this
+    # module produces stays resident, i.e. a memory leak of the full dequantized
+    # model size (4x the packed 4-bit bytes).
     module.register_forward_pre_hook(_enable_parametrization_cache)
-    module.register_forward_hook(_disable_parametrization_cache)
+    module.register_forward_hook(_disable_parametrization_cache, always_call=True)
 
 
 def _parametrized_state_dict_post_hook(

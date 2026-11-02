@@ -60,7 +60,7 @@ class LAMB(Optimizer2State):
             optim_bits,
             args,
             min_8bit_size,
-            max_unorm=1.0,
+            max_unorm=max_unorm,
         )
 
 
@@ -97,6 +97,7 @@ class LAMB8bit(Optimizer2State):
                 The weight decay value for the optimizer.
             amsgrad (`bool`, defaults to `False`):
                 Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
+                Note: This parameter is not supported in LAMB8bit and must be False.
             adam_w_mode (`bool`, defaults to `True`):
                 Whether to use the AdamW variant.
             args (`object`, defaults to `None`):
@@ -104,8 +105,21 @@ class LAMB8bit(Optimizer2State):
             min_8bit_size (`int`, defaults to 4096):
                 The minimum number of elements of the parameter tensors for 8-bit optimization.
             max_unorm (`float`, defaults to 1.0):
-                The maximum gradient norm.
+                The maximum update norm for trust-ratio clipping.
+                Note: This parameter is not supported in LAMB8bit and must be left at the
+                default 1.0. The 8-bit blockwise update does not implement update-norm
+                clipping; it is honored by the 32-bit LAMB / LAMB32bit optimizers.
         """
+        # Validate unsupported parameters
+        if amsgrad:
+            raise ValueError("LAMB8bit does not support amsgrad=True")
+
+        if max_unorm != 1.0:
+            # We allow the default value of 1.0 to maintain compatibility with the function
+            # signature, but the 8-bit blockwise update does not implement update-norm
+            # clipping, so any other value would be silently ignored.
+            raise ValueError("LAMB8bit only supports max_unorm=1.0 (default value for compatibility)")
+
         super().__init__(
             "lamb",
             params,
@@ -116,7 +130,7 @@ class LAMB8bit(Optimizer2State):
             8,
             args,
             min_8bit_size,
-            max_unorm=1.0,
+            max_unorm=max_unorm,
         )
 
 
@@ -172,5 +186,5 @@ class LAMB32bit(Optimizer2State):
             32,
             args,
             min_8bit_size,
-            max_unorm=1.0,
+            max_unorm=max_unorm,
         )

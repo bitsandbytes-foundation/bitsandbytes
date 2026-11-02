@@ -243,6 +243,55 @@ def test_optimizer32bit(dim1, dim2, gtype, optim_name, device):
             assert bnb_optimizer.state[p2]["unorm_vec"] > 0.0
 
 
+@pytest.mark.parametrize("gtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
+@pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
+@pytest.mark.parametrize("dim2", [32, 1024], ids=id_formatter("dim2"))
+@pytest.mark.parametrize("device", get_available_devices(), ids=id_formatter("device"))
+def test_lion32bit_weight_decay(dim1, dim2, gtype, device):
+    """Lion must use *decoupled* weight decay (p *= 1 - lr*wd), matching the Lion paper
+    and the lion_pytorch reference.
+
+    Regression test for a coupled-vs-decoupled weight-decay bug: the shared 32-bit
+    optimizer path (used by the `default` backend, i.e. MPS and any device without a
+    dedicated kernel) folded weight decay into the gradient (coupled L2) for Lion, which
+    corrupts the sign update. The existing test_optimizer32bit never caught it because it
+    constructs optimizers with the default weight_decay=0, where the two forms coincide.
+    """
+    weight_decay = 0.1
+
+    p1 = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.1
+    p2 = p1.clone()
+    p1 = p1.float()
+
+    torch_optimizer = Lion([p1], weight_decay=weight_decay)
+    bnb_optimizer = bnb.optim.Lion([p2], weight_decay=weight_decay)
+
+    if gtype == torch.float32:
+        atol, rtol = 1e-6, 1e-5
+    elif gtype == torch.bfloat16:
+        atol, rtol = 1e-3, 1e-2
+    else:
+        atol, rtol = 1e-4, 1e-3
+
+    for i in range(k):
+        g = torch.randn(dim1, dim2, device=device, dtype=gtype) * 0.01
+        p1.grad = g.clone().float()
+        p2.grad = g.clone()
+
+        bnb_optimizer.step()
+        torch_optimizer.step()
+
+        # Lion's sign update is noisy at boundaries, so allow a few mismatches (matches
+        # the tolerance policy in test_optimizer32bit). Under the coupled-decay bug this
+        # diverges far beyond the error budget; under the correct decoupled decay it holds.
+        assert_most_approx_close(p1, p2.float(), atol=atol, rtol=rtol, max_error_count=15)
+
+        if gtype != torch.float32:
+            # keep 16-bit params from drifting apart across steps (see test_optimizer32bit)
+            p1.data = p1.data.to(p2.dtype).float()
+            p2.copy_(p1.data)
+
+
 @pytest.mark.parametrize("dim1", [1024], ids=id_formatter("dim1"))
 @pytest.mark.parametrize("dim2", [32, 1024, 4097], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("gtype", [torch.float32, torch.float16], ids=describe_dtype)
@@ -632,3 +681,63 @@ def test_ademamix_state_dict_no_nan(optim_name, optim_factory, device):
 
     for p_a, p_b in zip(model.parameters(), model2.parameters()):
         torch.testing.assert_close(p_a, p_b)
+
+
+@pytest.mark.parametrize("optim_cls", [bnb.optim.LAMB, bnb.optim.LAMB32bit], ids=id_formatter("opt"))
+@pytest.mark.parametrize("max_unorm", [0.0, 0.5, 2.0], ids=id_formatter("max_unorm"))
+def test_lamb_max_unorm_threaded_to_config(optim_cls, max_unorm):
+    # The LAMB constructors accepted a `max_unorm` argument but passed a hardcoded 1.0
+    # to the base optimizer, so the user value never reached the optimizer config.
+    # (LAMB8bit rejects non-default values instead, since the 8-bit blockwise kernel
+    # does not apply update-norm clipping; see test_lamb8bit_rejects_non_default_max_unorm.)
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    opt = optim_cls(p, max_unorm=max_unorm)
+    assert opt.args.max_unorm == max_unorm
+
+
+def test_lamb_max_unorm_changes_update():
+    # Behavioral regression: on the 32-bit LAMB path, `max_unorm` drives trust-ratio
+    # clipping of the update. Before the fix the argument was ignored (always 1.0), so a
+    # tight and a loose value produced identical updates. Runs on CPU, which implements
+    # the 32-bit LAMB kernel.
+    def one_step(max_unorm):
+        torch.manual_seed(0)
+        p = torch.nn.Parameter(torch.randn(128, 128))
+        opt = bnb.optim.LAMB([p], lr=1e-1, max_unorm=max_unorm)
+        p.grad = torch.randn(128, 128) * 5.0
+        opt.step()
+        return p.detach().clone()
+
+    tight = one_step(1e-4)  # aggressive clipping
+    loose = one_step(10.0)  # effectively no clipping
+    assert not torch.allclose(tight, loose)
+
+
+def test_lamb8bit_rejects_amsgrad():
+    # amsgrad is unused by the base optimizer; mirror the Adam8bit/AdamW8bit guard (relates to #1261).
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        bnb.optim.LAMB8bit(p, amsgrad=True)
+    # default (amsgrad=False) still constructs
+    bnb.optim.LAMB8bit(p)
+
+
+def test_lamb8bit_rejects_non_default_max_unorm():
+    # The 8-bit blockwise update does not implement update-norm clipping, so a
+    # non-default max_unorm would be silently ignored; reject it instead.
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        bnb.optim.LAMB8bit(p, max_unorm=0.5)
+    with pytest.raises(ValueError):
+        bnb.optim.LAMB8bit(p, max_unorm=0.0)
+    # default (max_unorm=1.0) still constructs
+    bnb.optim.LAMB8bit(p, max_unorm=1.0)
+
+
+def test_adagrad8bit_rejects_non_8_optim_bits():
+    # optim_bits is ignored (Adagrad8bit always uses 8-bit); guard invalid values (relates to #1261).
+    p = [torch.nn.Parameter(torch.randn(8, 8))]
+    with pytest.raises(ValueError):
+        bnb.optim.Adagrad8bit(p, optim_bits=32)
+    # default (optim_bits=8) still constructs
+    bnb.optim.Adagrad8bit(p)

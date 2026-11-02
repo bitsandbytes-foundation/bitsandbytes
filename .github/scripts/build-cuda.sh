@@ -8,13 +8,17 @@ set -xeuo pipefail
 if [[ -v CUDA_TARGETS ]]; then
     build_capability="${CUDA_TARGETS}"
 elif [ "${RUNNER_ARCH}" = "ARM64" ]; then
-    build_capability="75;80;90"
+    if [ "${RUNNER_OS}" = "Windows" ]; then
+        build_capability="121"
+    else
+        build_capability="75;80;90"
 
-    # CUDA 12.8-12.9: Add sm100/sm120
-    [[ "${CUDA_VERSION}" == 12.8.* || "${CUDA_VERSION}" == 12.9.* ]] && build_capability="75;80;90;100;120"
+        # CUDA 12.8-12.9: Add sm100/sm120
+        [[ "${CUDA_VERSION}" == 12.8.* || "${CUDA_VERSION}" == 12.9.* ]] && build_capability="75;80;90;100;120"
 
-    # CUDA 13.0+: Add sm100/sm110/sm120
-    [[ "${CUDA_VERSION}" == 13.*.* ]] && build_capability="75;80;90;100;110;120;121"
+        # CUDA 13.0+: Add sm100/sm110/sm120
+        [[ "${CUDA_VERSION}" == 13.*.* ]] && build_capability="75;80;90;100;110;120;121"
+    fi
 else
     # By default, target Pascal through Hopper.
     build_capability="60;70;75;80;86;89;90"
