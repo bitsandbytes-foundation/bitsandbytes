@@ -13,6 +13,7 @@ import bitsandbytes as bnb
 from bitsandbytes.nn.modules import Linear8bitLt
 from tests.helpers import (
     TRUE_FALSE,
+    describe_dtype,
     get_available_devices,
     id_formatter,
     torch_load_from_buffer,
@@ -364,3 +365,32 @@ def test_linear8bitlt_device_movement(device):
 
     # Accelerator outputs should match both times.
     torch.testing.assert_close(out_accelerator_2, out_accelerator, rtol=1e-8, atol=1e-8)
+
+
+@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
+@pytest.mark.parametrize("threshold", [0.0, 6.0], ids=id_formatter("threshold"))
+def test_linear8bitlt_forward_dtypes(device, dtype, threshold):
+    # Exercises the activation-quant path end-to-end through Linear8bitLt for both fp16 and bf16.
+    linear = torch.nn.Linear(32, 96)
+    linear_custom = Linear8bitLt(
+        linear.in_features,
+        linear.out_features,
+        linear.bias is not None,
+        has_fp16_weights=False,
+        threshold=threshold,
+    )
+    linear_custom.weight = bnb.nn.Int8Params(
+        linear.weight.data.clone(),
+        requires_grad=False,
+        has_fp16_weights=False,
+    )
+    linear_custom.bias = linear.bias
+    linear_custom = linear_custom.to(device)
+
+    x = torch.randn(4, 32, dtype=dtype, device=device)
+    out = linear_custom(x)
+
+    assert out.dtype == dtype
+    assert out.shape == (4, 96)
+    assert out.isfinite().all()

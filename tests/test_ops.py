@@ -36,21 +36,19 @@ class TestLLMInt8Ops:
 
         opcheck(torch.ops.bitsandbytes.int8_linear_matmul.out, (A, B, out))
 
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
     @pytest.mark.parametrize("threshold", [0.0, 6.0])
     @pytest.mark.parametrize("device", get_available_devices())
-    def test_int8_vectorwise_quant(self, threshold, device):
-        A = torch.randn(10, 20, dtype=torch.float16, device=device)
+    def test_int8_vectorwise_quant(self, dtype, threshold, device):
+        A = torch.randn(10, 20, dtype=dtype, device=device)
         A[1][0] = 1000.0
-
         out_row, row_stats, outlier_cols = torch.ops.bitsandbytes.int8_vectorwise_quant(A, threshold=threshold)
-
         assert out_row.shape == (10, 20)
         assert out_row.dtype == torch.int8
         assert out_row.device == A.device
         assert row_stats.shape == (10,)
         assert row_stats.dtype == torch.float32
         assert row_stats.device == A.device
-
         if threshold > 0.0:
             assert outlier_cols is not None
             assert outlier_cols.dim() == 1
@@ -58,7 +56,6 @@ class TestLLMInt8Ops:
             assert outlier_cols.device == A.device
         else:
             assert outlier_cols is None
-
         opcheck(torch.ops.bitsandbytes.int8_vectorwise_quant, (A,))
         opcheck(torch.ops.bitsandbytes.int8_vectorwise_quant, (A, threshold))
 
@@ -74,6 +71,29 @@ class TestLLMInt8Ops:
         assert out.device == A.device
 
         opcheck(torch.ops.bitsandbytes.int8_mm_dequant, (A, row_stats, col_stats))
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
+    @pytest.mark.parametrize(
+        "bias_dtype", [None, torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("bias_dtype")
+    )
+    def test_int8_mm_dequant_dtypes(self, device, dtype, bias_dtype):
+        # Covers the native fp16/bf16 kernel outputs, the fused-bias path (bias dtype == output dtype),
+        # the unfused path, and fp32 output (computed in fp16, then cast).
+        A = torch.randint(-127 * 127, 127 * 127, (64, 96), dtype=torch.int32, device=device)
+        row_stats = torch.rand(64, dtype=torch.float32, device=device) * 4
+        col_stats = torch.rand(96, dtype=torch.float32, device=device) * 4
+        bias = torch.randn(96, dtype=bias_dtype, device=device) if bias_dtype is not None else None
+
+        out = torch.ops.bitsandbytes.int8_mm_dequant(A, row_stats, col_stats, dtype=dtype, bias=bias)
+
+        ref = A.float() * row_stats.unsqueeze(1) * col_stats.unsqueeze(0) / (127.0 * 127.0)
+        if bias is not None:
+            ref = ref + bias.float()
+
+        assert out.dtype == dtype
+        assert out.shape == A.shape
+        torch.testing.assert_close(out.float(), ref, rtol=1e-2, atol=1e-2)
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))

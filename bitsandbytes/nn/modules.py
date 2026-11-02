@@ -739,7 +739,9 @@ class Int8Params(torch.nn.Parameter):
             return super().to(device)
 
         # We quantize the weight and store in 8bit row-major
-        B = self.data.contiguous().to(device=device, dtype=torch.float16)
+        # bf16 weights are quantized natively; everything else goes through fp16.
+        dtype = torch.bfloat16 if self.data.dtype == torch.bfloat16 else torch.float16
+        B = self.data.contiguous().to(device=device, dtype=dtype)
         CB, SCB, _ = bnb.functional.int8_vectorwise_quant(B)
         self.data = CB
         self.CB = CB

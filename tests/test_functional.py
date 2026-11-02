@@ -397,22 +397,20 @@ class TestLLMInt8Functional:
     @pytest.mark.parametrize("dim3", [32], ids=id_formatter("dim3"))
     @pytest.mark.parametrize("dim4", [32], ids=id_formatter("dim4"))
     @pytest.mark.parametrize("dims", (2,), ids=id_formatter("dims"))
-    def test_int8_linear_matmul_half(self, device, dim1, dim2, dim3, dim4, dims):
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
+    def test_int8_linear_matmul_half(self, device, dim1, dim2, dim3, dim4, dims, dtype):
         for i in range(k):
             if dims == 2:
-                A = torch.normal(0, 0.5, size=(dim1, dim3), device=device).half()
+                A = torch.normal(0, 0.5, size=(dim1, dim3), device=device).to(dtype)
             elif dims == 3:
-                A = torch.normal(0, 0.5, size=(dim1, dim2, dim3), device=device).half()
-            B = torch.randn((dim4, dim3), device=device).half()
+                A = torch.normal(0, 0.5, size=(dim1, dim2, dim3), device=device).to(dtype)
+            B = torch.randn((dim4, dim3), device=device).to(dtype)
             torch.nn.init.xavier_uniform_(B)
             C1 = torch.matmul(A, B.t())
-
             A = A.view(-1, A.shape[-1])
-
             CA, statsA, _ = F.int8_vectorwise_quant(A)
             CB, statsB, _ = F.int8_vectorwise_quant(B)
-            output = F.int8_mm_dequant(F.int8_linear_matmul(CA, CB), statsA, statsB)
-
+            output = F.int8_mm_dequant(F.int8_linear_matmul(CA, CB), statsA, statsB, dtype=dtype)
             torch.testing.assert_close(C1.view(-1, C1.shape[-1]), output, atol=0.025, rtol=0.05)
 
     @pytest.mark.parametrize("device", get_available_devices())

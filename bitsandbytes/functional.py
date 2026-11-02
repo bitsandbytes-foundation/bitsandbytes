@@ -1565,6 +1565,7 @@ def int8_mm_dequant(
     col_stats: torch.Tensor,
     out: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
+    dtype: Optional[torch.dtype] = None,
 ):
     """Performs dequantization on the result of a quantized int8 matrix multiplication.
 
@@ -1574,11 +1575,14 @@ def int8_mm_dequant(
         col_stats (`torch.Tensor`): The column-wise quantization statistics for the rhs operand of the matrix multiplication.
         out (`torch.Tensor`, *optional*): A pre-allocated tensor to store the output of the operation.
         bias (`torch.Tensor`, *optional*): An optional bias vector to add to the result.
+        dtype (`torch.dtype`, *optional*): The desired output dtype. Defaults to `torch.float16`.
 
     Returns:
-        `torch.Tensor`: The dequantized result with an optional bias, with dtype `torch.float16`.
+        `torch.Tensor`: The dequantized result with an optional bias, with the requested dtype.
     """
-    result = torch.ops.bitsandbytes.int8_mm_dequant.default(A, row_stats, col_stats, dtype=torch.float16, bias=bias)
+    result = torch.ops.bitsandbytes.int8_mm_dequant.default(
+        A, row_stats, col_stats, dtype=dtype or torch.float16, bias=bias
+    )
 
     # TODO(matthewdouglas): Deprecate out kwarg
     if out is not None:
@@ -1607,7 +1611,7 @@ def int8_double_quant(
     </Tip>
 
     Args:
-        A (`torch.Tensor` with dtype `torch.float16`): The input matrix.
+        A (`torch.Tensor` with dtype `torch.float16` or `torch.bfloat16`): The input matrix.
         col_stats (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the column-wise quantization scales.
         row_stats (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the row-wise quantization scales.
         out_col (`torch.Tensor`, *optional*): A pre-allocated tensor to hold the column-wise quantized data.
@@ -1653,12 +1657,12 @@ def int8_vectorwise_dequant(A: torch.Tensor, stats: torch.Tensor):
 
 
 def int8_vectorwise_quant(A: torch.Tensor, threshold=0.0):
-    """Quantizes a tensor with dtype `torch.float16` to `torch.int8` in accordance to the `LLM.int8()` algorithm.
+    """Quantizes a tensor with dtype `torch.float16` or `torch.bfloat16` to `torch.int8` in accordance to the `LLM.int8()` algorithm.
 
     For more information, see the [LLM.int8() paper](https://arxiv.org/abs/2208.07339).
 
     Args:
-        A (`torch.Tensor` with dtype `torch.float16`): The input tensor.
+        A (`torch.Tensor` with dtype `torch.float16` or `torch.bfloat16`): The input tensor.
         threshold (`float`, *optional*):
             An optional threshold for sparse decomposition of outlier features.
 
