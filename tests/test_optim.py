@@ -165,8 +165,8 @@ optimizer_names_32bit = [
 @pytest.mark.parametrize("dim2", [32, 1024, 4097, 1], ids=id_formatter("dim2"))
 @pytest.mark.parametrize("device", get_available_devices(), ids=id_formatter("device"))
 def test_optimizer32bit(dim1, dim2, gtype, optim_name, device):
-    if device == "cpu" and optim_name.startswith("paged_"):
-        pytest.skip("Paged optimizers are not meaningful on CPU")
+    if device not in ("cuda", "xpu") and optim_name.startswith("paged_"):
+        pytest.skip(f"Paged optimizers are not meaningful on {device}")
 
     if optim_name.startswith("paged_") and sys.platform == "win32":
         pytest.skip("Paged optimizers can have issues on Windows.")

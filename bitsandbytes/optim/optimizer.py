@@ -17,6 +17,10 @@ from bitsandbytes.utils import sync_gpu
 logger = logging.getLogger(__name__)
 
 
+# Device types whose native library provides managed (paged) memory allocation.
+_PAGED_DEVICE_TYPES = ("cuda", "xpu")
+
+
 class MockArgs:
     def __init__(self, initial_data):
         for key in initial_data:
@@ -372,13 +376,16 @@ class Optimizer8bit(torch.optim.Optimizer):
         raise NotImplementedError("The update_step method needs to be overridden")
 
     def get_state_buffer(self, p, dtype=torch.float32):
-        if p.device.type == "cpu":
-            if self.is_paged and not getattr(self, "_cpu_paged_warned", False):
+        if p.device.type not in _PAGED_DEVICE_TYPES:
+            # Paged (unified-memory) state buffers need the CUDA/ROCm or XPU native
+            # library. Other devices (cpu, mps, ...) fall back to a regular tensor.
+            if self.is_paged and not getattr(self, "_paged_fallback_warned", False):
                 warnings.warn(
-                    "Paged optimizers are not supported on CPU. Falling back to non-paged optimizer behavior.",
+                    f"Paged optimizers are not supported on {p.device.type} devices. "
+                    "Falling back to non-paged optimizer behavior.",
                     stacklevel=2,
                 )
-                self._cpu_paged_warned = True
+                self._paged_fallback_warned = True
             return torch.zeros_like(p, dtype=dtype, device=p.device)
         if not self.is_paged or p.numel() < 1e5:
             return torch.zeros_like(p, dtype=dtype, device=p.device)

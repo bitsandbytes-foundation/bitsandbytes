@@ -5,7 +5,7 @@ from typing import Literal, Optional
 import torch
 
 import bitsandbytes.functional as F
-from bitsandbytes.optim.optimizer import Optimizer2State
+from bitsandbytes.optim.optimizer import _PAGED_DEVICE_TYPES, Optimizer2State
 
 
 class _ReferenceAdEMAMix(torch.optim.Optimizer):
@@ -258,7 +258,7 @@ class AdEMAMix(Optimizer2State):
             )
 
     def _get_state_double_buffer(self, p, dtype=torch.float32):
-        if not self.is_paged or p.numel() < 1e5:
+        if p.device.type not in _PAGED_DEVICE_TYPES or not self.is_paged or p.numel() < 1e5:
             return torch.zeros((2, *p.size()), dtype=dtype, device=p.device)
         else:
             buff = F.get_paged(*(2, *p.size()), dtype=dtype, device=p.device)
