@@ -1,4 +1,5 @@
 from math import prod
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -7,6 +8,42 @@ import bitsandbytes
 from tests.helpers import TRUE_FALSE, describe_dtype, get_available_devices, id_formatter, is_supported_on_hpu
 
 opcheck = torch.library.opcheck
+
+
+def _dequantize_4bit_reference(packed, absmax, blocksize, quant_type, shape, dtype):
+    # Decode on CPU independently of the quantizer and all backend dequantizers.
+    raw = packed.cpu().contiguous().view(torch.uint8).reshape(-1)
+    codes = torch.stack((raw >> 4, raw & 0xF), dim=1).flatten()[: prod(shape)].long()
+    codebook = bitsandbytes.functional.get_4bit_type(quant_type, device="cpu")
+    scales = absmax.cpu().repeat_interleave(blocksize)[: prod(shape)]
+    return (codebook[codes] * scales).reshape(shape).to(dtype)
+
+
+@pytest.fixture(params=["hub", "fallback"])
+def mps_dequantize_backend(request, monkeypatch):
+    if "mps" not in get_available_devices() or not torch.backends.mps.is_available():
+        pytest.skip("MPS is not available or not selected for this run")
+
+    from bitsandbytes.backends.mps import ops
+
+    # Restore loader state too: _get_kernel() can mutate both globals.
+    monkeypatch.setattr(ops, "_kernel", ops._kernel)
+    monkeypatch.setattr(ops, "_kernel_load_failed", ops._kernel_load_failed)
+    kernel = ops._get_kernel()
+    if request.param == "hub" and kernel is None:
+        if request.config.getoption("--require-mps-hub"):
+            pytest.fail("The required MPS Hub kernel is unavailable")
+        pytest.skip("The bitsandbytes-mps Hub kernel is unavailable (requires macOS 26+ and kernels)")
+
+    if kernel is not None:
+        calls = Mock(wraps=kernel.dequantize_4bit)
+        monkeypatch.setattr(kernel, "dequantize_4bit", calls)
+    else:
+        calls = Mock(side_effect=AssertionError("Hub dequantization must not run in fallback mode"))
+        monkeypatch.setattr(ops, "_kernel", Mock(dequantize_4bit=calls))
+    if request.param == "fallback":
+        monkeypatch.setattr(ops, "_kernel_load_failed", True)
+    return request.param, calls
 
 
 class TestLLMInt8Ops:
@@ -213,11 +250,53 @@ class Test4bitBlockwiseQuantOps:
 
         assert out.device == A.device
         assert out.shape == shape
+        assert out.dtype == dtype
+        expected = _dequantize_4bit_reference(A, absmax, blocksize, quant_type, shape, dtype)
+        torch.testing.assert_close(out.cpu(), expected)
 
         opcheck(
             torch.ops.bitsandbytes.dequantize_4bit.default,
             (A, absmax, blocksize, quant_type, shape, dtype),
         )
+
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize(
+        ("blocksize", "shape", "storage_dtype"),
+        [
+            (64, (4, 64), torch.uint8),
+            (128, (4, 128), torch.bfloat16),
+            (256, (3, 257), torch.bfloat16),
+            (512, (3, 513), torch.uint8),
+            (32, (3, 33), torch.bfloat16),
+        ],
+        ids=["block64-aligned", "block128-aligned", "block256-tail", "block512-tail", "block32-fallback"],
+    )
+    def test_dequantize_4bit_mps(
+        self, mps_dequantize_backend, record_property, dtype, quant_type, blocksize, shape, storage_dtype
+    ):
+        mode, hub_calls = mps_dequantize_backend
+        hub_calls.reset_mock()
+        indices = torch.arange((prod(shape) + 1) // 2)
+        # Exercise every nibble code, including different high/low nibbles.
+        raw = (((indices % 16) << 4) | ((indices * 7 + 3) % 16)).to(torch.uint8)
+        packed = raw.view(storage_dtype).reshape(-1, 1).to("mps")
+        absmax = torch.tensor([0.0, 0.37, 1.125, 2.75], device="mps")
+        expected = _dequantize_4bit_reference(packed, absmax, blocksize, quant_type, shape, dtype)
+
+        actual = torch.ops.bitsandbytes.dequantize_4bit.default(packed, absmax, blocksize, quant_type, shape, dtype)
+        assert actual.device == packed.device
+        torch.testing.assert_close(actual.cpu(), expected, rtol=0, atol=0)
+
+        out = torch.empty((shape[1], shape[0]), device="mps", dtype=dtype).T
+        pointer = out.data_ptr()
+        torch.ops.bitsandbytes.dequantize_4bit.out(packed, absmax, blocksize, quant_type, shape, dtype, out=out)
+        assert out.data_ptr() == pointer
+        assert not out.is_contiguous()
+        torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)
+        assert hub_calls.call_count == (2 if mode == "hub" and blocksize != 32 else 0)
+        if mode == "hub" and blocksize != 32:
+            record_property("mps_hub_verified", True)
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
