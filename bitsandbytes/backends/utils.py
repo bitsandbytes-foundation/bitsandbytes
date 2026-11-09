@@ -79,6 +79,7 @@ def get_gaudi_sw_version():
     """
     Returns the installed version of Gaudi SW.
     """
+    gaudi_version = None
     try:
         # if we find the spec, examine the installed version
         plugin_metadata = metadata("habana-torch-plugin")
