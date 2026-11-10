@@ -501,8 +501,13 @@ def _optimizer_update_8bit_blockwise_cpu(
     if state2 is not None and qmap2 is not None and absmax2 is not None:
         state2_fp32 = _dequant_blockwise_fp32_direct(state2, absmax2, qmap2, blocksize)
 
-    grad = g.float() * gnorm_scale
-    p_fp32 = p.data.float()
+    if g.dtype == torch.float32:
+        grad = g if gnorm_scale == 1.0 else g * gnorm_scale
+    else:
+        grad = g.float()
+        if gnorm_scale != 1.0:
+            grad.mul_(gnorm_scale)
+    p_fp32 = p.data if p.dtype == torch.float32 else p.data.float()
 
     if optimizer_name in ("adam", "lamb"):
         state1_fp32.mul_(beta1).add_(grad, alpha=1.0 - beta1)
@@ -511,10 +516,13 @@ def _optimizer_update_8bit_blockwise_cpu(
         correction1 = 1.0 - beta1**step
         correction2 = math.sqrt(1.0 - beta2**step)
 
-        denom = (state2_fp32.sqrt() / correction2).add_(eps)
+        # Store the variance before reusing its FP32 buffer as the denominator.
+        _quant_blockwise_fp32_direct(state2_fp32, qmap2, absmax2, state2, blocksize)
+        state2_fp32.sqrt_().div_(correction2).add_(eps)
         if weight_decay > 0.0:
             p_fp32.mul_(1.0 - lr * weight_decay)
-        p_fp32.addcdiv_(state1_fp32, denom, value=-lr / correction1)
+        p_fp32.addcdiv_(state1_fp32, state2_fp32, value=-lr / correction1)
+        state2_fp32 = None
 
     elif optimizer_name == "ademamix":
         m1_fp32, m2_fp32 = state1_fp32[0], state1_fp32[1]
@@ -535,11 +543,11 @@ def _optimizer_update_8bit_blockwise_cpu(
         state1_fp32 = torch.stack([m1_fp32, m2_fp32])
 
     elif optimizer_name in ("momentum", "lars"):
-        grad.add_(p_fp32, alpha=weight_decay)
+        grad_with_decay = grad.add(p_fp32, alpha=weight_decay) if weight_decay > 0.0 else grad
         if step == 1:
-            state1_fp32.copy_(grad)
+            state1_fp32.copy_(grad_with_decay)
         else:
-            state1_fp32.mul_(beta1).add_(grad)
+            state1_fp32.mul_(beta1).add_(grad_with_decay)
         p_fp32.add_(state1_fp32, alpha=-lr)
 
     elif optimizer_name == "lion":
@@ -552,19 +560,20 @@ def _optimizer_update_8bit_blockwise_cpu(
         state1_fp32.mul_(beta2).add_(grad, alpha=1.0 - beta2)
 
     elif optimizer_name == "rmsprop":
-        grad.add_(p_fp32, alpha=weight_decay)
-        state1_fp32.mul_(beta1).addcmul_(grad, grad, value=1.0 - beta1)
-        p_fp32.addcdiv_(grad, state1_fp32.sqrt().add_(eps), value=-lr)
+        grad_with_decay = grad.add(p_fp32, alpha=weight_decay) if weight_decay > 0.0 else grad
+        state1_fp32.mul_(beta1).addcmul_(grad_with_decay, grad_with_decay, value=1.0 - beta1)
+        p_fp32.addcdiv_(grad_with_decay, state1_fp32.sqrt().add_(eps), value=-lr)
 
     elif optimizer_name == "adagrad":
-        grad.add_(p_fp32, alpha=weight_decay)
-        state1_fp32.addcmul_(grad, grad, value=1.0)
-        p_fp32.addcdiv_(grad, state1_fp32.sqrt().add_(eps), value=-lr)
+        grad_with_decay = grad.add(p_fp32, alpha=weight_decay) if weight_decay > 0.0 else grad
+        state1_fp32.addcmul_(grad_with_decay, grad_with_decay, value=1.0)
+        p_fp32.addcdiv_(grad_with_decay, state1_fp32.sqrt().add_(eps), value=-lr)
 
     else:
         raise ValueError(f"Unsupported optimizer for CPU 8-bit: {optimizer_name}")
 
-    p.data.copy_(p_fp32)
+    if p.dtype != torch.float32:
+        p.data.copy_(p_fp32)
 
     # Re-quantize states
     if optimizer_name == "ademamix":
