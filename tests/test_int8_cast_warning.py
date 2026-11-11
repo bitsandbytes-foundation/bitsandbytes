@@ -105,8 +105,8 @@ def test_cast_warning_empty_input(cast_warning):
 @pytest.mark.parametrize("threshold", [0.0, 6.0])
 @pytest.mark.parametrize("weight_grad", [False, True])
 def test_cast_warning_preserves_forward_backward(dtype, device, threshold, weight_grad, monkeypatch):
-    if device == "cpu" and weight_grad:
-        pytest.skip("The CPU backend does not implement int8_double_quant for weight gradients")
+    if weight_grad and device != "cuda":
+        pytest.skip("int8_double_quant for weight gradients is only implemented by the CUDA backend")
     monkeypatch.setattr(af, "_int8_cast_warned_dtypes", set())
     a = torch.randn(2, 32, device=device, dtype=dtype, requires_grad=True)
     with torch.no_grad():
