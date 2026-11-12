@@ -198,7 +198,13 @@ class Optimizer8bit(torch.optim.Optimizer):
             move_to_device (`bool`, defaults to `True`):
                 Whether to move the optimizer's state to the device.
         """
-        # deepcopy, to be consistent with module API
+        state_dict = state_dict.copy()
+        for pre_hook in self._optimizer_load_state_dict_pre_hooks.values():
+            hook_result = pre_hook(self, state_dict)
+            if hook_result is not None:
+                state_dict = hook_result
+
+        # Do not mutate checkpoint data while unwrapping and moving quantization state.
         state_dict = deepcopy(state_dict)
 
         # Unwrap quantization states that were wrapped for FSDP compatibility
@@ -269,6 +275,9 @@ class Optimizer8bit(torch.optim.Optimizer):
 
         param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({"state": state, "param_groups": param_groups})
+
+        for post_hook in self._optimizer_load_state_dict_post_hooks.values():
+            post_hook(self)
 
     def to_gpu(self):
         for gindex, group in enumerate(self.param_groups):
