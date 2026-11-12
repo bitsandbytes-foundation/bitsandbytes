@@ -492,3 +492,63 @@ def test_embedding_not_implemented_error():
     with pytest.raises(NotImplementedError):
         emb = bnb.nn.Embedding8bit(32, 32)
         emb.state_dict()
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("embedding_class", [bnb.nn.Embedding8bit, bnb.nn.EmbeddingFP4, bnb.nn.EmbeddingNF4])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("quantize_first", [False, True])
+def test_quantized_embedding_dtype_model_updates(device, embedding_class, dtype, quantize_first):
+    embedding = embedding_class(16, 64, dtype=torch.float32)
+    model = nn.Sequential(embedding, nn.Linear(64, 3))
+    packed_weight = None
+    if quantize_first:
+        model.to(device)
+        packed_weight = embedding.weight.detach().clone()
+    model.to(dtype=dtype)
+    if not quantize_first:
+        model.to(device)
+    if packed_weight is not None:
+        torch.testing.assert_close(embedding.weight, packed_weight, atol=0, rtol=0)
+    tokens = torch.tensor([[1, 3, 5], [0, 15, 4]], device=device)
+    assert embedding(tokens).dtype == dtype
+    assert embedding.dtype == dtype
+
+    with torch.no_grad():
+        dequantized = embedding(torch.arange(16, device=device))
+    reference = nn.Sequential(
+        nn.Embedding.from_pretrained(dequantized, freeze=True),
+        nn.Linear(64, 3, device=device, dtype=dtype),
+    )
+    reference[1].load_state_dict(model[1].state_dict())
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+    reference_optimizer = torch.optim.SGD(reference.parameters(), lr=0.1, momentum=0.9)
+    for _ in range(2):
+        optimizer.zero_grad()
+        reference_optimizer.zero_grad()
+        actual = model(tokens)
+        expected = reference(tokens)
+        torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+        actual.float().square().mean().backward()
+        expected.float().square().mean().backward()
+        for parameter, reference_parameter in zip(model[1].parameters(), reference[1].parameters()):
+            torch.testing.assert_close(parameter.grad, reference_parameter.grad, atol=0, rtol=0)
+        optimizer.step()
+        reference_optimizer.step()
+        for parameter, reference_parameter in zip(model[1].parameters(), reference[1].parameters()):
+            torch.testing.assert_close(parameter, reference_parameter, atol=0, rtol=0)
+    assert not embedding.weight.requires_grad
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("embedding_class", [bnb.nn.Embedding8bit, bnb.nn.EmbeddingFP4, bnb.nn.EmbeddingNF4])
+def test_quantized_embedding_dtype_convenience_methods(device, embedding_class):
+    embedding = embedding_class(16, 64).to(device)
+    tokens = torch.tensor([0, 7, 15], device=device)
+    expected = embedding(tokens).detach()
+    packed_weight = embedding.weight.detach().clone()
+    for method, dtype in (("half", torch.float16), ("float", torch.float32), ("bfloat16", torch.bfloat16)):
+        assert getattr(embedding, method)() is embedding
+        assert embedding.dtype == dtype
+        actual = embedding(tokens)
+        torch.testing.assert_close(actual, expected.to(dtype), atol=0, rtol=0)
+        torch.testing.assert_close(embedding.weight, packed_weight, atol=0, rtol=0)
