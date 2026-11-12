@@ -364,3 +364,29 @@ def test_linear8bitlt_device_movement(device):
 
     # Accelerator outputs should match both times.
     torch.testing.assert_close(out_accelerator_2, out_accelerator, rtol=1e-8, atol=1e-8)
+
+
+@pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
+@pytest.mark.parametrize("has_fp16_weights", TRUE_FALSE)
+@torch.inference_mode()
+def test_nested_linear8bitlt_device_movement(device, has_fp16_weights):
+    layer = bnb.nn.Linear8bitLt(32, 128, bias=False, has_fp16_weights=has_fp16_weights)
+    model = torch.nn.Sequential(layer).eval().requires_grad_(False).to(device)
+    x = torch.randn(4, 32, dtype=torch.float16)
+    if not has_fp16_weights:
+        model.cpu()
+        assert layer.weight.SCB.device == layer.weight.device == x.device
+        assert layer.weight.CB.data_ptr() == layer.weight.data_ptr()
+        model.to(device)
+    reference = model(x.to(device)).cpu()
+
+    model.cpu()
+    assert layer.state.CB.device == layer.state.SCB.device == layer.weight.device == x.device
+    if not has_fp16_weights:
+        assert layer.state.CB.data_ptr() == layer.weight.data_ptr()
+    cpu_reference = model(x)
+
+    model.to(device)
+    torch.testing.assert_close(model(x.to(device)).cpu(), reference, rtol=0, atol=0)
+    model.to("cpu")
+    torch.testing.assert_close(model(x), cpu_reference, rtol=0, atol=0)
