@@ -87,7 +87,7 @@ def _(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor):
 
 
 def _int8_linear_matmul_impl(A: torch.Tensor, B: torch.Tensor, out: torch.Tensor):
-    A, B = B, A
+    A, B = B.contiguous(), A.contiguous()
 
     shapeA = A.shape
     shapeB = B.shape
@@ -183,6 +183,12 @@ def _(
     if col_stats.dtype != torch.float32:
         raise ValueError(f"col_stats must be float32, got {col_stats.dtype}")
 
+    A = A.contiguous()
+    row_stats = row_stats.contiguous()
+    col_stats = col_stats.contiguous()
+    if bias is not None:
+        bias = bias.contiguous()
+
     # Note: cuda kernel only currently supports fp16 output.
     # We'll later cast to desired dtype if needed.
     out = torch.empty_like(A, dtype=torch.float16)
@@ -216,6 +222,8 @@ def _(A: torch.Tensor, threshold=0.0):
         raise ValueError(f"A must be float16, got {A.dtype}")
     if threshold < 0.0:
         raise ValueError("threshold must be non-negative")
+
+    A = A.contiguous()
 
     rows = A.numel() // A.shape[-1]
     cols = A.shape[-1]

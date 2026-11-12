@@ -472,3 +472,50 @@ class TestNonContiguousInputs:
         deq_c = torch.ops.bitsandbytes.dequantize_4bit(q_c, absmax_c, blocksize, quant_type, shape, dtype)
 
         torch.testing.assert_close(deq_nc, deq_c)
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("threshold", [0.0, 6.0], ids=id_formatter("threshold"))
+    def test_int8_vectorwise_quant_non_contiguous(self, device, threshold):
+        # Token pooling (hidden_states[:, 0]) gives a 2D view whose rows are not adjacent in memory.
+        A_full = torch.randn(8, 16, 64, dtype=torch.float16, device=device)
+        A_full[:, :, 3] = 10.0  # an outlier column, so the threshold path is exercised
+        A_noncontig = A_full[:, 0]
+        assert not A_noncontig.is_contiguous()
+
+        A_contig = A_noncontig.contiguous()
+
+        out_nc, stats_nc, outliers_nc = torch.ops.bitsandbytes.int8_vectorwise_quant(A_noncontig, threshold)
+        out_c, stats_c, outliers_c = torch.ops.bitsandbytes.int8_vectorwise_quant(A_contig, threshold)
+
+        torch.testing.assert_close(stats_nc, stats_c)
+        torch.testing.assert_close(out_nc, out_c)
+        if threshold > 0.0:
+            torch.testing.assert_close(outliers_nc, outliers_c)
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_int8_linear_matmul_non_contiguous(self, device):
+        A_noncontig = torch.randint(-128, 127, (10, 3, 32), dtype=torch.int8, device=device)[:, 0]
+        B_noncontig = torch.randint(-128, 127, (32, 30), dtype=torch.int8, device=device).t()
+        assert not A_noncontig.is_contiguous()
+        assert not B_noncontig.is_contiguous()
+
+        out_nc = torch.ops.bitsandbytes.int8_linear_matmul(A_noncontig, B_noncontig)
+        out_c = torch.ops.bitsandbytes.int8_linear_matmul(A_noncontig.contiguous(), B_noncontig.contiguous())
+
+        torch.testing.assert_close(out_nc, out_c)
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    def test_int8_mm_dequant_non_contiguous(self, device):
+        A_noncontig = torch.randint(-128, 127, (4, 32, 64), dtype=torch.int32, device=device)[:, 0]
+        row_stats_noncontig = torch.rand(8, dtype=torch.float32, device=device)[::2]
+        col_stats_noncontig = torch.rand(128, dtype=torch.float32, device=device)[::2]
+        assert not A_noncontig.is_contiguous()
+        assert not row_stats_noncontig.is_contiguous()
+        assert not col_stats_noncontig.is_contiguous()
+
+        out_nc = torch.ops.bitsandbytes.int8_mm_dequant(A_noncontig, row_stats_noncontig, col_stats_noncontig)
+        out_c = torch.ops.bitsandbytes.int8_mm_dequant(
+            A_noncontig.contiguous(), row_stats_noncontig.contiguous(), col_stats_noncontig.contiguous()
+        )
+
+        torch.testing.assert_close(out_nc, out_c)
