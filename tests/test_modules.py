@@ -493,11 +493,16 @@ def test_embedding_not_implemented_error():
         emb = bnb.nn.Embedding8bit(32, 32)
         emb.state_dict()
 
+
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("embedding_class", [bnb.nn.Embedding8bit, bnb.nn.EmbeddingFP4, bnb.nn.EmbeddingNF4])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("quantize_first", [False, True])
 def test_quantized_embedding_dtype_model_updates(device, embedding_class, dtype, quantize_first):
+    if device == "hpu" and embedding_class is not bnb.nn.Embedding8bit:
+        quant_type = "fp4" if embedding_class is bnb.nn.EmbeddingFP4 else "nf4"
+        if not is_supported_on_hpu(quant_type, dtype):
+            pytest.skip("This quantization and dtype configuration is not supported on HPU")
     embedding = embedding_class(16, 64, dtype=torch.float32)
     model = nn.Sequential(embedding, nn.Linear(64, 3))
     packed_weight = None
@@ -542,6 +547,8 @@ def test_quantized_embedding_dtype_model_updates(device, embedding_class, dtype,
 @pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("embedding_class", [bnb.nn.Embedding8bit, bnb.nn.EmbeddingFP4, bnb.nn.EmbeddingNF4])
 def test_quantized_embedding_dtype_convenience_methods(device, embedding_class):
+    if device == "hpu" and embedding_class is not bnb.nn.Embedding8bit:
+        pytest.skip("FP16 4-bit embedding inference is not supported on HPU")
     embedding = embedding_class(16, 64).to(device)
     tokens = torch.tensor([0, 7, 15], device=device)
     expected = embedding(tokens).detach()
