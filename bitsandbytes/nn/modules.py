@@ -803,8 +803,9 @@ class Int8Params(torch.nn.Parameter):
         if is_quantized:
             new_param.CB = new_param.data
 
+            new_param.SCB = self.SCB
             if device is not None and self.SCB is not None and self.SCB.device.type != "meta":
-                new_param.SCB = self.SCB.to(device)
+                new_param.SCB = self.SCB.to(device=device, non_blocking=non_blocking)
 
         return new_param
 
