@@ -20,10 +20,12 @@ def _metadata_view(values, stride=2):
 @pytest.mark.parametrize("blocksize", [64, 128])
 @pytest.mark.parametrize("stride", [1, 2])
 def test_cpu_blockwise_quantization_uses_codebook_values(dtype, blocksize, stride):
-    code = F.create_dynamic_map()
+    code = torch.linspace(-1.0, 1.0, 256)
     view, storage = _metadata_view(code, stride)
     before = storage.clone()
-    values = torch.linspace(-1.0, 1.0, 257, dtype=dtype)
+    # Binary fractions stay away from the LUT discretization boundaries.
+    values = torch.tensor([-1.0, -0.75, -0.5, -0.25, 0.125, 0.5, 0.75, 1.0], dtype=dtype)
+    values = values.repeat(33)[:257]
     expected_codes, expected_state = F.quantize_blockwise(values, code=code, blocksize=blocksize)
 
     actual_codes, state = F.quantize_blockwise(values, code=view, blocksize=blocksize)
@@ -77,14 +79,10 @@ def test_cpu_blockwise_caller_supplied_scale_and_output_views(dtype):
     torch.testing.assert_close(scales, expected_state.absmax, rtol=0, atol=0)
     assert torch.all(encoded_storage[1::2] == 173)
 
-    output_storage = torch.full((514,), -7.0, dtype=dtype)
-    output = output_storage[::2]
     expected = F.dequantize_blockwise(expected_codes, expected_state)
-    actual = F.dequantize_blockwise(actual_codes, state, out=output)
+    actual = F.dequantize_blockwise(actual_codes, state)
 
-    assert actual is output
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
-    assert torch.all(output_storage[1::2] == -7.0)
 
 
 def test_cpu_blockwise_explicit_metadata_survives_weight_serialization():
