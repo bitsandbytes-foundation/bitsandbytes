@@ -880,7 +880,10 @@ class Embedding8bit(nn.Embedding):
                 return
             assign = local_metadata.get("assign_to_params_buffers", False)
             device = packed_weight.device if assign else self.weight.device
-            self.weight.data = torch.empty_like(packed_weight, device=device)
+            if assign:
+                self.weight = Int8Params(packed_weight, requires_grad=False, has_fp16_weights=False)
+            else:
+                self.weight.data = torch.empty_like(packed_weight, device=device)
             scales = scales.to(device=device).clone()
             state_dict.pop(scale_key)
 
@@ -1033,6 +1036,7 @@ class Embedding4bit(nn.Embedding):
             for key in quantized_keys:
                 state_dict.pop(key)
             if assign:
+                self.weight = restored
                 state_dict[weight_key] = restored
             else:
                 self.weight.data = torch.empty_like(restored.data, device=device)

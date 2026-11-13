@@ -132,3 +132,16 @@ def test_embedding_checkpoint_requires_int8_scales():
     with pytest.raises(RuntimeError, match="Missing quantization scales"):
         destination.load_state_dict(state)
     torch.testing.assert_close(destination.weight, original_weight, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("kind", ["int8", "fp4", "nf4"])
+@pytest.mark.parametrize("width", [32, 64])
+def test_embedding_checkpoint_assign_materializes_meta(kind, width):
+    source = make_embedding(kind, width=width).to("cpu")
+    with torch.device("meta"):
+        destination = make_embedding(kind, width=width)
+    assert destination.weight.device.type == "meta"
+    destination.load_state_dict(source.state_dict(), assign=True, strict=True)
+    assert destination.weight.device.type == "cpu"
+    inputs = torch.tensor([[1, 7], [4, 9]])
+    torch.testing.assert_close(destination(inputs), source(inputs), rtol=0, atol=0)
