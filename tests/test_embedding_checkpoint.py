@@ -1,10 +1,10 @@
 import copy
 
 import pytest
-from tests.helpers import get_available_devices
 import torch
 
 import bitsandbytes as bnb
+from tests.helpers import get_available_devices
 
 
 def make_embedding(kind, width=64, dtype=torch.float32, storage=torch.uint8):
