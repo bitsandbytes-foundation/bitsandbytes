@@ -857,7 +857,41 @@ class Embedding8bit(nn.Embedding):
         self.weight = Int8Params(self.weight.data, has_fp16_weights=False, requires_grad=False)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        raise NotImplementedError("Saving Embedding8bit module is not implemented")
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        if self.weight.SCB is not None:
+            destination[prefix + "SCB"] = self.weight.SCB if keep_vars else self.weight.SCB.detach()
+
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+    ):
+        weight_key = prefix + "weight"
+        scale_key = prefix + "SCB"
+        packed_weight = state_dict.get(weight_key)
+        scales = state_dict.get(scale_key)
+        quantized = packed_weight is not None and packed_weight.dtype == torch.int8
+        if quantized:
+            if scales is None:
+                error_msgs.append(f"Missing quantization scales for {weight_key}")
+                return
+            if packed_weight.shape != (self.num_embeddings, self.embedding_dim) or scales.shape != (
+                self.num_embeddings,
+            ):
+                error_msgs.append(f"Invalid quantized embedding shape for {weight_key}")
+                return
+            assign = local_metadata.get("assign_to_params_buffers", False)
+            device = packed_weight.device if assign else self.weight.device
+            self.weight.data = torch.empty_like(packed_weight, device=device)
+            scales = scales.to(device=device).clone()
+            state_dict.pop(scale_key)
+
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        )
+        if quantized:
+            if not isinstance(self.weight, Int8Params):
+                self.weight = Int8Params(self.weight.data, requires_grad=False, has_fp16_weights=False)
+            self.weight.CB = self.weight.data
+            self.weight.SCB = scales
 
     def forward(self, input: Tensor) -> Tensor:
         if not hasattr(self.weight, "SCB"):
@@ -961,7 +995,56 @@ class Embedding4bit(nn.Embedding):
         return output.to(self.dtype)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        raise NotImplementedError("Saving Embedding4bit module is not implemented")
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        if self.weight.quant_state is not None:
+            for name, value in self.weight.quant_state.as_dict(packed=True).items():
+                destination[prefix + "weight." + name] = value if keep_vars else value.detach()
+
+    def _load_from_state_dict(
+        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+    ):
+        weight_key = prefix + "weight"
+        quantized_keys = [
+            key
+            for key in state_dict
+            if key.startswith(weight_key + ".")
+            and key.split(".")[-1] in QuantState.valid_qs_keys + QuantState.valid_qs_type_keys
+        ]
+        restored = None
+        if quantized_keys:
+            if weight_key not in state_dict:
+                error_msgs.append(f"Missing packed weight for {weight_key}")
+                return
+            assign = local_metadata.get("assign_to_params_buffers", False)
+            packed_weight = state_dict[weight_key]
+            device = packed_weight.device if assign else self.weight.device
+            stats = {key: state_dict[key] for key in quantized_keys}
+            # Loading must not share mutable quantization metadata with the
+            # checkpoint: later device moves update these tensors in place.
+            restored = Params4bit.from_prequantized(
+                packed_weight,
+                copy.deepcopy(stats),
+                requires_grad=False,
+                device=device,
+            )
+            if restored.quant_state.shape != (self.num_embeddings, self.embedding_dim):
+                error_msgs.append(f"Invalid quantized embedding shape for {weight_key}")
+                return
+            for key in quantized_keys:
+                state_dict.pop(key)
+            if assign:
+                state_dict[weight_key] = restored
+            else:
+                self.weight.data = torch.empty_like(restored.data, device=device)
+                self.weight.__dict__.update(restored.__dict__)
+                state_dict[weight_key] = restored.data
+
+        super()._load_from_state_dict(
+            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        )
+        if restored is not None:
+            self.weight.module = self
+            self.quant_state = self.weight.quant_state
 
     def forward(self, input: Tensor) -> Tensor:
         fix_4bit_weight_quant_state_from_module(self)
