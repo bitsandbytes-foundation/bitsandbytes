@@ -38,6 +38,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
     @register_kernel("bitsandbytes::quantize_blockwise", "cpu")
     def _(A: torch.Tensor, code: torch.Tensor, blocksize: int) -> tuple[torch.Tensor, torch.Tensor]:
         A = A.contiguous()
+        code = code.contiguous()
         n = A.numel()
         blocks = -(n // -blocksize)
 
@@ -96,6 +97,8 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         A: torch.Tensor, absmax: torch.Tensor, code: torch.Tensor, blocksize: int, dtype: torch.dtype
     ) -> torch.Tensor:
         A = A.contiguous()
+        absmax = absmax.contiguous()
+        code = code.contiguous()
         out = torch.empty_like(A, dtype=dtype)
         if dtype == torch.float32:
             lib.cdequantize_blockwise_cpu_fp32(
