@@ -14,6 +14,7 @@ from .adamw import (
     PagedAdamW32bit,
 )
 from .ademamix import AdEMAMix, AdEMAMix8bit, AdEMAMix32bit, PagedAdEMAMix, PagedAdEMAMix8bit, PagedAdEMAMix32bit
+from .c_adamw import CAdamW, CAdamW8bit, CAdamW32bit
 from .lamb import LAMB, LAMB8bit, LAMB32bit
 from .lars import LARS, LARS8bit, LARS32bit, PytorchLARS
 from .lion import Lion, Lion8bit, Lion32bit, PagedLion, PagedLion8bit, PagedLion32bit
