@@ -814,21 +814,33 @@ def _gemm_4bit_use_custom_cuda(device_index, dtype, M, N, K):
 @functools.cache
 def _gemm_4bit_use_custom_rocm(device_index, dtype, M, N, K):
     """
-    Fused SIMT kernel vs dequant+F.linear heuristic for ROCm.
+    Fused custom kernel vs dequant+F.linear heuristic for ROCm.
 
-    RDNA3/RDNA4 calibration keeps the SIMT kernel through ~M=8.
-    gfx125x (CDNA5) is Wave32 but lacks the v_dot2 SIMT
-    instructions, so its kernel takes the fp32-FMA CDNA math path. The crossover
-    below is left at the gfx12 default (M<=8) pending dedicated calibration.
-    CDNA/gfx9 is calibrated on MI308X (gfx942): bf16/fp16 win through M<=4
-    after the SIMT math-path tuning, while fp32 only has a broad win through M<=2.
+    RDNA3/RDNA3.5/RDNA4 with K % 64 == 0 have a WMMA kernel (the C dispatch picks SIMT or WMMA),
+    which stays ahead of dequant+F.linear up to these M limits:
+    - gfx110x: bf16/fp16 through M=384, fp32 through M=128.
+    - gfx1103: all dtypes through M=384.
+    - gfx115x: all dtypes through M=512.
+    - gfx120x: bf16/fp16 through M=384, fp32 through M=512.
+    Otherwise (K % 64 != 0) gfx11/gfx12 keep SIMT through M=8. gfx125x (CDNA5) is Wave32 but lacks the v_dot2
+    SIMT instructions, so its kernel takes the fp32-FMA CDNA math path; it keeps the gfx12 default
+    (M<=8) pending calibration. CDNA/gfx9 is calibrated on MI308X (gfx942): bf16/fp16 win through
+    M<=4 after the SIMT math-path tuning, fp32 only through M<=2.
 
-    TODO: revisit once WMMA/MFMA kernels land; calibrate the gfx125x crossover.
+    TODO: add MFMA kernels for CDNA; calibrate the gfx125x crossover.
     """
     if M <= _GEMM_4BIT_CUSTOM_FLOOR_M and dtype != torch.float32:
         return True
 
     arch = _rocm_gfx_arch(device_index)
+    if arch == "gfx1103" and K % 64 == 0:  # RDNA3 iGPU WMMA
+        return M <= 384
+    if arch.startswith("gfx110") and K % 64 == 0:  # RDNA3 WMMA
+        return M <= (128 if dtype == torch.float32 else 384)
+    if arch.startswith("gfx115") and K % 64 == 0:  # RDNA3.5 WMMA (gfx1151 values)
+        return M <= 512
+    if arch.startswith("gfx120") and K % 64 == 0:  # RDNA4 WMMA (gfx1201 values)
+        return M <= (512 if dtype == torch.float32 else 384)
     if arch.startswith("gfx11") or arch.startswith("gfx12"):  # RDNA3 / RDNA4 / CDNA5 (gfx125x)
         return M <= 8
     if arch.startswith("gfx9"):  # CDNA1-4 / MI-series (Wave64)
@@ -917,7 +929,7 @@ def _dequant_linear_fallback(
 
 
 # Unified CUDA/ROCm dispatch for bitsandbytes::gemm_4bit. The choice *among* custom
-# kernels (CUDA SIMT vs MMA; ROCm SIMT) is made in the C dispatch (csrc/gemm_4bit.cu).
+# kernels (CUDA SIMT vs MMA; ROCm SIMT vs WMMA) is made in the C dispatch (csrc/gemm_4bit.cu).
 _GEMM_4BIT_CUSTOM_FLOOR_M = 4
 if torch.version.hip is None:
     _gemm_4bit_use_custom_fn = _gemm_4bit_use_custom_cuda
@@ -926,9 +938,10 @@ if torch.version.hip is None:
     _gemm_4bit_custom_max_m = 1536
 else:
     _gemm_4bit_use_custom_fn = _gemm_4bit_use_custom_rocm
-    # ROCm: the custom path is SIMT-only today; the per-arch heuristic above owns
-    # RDNA/CDNA thresholds. Keep a hard upper cap while WMMA/MFMA paths are absent.
-    _gemm_4bit_custom_max_m = 256
+    # ROCm: the per-arch heuristic above owns RDNA/CDNA thresholds; gfx110x/gfx1201 bf16/fp16
+    # keep the custom kernel through M=384, gfx1103 fp32 through M=384, gfx1151 (all dtypes)
+    # and gfx1201 fp32 through M=512.
+    _gemm_4bit_custom_max_m = 512
 
 
 @register_kernel("bitsandbytes::gemm_4bit", "cuda")
