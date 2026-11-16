@@ -13,17 +13,13 @@
 #include "gemm_4bit_wmma.cuh"
 #include "gemm_4bit_wmma_rules.cuh"
 
-// RDNA3.5 (gfx115x) shares the gfx11 WMMA encoding and half-wave behaviour
-//, so it runs the gfx11 kernels.
-#define BNB_WMMA_RDNA3 (IS_RDNA3 || IS_RDNA3_5)
-#define BNB_WMMA_RDNA4 IS_RDNA4
-
 // WMMA generation the current device pass compiles kernel bodies for (0 = none,
 // including the host pass). Kernels are templated on the generation so the host
-// can size tiles for the device it runs on.
-#if BNB_WMMA_RDNA3
+// can size tiles for the device it runs on. RDNA3.5 (gfx115x) shares the gfx11 WMMA
+// encoding and runs the gfx11 kernels; the generic targets cover their family's chips.
+#if IS_RDNA3 || IS_RDNA3_5 || defined(__gfx11_generic__)
 #define BNB_WMMA_DEVICE_ARCH 11
-#elif BNB_WMMA_RDNA4
+#elif IS_RDNA4 || defined(__gfx12_generic__)
 #define BNB_WMMA_DEVICE_ARCH 12
 #else
 #define BNB_WMMA_DEVICE_ARCH 0
@@ -61,11 +57,9 @@ using wmma_v16s = short __attribute__((ext_vector_type(16)));
 // products (see wmma_16x16x16), gfx12 one full 16x16x16 product.
 constexpr int wmma_rows(int arch) { return arch == 12 ? 16 : 8; }
 
-// WMMA generation (kernel family) of a tuning target (gemm_4bit_wmma_rules.cuh): gfx115x and gfx1103 run the
-// gfx11 kernels.
-constexpr int wmma_gen(int target) {
-    return target == WMMA_TARGET_GFX115X || target == WMMA_TARGET_GFX1103 ? 11 : target;
-}
+// WMMA generation (kernel family) of a tuning target (gemm_4bit_wmma_rules.cuh): gfx120x runs the gfx12
+// kernels, gfx110x, gfx1103 and gfx115x the gfx11 kernels.
+constexpr int wmma_gen(int target) { return target == WMMA_TARGET_GFX12 ? 12 : 11; }
 
 // Per-lane operand fragment: 16 (gfx11) or 8 (gfx12) 16-bit values.
 template <int ARCH> using wmma_frag = std::conditional_t<ARCH == 12, wmma_v4u, wmma_v8u>;
@@ -88,7 +82,7 @@ template <int ARCH> using wmma_frag = std::conditional_t<ARCH == 12, wmma_v4u, w
 template <int ARCH, typename T>
 __device__ __forceinline__ wmma_v8f wmma_16x16x16(wmma_frag<ARCH> a, wmma_frag<ARCH> b, wmma_v8f c) {
     if constexpr (ARCH == 11) {
-#if BNB_WMMA_RDNA3
+#if BNB_WMMA_DEVICE_ARCH == 11
         if constexpr (std::is_same_v<T, half>) {
             return __builtin_amdgcn_wmma_f32_16x16x16_f16_w32(
                 __builtin_bit_cast(wmma_v16h, a), __builtin_bit_cast(wmma_v16h, b), c
@@ -100,7 +94,7 @@ __device__ __forceinline__ wmma_v8f wmma_16x16x16(wmma_frag<ARCH> a, wmma_frag<A
         }
 #endif
     } else {
-#if BNB_WMMA_RDNA4
+#if BNB_WMMA_DEVICE_ARCH == 12
         if constexpr (std::is_same_v<T, half>) {
             return __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(
                 __builtin_bit_cast(wmma_v8h, a), __builtin_bit_cast(wmma_v8h, b), c
@@ -120,8 +114,12 @@ constexpr int WMMA_F32_PARTS = 3;
 
 // Split an fp32 value into P bf16 parts (bit patterns in the low 16 bits) whose sum
 // is x to ~2^-(8P) relative: every part but the last truncates, so each remainder
-// is exact in fp32; the last rounds to nearest even. Inf/NaN keep the lower parts at
-// zero so they propagate through the leading part alone.
+// is exact in fp32; the last rounds to nearest even. This holds for |x| >= ~1e-33
+// (2^-110): below that the lower parts and their products are fp32 denormals, which
+// the WMMAs flush, so a row whose values are all that small loses accuracy.
+// Inf/NaN go to the last part alone, with the others zero: the last part is only
+// multiplied by the leading part of B, so no Inf * 0 products arise from B's lower
+// parts (zero for every centroid exact in bf16) and Inf/NaN propagate as in fp32.
 template <int P> __device__ __forceinline__ void split_bf16(float x, uint32_t (&parts)[P]) {
     const bool finite = (__builtin_bit_cast(uint32_t, x) & 0x7f800000u) != 0x7f800000u;
     float r = x;
@@ -135,14 +133,17 @@ template <int P> __device__ __forceinline__ void split_bf16(float x, uint32_t (&
     parts[P - 1] = (bits + 0x7fffu + ((bits >> 16) & 1u)) >> 16;
     if (!finite) {
 #pragma unroll
-        for (int p = 1; p < P; p++)
+        for (int p = 0; p < P - 1; p++)
             parts[p] = 0u;
+        // Keep NaNs whose payload is only in the low 16 bits from truncating to Inf.
+        const uint32_t xb = __builtin_bit_cast(uint32_t, x);
+        parts[P - 1] = (xb >> 16) | ((xb & 0x007fffffu) ? 0x40u : 0u);
     }
 }
 
 // Add the value held by the lane 16 positions away (the other half-wave).
 __device__ __forceinline__ float half_wave_sum(float v) {
-#if BNB_WMMA_RDNA3
+#if BNB_WMMA_DEVICE_ARCH == 11
     const uint32_t other = __builtin_amdgcn_permlanex16(
         __builtin_bit_cast(uint32_t, v), __builtin_bit_cast(uint32_t, v), 0x76543210u, 0xfedcba98u, false, false
     );
@@ -509,6 +510,9 @@ __device__ __forceinline__ void gemm_4bit_wmma_body(
             for (int wm = 0; wm < WM; wm++)
 #pragma unroll
                 for (int wn = 0; wn < WN; wn++)
+                    // absmax scales the group's fp32 sum of A x centroid only here, so that sum
+                    // must stay finite: |A| below ~FLT_MAX / blocksize (~5e36 at blocksize 64),
+                    // reachable only by fp32/bf16 inputs (the SIMT bf16 path: FLT_MAX / 8).
                     if constexpr (!PRESCALE)
                         acc[wm][wn] += tmp[wm][wn] * scale[wn];
         }
@@ -622,26 +626,18 @@ __global__ void __launch_bounds__(KSPLIT* WARPS_M* WARPS_N * 32) gemm_4bit_wmma(
 namespace {
 
 // WMMA tuning target for a gcnArchName ("gfx1201" or "gfx1201:xnack-"): 11, 113, 115, 12, or 0.
-// The chips must be ones whose device pass emits the kernel body (IS_RDNA3 / IS_RDNA4 in
-// common.cuh); any other device would launch an empty kernel. Measured: gfx1100, gfx1103,
-// gfx1151 and gfx1201. gfx1101/gfx1102, gfx1150/gfx1152/gfx1153 and gfx1200 share the WMMA
+// The chips must be ones whose device pass emits the kernel body (BNB_WMMA_DEVICE_ARCH,
+// including builds for gfx11-generic / gfx12-generic); any other device would launch an empty kernel. Measured:
+// gfx1100, gfx1103, gfx1151 and gfx1201. gfx1101/gfx1102, gfx1150/gfx1152/gfx1153 and gfx1200 share the WMMA
 // instructions of their family and use its rules (gfx1100, gfx1151, gfx1201) unmeasured.
 int wmma_arch_of(const char* name) {
     static constexpr struct {
         const char* chip;
         int arch;
-    } chips[] = {
-        {"gfx1100", 11},
-        {"gfx1101", 11},
-        {"gfx1102", 11},
-        {"gfx1103", WMMA_TARGET_GFX1103},
-        {"gfx1150", WMMA_TARGET_GFX115X},
-        {"gfx1151", WMMA_TARGET_GFX115X},
-        {"gfx1152", WMMA_TARGET_GFX115X},
-        {"gfx1153", WMMA_TARGET_GFX115X},
-        {"gfx1200", 12},
-        {"gfx1201", 12}
-    };
+    } chips[] = {{"gfx1100", WMMA_TARGET_GFX11},   {"gfx1101", WMMA_TARGET_GFX11},   {"gfx1102", WMMA_TARGET_GFX11},
+                 {"gfx1103", WMMA_TARGET_GFX1103}, {"gfx1150", WMMA_TARGET_GFX115X}, {"gfx1151", WMMA_TARGET_GFX115X},
+                 {"gfx1152", WMMA_TARGET_GFX115X}, {"gfx1153", WMMA_TARGET_GFX115X}, {"gfx1200", WMMA_TARGET_GFX12},
+                 {"gfx1201", WMMA_TARGET_GFX12}};
 
     for (const auto& c : chips) {
         const size_t n = std::strlen(c.chip);
@@ -672,9 +668,9 @@ int wmma_device_arch() {
 /// (see gemm_4bit_wmma_body). Only matters with two or more row tiles. fp32 on gfx110x
 /// stays N-first. The tile rules are fitted with this order.
 bool wmma_row_tiles_first(int target, bool fp32) {
-    if (target == 11 || target == WMMA_TARGET_GFX1103)
+    if (target == WMMA_TARGET_GFX11 || target == WMMA_TARGET_GFX1103)
         return !fp32;
-    return target == 12 || target == WMMA_TARGET_GFX115X;
+    return target == WMMA_TARGET_GFX12 || target == WMMA_TARGET_GFX115X;
 }
 
 /// Launch one tile configuration. KCH_MAX is lowered to 1 when K is not a multiple
@@ -863,16 +859,16 @@ bool launch_gemm_4bit_wmma(
     // clang-format on
 ) {
 #if BNB_WMMA_EMIT_12
-    if (arch == 12) {
-        launch_gemm_4bit_wmma_arch<12, T>(
+    if (arch == WMMA_TARGET_GFX12) {
+        launch_gemm_4bit_wmma_arch<WMMA_TARGET_GFX12, T>(
             A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type, stream
         );
         return true;
     }
 #endif
 #if BNB_WMMA_EMIT_11
-    if (arch == 11) {
-        launch_gemm_4bit_wmma_arch<11, T>(
+    if (arch == WMMA_TARGET_GFX11) {
+        launch_gemm_4bit_wmma_arch<WMMA_TARGET_GFX11, T>(
             A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type, stream
         );
         return true;

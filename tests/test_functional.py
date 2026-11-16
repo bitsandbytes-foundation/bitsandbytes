@@ -37,7 +37,7 @@ _GEMM_4BIT_SHAPES = [
     (24, 6000, 704),  # RDNA3/RDNA4 WMMA: 64-K iterations (K % 128 != 0), wide N
     (200, 2000, 512),  # RDNA3/RDNA4 WMMA: M > 128 tile with split-K
     (5, 8192, 256),  # RDNA4 WMMA: fp32 starts at M=5 on wide N
-    (16, 6144, 512),  # RDNA4 WMMA: M <= 16 tile for N >= 6144 (128-K iterations)
+    (16, 6144, 512),  # RDNA4 WMMA: wide-N M <= 16 tile (128-K iterations for fp16/bf16)
     (17, 4096, 704),  # RDNA4 WMMA: one row past a 16-row tile, K % 128 != 0
 ]
 
@@ -1029,7 +1029,7 @@ class TestQuantize4BitFunctional:
         # emulate it with split bf16 operands). Compare against a float64 product of the
         # same dequantized weights. N=8192 reaches RDNA4's fp32 WMMA tiles at small M, which
         # narrow weights (N=1000) leave to SIMT up to M=31.
-        if device not in ("cuda",):
+        if device != "cuda":
             pytest.skip("fp32 precision bound is calibrated for the CUDA/ROCm kernels")
         K = 1024
         A = torch.randn(1, M, K, dtype=torch.float32, device=device)
@@ -1039,10 +1039,31 @@ class TestQuantize4BitFunctional:
         )
         ref = A.double() @ F.dequantize_4bit(qB, qs).double().t()
         out = bnb.matmul_4bit(A, qB, qs)
-        # fp32 kernels and the fp32 dequant+F.linear fallback stay below ~6e-7; a
-        # reduced-precision (e.g. bf16 or two-part bf16) path would be at >=8e-6.
+        # Mean absolute error over mean absolute reference. The fp32 kernels and the fp32
+        # dequant+F.linear fallback stay below ~1.5e-6 (the RDNA4 three-part split-bf16 WMMA path
+        # with blocksize 64 is the highest); a two-part bf16 split or bf16 math would be at >=8e-6.
         rel = ((out.double() - ref).abs().mean() / ref.abs().mean()).item()
         assert rel < 2e-6
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("M", [4, 100], ids=id_formatter("M"))
+    def test_matmul_4bit_fp32_special_values(self, M, device):
+        # Inf and NaN activations must propagate as in fp32 math on every kernel path (the
+        # RDNA3/RDNA4 split-bf16 WMMA path must not turn Inf * (zero lower part) into NaN).
+        if device != "cuda":
+            pytest.skip("checks the CUDA/ROCm 4-bit GEMM kernels")
+        N, K = 4096, 1024
+        A = torch.randn(1, M, K, dtype=torch.float32, device=device)
+        A[..., 0] = float("inf")
+        A[..., 1::4, 1] = float("-inf")
+        A[..., 2::4, 2] = float("nan")
+        B = torch.randn(N, K, dtype=torch.float32, device=device) / (K**0.5)
+        qB, qs = F.quantize_4bit(B, blocksize=64, quant_type="nf4")
+        ref = A.double() @ F.dequantize_4bit(qB, qs).double().t()
+        out = bnb.matmul_4bit(A, qB, qs).double()
+        assert torch.equal(out.isnan(), ref.isnan())
+        assert torch.equal(out.isposinf(), ref.isposinf())
+        assert torch.equal(out.isneginf(), ref.isneginf())
 
     @pytest.mark.parametrize("device", get_available_devices())
     def test_matmul_4bit_weight_orientation(self, device):

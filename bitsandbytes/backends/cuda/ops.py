@@ -833,14 +833,15 @@ def _gemm_4bit_use_custom_rocm(device_index, dtype, M, N, K):
         return True
 
     arch = _rocm_gfx_arch(device_index)
-    if arch == "gfx1103" and K % 64 == 0:  # RDNA3 iGPU WMMA
-        return M <= 384
-    if arch.startswith("gfx110") and K % 64 == 0:  # RDNA3 WMMA
-        return M <= (128 if dtype == torch.float32 else 384)
-    if arch.startswith("gfx115") and K % 64 == 0:  # RDNA3.5 WMMA (gfx1151 values)
-        return M <= 512
-    if arch.startswith("gfx120") and K % 64 == 0:  # RDNA4 WMMA (gfx1201 values)
-        return M <= (512 if dtype == torch.float32 else 384)
+    if K % 64 == 0:  # WMMA kernel
+        if arch == "gfx1103":  # RDNA3 iGPU
+            return M <= 384
+        if arch.startswith("gfx110"):  # RDNA3
+            return M <= (128 if dtype == torch.float32 else 384)
+        if arch.startswith("gfx115"):  # RDNA3.5 (gfx1151 values)
+            return M <= 512
+        if arch.startswith("gfx120"):  # RDNA4 (gfx1201 values)
+            return M <= (512 if dtype == torch.float32 else 384)
     if arch.startswith("gfx11") or arch.startswith("gfx12"):  # RDNA3 / RDNA4 / CDNA5 (gfx125x)
         return M <= 8
     if arch.startswith("gfx9"):  # CDNA1-4 / MI-series (Wave64)
@@ -938,9 +939,7 @@ if torch.version.hip is None:
     _gemm_4bit_custom_max_m = 1536
 else:
     _gemm_4bit_use_custom_fn = _gemm_4bit_use_custom_rocm
-    # ROCm: the per-arch heuristic above owns RDNA/CDNA thresholds; gfx110x/gfx1201 bf16/fp16
-    # keep the custom kernel through M=384, gfx1103 fp32 through M=384, gfx1151 (all dtypes)
-    # and gfx1201 fp32 through M=512.
+    # ROCm: the per-arch heuristic above owns RDNA/CDNA thresholds; this is the largest of them.
     _gemm_4bit_custom_max_m = 512
 
 
