@@ -1,14 +1,17 @@
-// AMD WMMA 4-bit GEMM kernel for RDNA3 (gfx110x) and RDNA4 (gfx120x), wave32.
+// AMD WMMA 4-bit GEMM kernel for RDNA3 (gfx110x), RDNA3.5 (gfx115x) and RDNA4 (gfx120x), wave32.
 // Computes C[M,N] = A[M,K] @ B[N,K]^T + bias with fused 4-bit dequantization.
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
+#include <utility>
 
 #include "common.cuh"
 #include "gemm_4bit_common.cuh"
 #include "gemm_4bit_wmma.cuh"
+#include "gemm_4bit_wmma_rules.cuh"
 
 // RDNA3.5 (gfx115x) shares the gfx11 WMMA encoding and half-wave behaviour
 //, so it runs the gfx11 kernels.
@@ -58,13 +61,8 @@ using wmma_v16s = short __attribute__((ext_vector_type(16)));
 // products (see wmma_16x16x16), gfx12 one full 16x16x16 product.
 constexpr int wmma_rows(int arch) { return arch == 12 ? 16 : 8; }
 
-// Tuning targets returned by gemm_4bit_wmma_arch(): 11 (gfx110x), 115 (gfx115x, RDNA3.5)
-// and 12 (gfx120x). gfx115x runs the gfx11 kernels with its own tile rules.
-constexpr int WMMA_TARGET_GFX115X = 115;
-// gfx1103 (Radeon 760M/780M iGPU): gfx110x kernels and tile rules, own fp32 dispatch (see
-// csrc/gemm_4bit.cu and the Python cutover).
-constexpr int WMMA_TARGET_GFX1103 = 113;
-
+// WMMA generation (kernel family) of a tuning target (gemm_4bit_wmma_rules.cuh): gfx115x and gfx1103 run the
+// gfx11 kernels.
 constexpr int wmma_gen(int target) {
     return target == WMMA_TARGET_GFX115X || target == WMMA_TARGET_GFX1103 ? 11 : target;
 }
@@ -750,220 +748,93 @@ void launch_wmma_tile(
     );
 }
 
-/// @brief Tile selection for one WMMA generation (parameters as launch_gemm_4bit_wmma).
-///
-/// gfx11: calibrated on gfx1100 (W7900) at pinned clocks (perf level high) over 40 LLM
-/// linear-layer shapes with row-tiles-first block order and fp16 prescaling: up to three
-/// leaves on N or K/N per M bucket, fp16 total
-/// time within 0.3-4.4% of the best swept tile per shape (fp32 within 1.5%). Sweeps at default (auto) clocks
-/// are bimodal by ~10% and picked wrong small-M tiles. Narrow N keeps 16-column warp tiles and deeper
-/// split-K so enough warps stream B; wide N uses 32-column warp tiles and 128-K
-/// iterations.
+/// The tile rule table (gemm_4bit_wmma_rules.cuh) of a tuning target and dtype. gfx1103 uses the gfx110x tables
+/// (it differs in the SIMT/WMMA fp32 cutoffs and Python M limits only); bf16 and fp16 share a table.
+template <int TARGET, typename T> constexpr const auto& wmma_rules() {
+    constexpr bool fp32 = std::is_same_v<T, float>;
+    if constexpr (wmma_gen(TARGET) == 12) {
+        if constexpr (fp32)
+            return wmma_rules_gfx12_f32;
+        else
+            return wmma_rules_gfx12_f16;
+    } else if constexpr (TARGET == WMMA_TARGET_GFX115X) {
+        if constexpr (fp32)
+            return wmma_rules_gfx115_f32;
+        else
+            return wmma_rules_gfx115_f16;
+    } else {
+        if constexpr (fp32)
+            return wmma_rules_gfx11_f32;
+        else
+            return wmma_rules_gfx11_f16;
+    }
+}
+
+/// The distinct tiles of a rule table in first-use order (at most four per bucket).
+template <int R> struct WmmaTileList {
+    WmmaTile tiles[R * 4] = {};
+    int n = 0;
+};
+
+template <int R> constexpr WmmaTileList<R> wmma_distinct_tiles(const WmmaRule (&rules)[R]) {
+    WmmaTileList<R> list;
+    auto add = [&](const WmmaTile& t) {
+        for (int i = 0; i < list.n; i++)
+            if (list.tiles[i] == t)
+                return;
+        list.tiles[list.n++] = t;
+    };
+    for (const WmmaRule& rule : rules) {
+        for (const WmmaLeaf& leaf : rule.leaves)
+            if (leaf.on != WmmaOn::NONE)
+                add(leaf.tile);
+        add(rule.otherwise);
+    }
+    return list;
+}
+
+/// The distinct tiles of RULES as a compile-time array: the launcher instantiates exactly these.
+template <const auto& RULES>
+inline constexpr auto wmma_tiles_of = [] {
+    constexpr auto list = wmma_distinct_tiles(RULES);
+    std::array<WmmaTile, list.n> tiles{};
+    for (int i = 0; i < list.n; i++)
+        tiles[i] = list.tiles[i];
+    return tiles;
+}();
+
+/// Launch `tile`, which must be one of TILES, through its compile-time instantiation.
+template <int ARCH, typename T, const auto& TILES, size_t... I>
+void launch_wmma_tile_of(
+    const WmmaTile& tile, std::index_sequence<I...>, const T* A, const uint8_t* B, const float* absmax,
+    const uint8_t* absmax_8bit, const float* absmax_code, const float* absmax_offset, T* C, const T* bias, int M, int N,
+    int K, int blocksize, int quant_type, bool row_tiles_first, bnb_stream_t stream
+) {
+    (void)((tile == TILES[I] &&
+            (launch_wmma_tile<
+                 ARCH, T, TILES[I].wm, TILES[I].wn, TILES[I].warps_m, TILES[I].warps_n, TILES[I].ksplit, TILES[I].kch>(
+                 A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type,
+                 row_tiles_first, stream
+             ),
+             true)) ||
+           ...);
+}
+
+/// @brief Pick the tile for (M, N, K) from the target's rule table and launch it (parameters as
+/// launch_gemm_4bit_wmma).
 template <int TARGET, typename T>
 void launch_gemm_4bit_wmma_arch(
-    // clang-format off
-    const T*       A,             // inputs [M, K]
-    const uint8_t* B,             // packed 4-bit weights [N, K/2]
-    const float*   absmax,        // fp32 absmax [N*K/blocksize] or [ceil(N*K/(blocksize*256))] when nested
-    const uint8_t* absmax_8bit,   // [N*K/blocksize] uint8 compressed absmax; nullptr = non-nested
-    const float*   absmax_code,   // [256] codebook for 8bit absmax
-    const float*   absmax_offset, // scalar; nullptr = non-nested
-    T*             C,             // output [M, N]
-    const T*       bias,          // [N] optional, nullptr = no bias
-    int M, int N, int K,          // problem shape
-    int blocksize,                // elements per quantization block
-    int quant_type,               // 1 = FP4, 2 = NF4
-    bnb_stream_t stream           // HIP stream
-    // clang-format on
+    const T* A, const uint8_t* B, const float* absmax, const uint8_t* absmax_8bit, const float* absmax_code,
+    const float* absmax_offset, T* C, const T* bias, int M, int N, int K, int blocksize, int quant_type,
+    bnb_stream_t stream
 ) {
-    constexpr int ARCH = wmma_gen(TARGET);
+    constexpr const auto& RULES = wmma_rules<TARGET, T>();
+    constexpr const auto& TILES = wmma_tiles_of<RULES>;
     const bool row_tiles_first = wmma_row_tiles_first(TARGET, std::is_same_v<T, float>);
-    // clang-format off
-#define LAUNCH_WMMA(WM, WN, WARPS_M, WARPS_N, KSPLIT, KCH_MAX)                                           \
-    launch_wmma_tile<ARCH, T, WM, WN, WARPS_M, WARPS_N, KSPLIT, KCH_MAX>(                                \
-        A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type,  \
-        row_tiles_first, stream)
-
-    if constexpr (ARCH == 12) {
-        // gfx12 (16-row WMMA): calibrated on gfx1201 (R9700) at pinned clocks over the same
-        // 40 shapes, within ~2-6% (bf16/fp16) and ~0-2% (fp32) geomean of the best swept tile.
-        // One 16-row tile covers M <= 16, where the kernel is bandwidth-bound; larger M adds
-        // warps along N and rows per warp rather than warps along M.
-        if constexpr (std::is_same_v<T, float>) {
-            // Refitted at pinned clocks on the one-fragment fp32 kernel: total time within
-            // 0.0-1.4% of the best swept tile per shape.
-            if (M <= 16) {
-                if (N < 3840)      LAUNCH_WMMA(1, 1, 1, 2, 2, 1);
-                else if (N < 4608) LAUNCH_WMMA(1, 1, 1, 4, 2, 1);
-                else               LAUNCH_WMMA(1, 2, 1, 2, 2, 1);
-            } else if (M <= 48) {
-                if (N < 8192) LAUNCH_WMMA(1, 1, 1, 4, 2, 1);
-                else          LAUNCH_WMMA(2, 2, 1, 4, 1, 1);
-            } else if (M <= 96) {
-                if (N < 3840) LAUNCH_WMMA(2, 1, 1, 4, 1, 1);
-                else          LAUNCH_WMMA(2, 2, 1, 4, 1, 1);
-            } else if (M <= 192) {
-                if (N < 2048) LAUNCH_WMMA(2, 1, 1, 4, 1, 1);
-                else          LAUNCH_WMMA(2, 2, 1, 4, 1, 1);
-            } else {
-                LAUNCH_WMMA(2, 2, 1, 4, 1, 1);
-            }
-        } else if (M <= 16) {
-            // fp16/bf16 refitted at pinned clocks (perf level high) on R9700: total time within
-            // 0.1-3.6% of the best swept tile per shape (the auto-clock rules were 9% off at
-            // M <= 16 and 12.5% at M = 256).
-            if (N < 3840) LAUNCH_WMMA(1, 1, 1, 2, 8, 1);
-            else          LAUNCH_WMMA(1, 2, 1, 2, 4, 2);
-        } else if (M <= 32) {
-            if (N < 2048)      LAUNCH_WMMA(1, 1, 1, 2, 8, 1);
-            else if (N < 8192) LAUNCH_WMMA(2, 1, 1, 4, 4, 1);
-            else               LAUNCH_WMMA(2, 2, 1, 4, 2, 2);
-        } else if (M <= 96) {
-            if (N < 3840) LAUNCH_WMMA(2, 1, 1, 4, 4, 1);
-            else          LAUNCH_WMMA(2, 2, 1, 4, 2, 2);
-        } else if (M <= 128) {
-            if (N < 3072)      LAUNCH_WMMA(2, 1, 1, 4, 4, 1);
-            else if (N < 8192) LAUNCH_WMMA(2, 2, 1, 4, 2, 2);
-            else               LAUNCH_WMMA(4, 2, 1, 4, 1, 1);
-        } else if (M <= 160) {
-            if (N < 3072) LAUNCH_WMMA(2, 1, 1, 4, 2, 1);
-            else          LAUNCH_WMMA(2, 2, 1, 4, 1, 2);
-        } else {
-            if (N < 2816)      LAUNCH_WMMA(2, 2, 1, 4, 2, 2);
-            else if (N < 3840) LAUNCH_WMMA(4, 1, 1, 4, 1, 1);
-            else               LAUNCH_WMMA(4, 2, 1, 4, 1, 1);
-        }
-        return;
-    } else
-    if constexpr (TARGET == WMMA_TARGET_GFX115X) {
-        // gfx115x (gfx11 kernels): calibrated on gfx1151 (Radeon 8060S, LPDDR5X) at default
-        // clocks over the 40 shapes with row-tiles-first; total time within 1-6% (fp16) and
-        // 0.4-2% (fp32) of the best swept tile per shape (the gfx1100 rules were 15-17% off at
-        // M <= 16 and 33% at M = 128). The 8-row half-wave tiles and 40 CUs favour fewer warps
-        // along N at small M than on gfx1100.
-        if constexpr (std::is_same_v<T, float>) {
-            if (M <= 8) {
-                if (N < 2048)      LAUNCH_WMMA(1, 1, 1, 2, 4, 1);
-                else if (N < 3072) LAUNCH_WMMA(1, 1, 1, 4, 4, 1);
-                else               LAUNCH_WMMA(1, 2, 1, 2, 2, 2);
-            } else if (M <= 16) {
-                // M > 8 refitted from a pinned-clock sweep at M = 12, 24, 48 and 96: the previous
-                // buckets (auto-clock sweep, no data at M = 24/48) were 1.13-1.49x off the best tile.
-                if (K < 4608)      LAUNCH_WMMA(2, 2, 1, 2, 2, 1);
-                else if (K < 8192) LAUNCH_WMMA(2, 2, 1, 4, 1, 2);
-                else               LAUNCH_WMMA(2, 1, 1, 4, 1, 2);
-            } else if (M <= 32) {
-                if (K < 3840)       LAUNCH_WMMA(1, 1, 1, 4, 2, 1);
-                else if (K < 17408) LAUNCH_WMMA(2, 2, 1, 4, 1, 2);
-                else                LAUNCH_WMMA(1, 2, 1, 2, 2, 2);
-            } else if (M <= 64) {
-                if (N < 3840)       LAUNCH_WMMA(2, 2, 1, 4, 1, 2);
-                else if (N < 10240) LAUNCH_WMMA(2, 2, 1, 2, 2, 1);
-                else                LAUNCH_WMMA(2, 2, 1, 4, 1, 2);
-            } else {
-                if (N < 2048)      LAUNCH_WMMA(2, 2, 1, 4, 1, 2);
-                else if (N < 3072) LAUNCH_WMMA(2, 2, 1, 2, 1, 1);
-                else               LAUNCH_WMMA(2, 2, 1, 4, 1, 2);
-            }
-        } else if (M <= 8) {
-            if (N < 3072)       LAUNCH_WMMA(1, 1, 1, 1, 4, 1);
-            else if (N < 28672) LAUNCH_WMMA(1, 1, 1, 1, 8, 2);
-            else                LAUNCH_WMMA(1, 1, 1, 1, 2, 2);
-        } else if (M <= 16) {
-            if (N < 3072)       LAUNCH_WMMA(2, 1, 1, 2, 4, 1);
-            else if (N < 25600) LAUNCH_WMMA(2, 2, 1, 1, 4, 2);
-            else                LAUNCH_WMMA(2, 1, 1, 2, 2, 2);
-        } else if (M <= 24) {
-            // M > 16 refitted from a pinned-clock sweep at M = 24, 48, 96, 192 and 384 (the
-            // auto-clock buckets were 1.10-1.12x off the best tile at M = 24-96). The bucket tops
-            // M = 25-32 and 49-64 keep the gfx1100 tiles, which measured 2-6% faster there.
-            if (K < 8192)       LAUNCH_WMMA(4, 1, 1, 4, 2, 2);
-            else if (K < 10240) LAUNCH_WMMA(4, 1, 1, 2, 1, 2);
-            else                LAUNCH_WMMA(1, 2, 1, 1, 8, 2);
-        } else if (M <= 32) {
-            if (N < 3072)      LAUNCH_WMMA(2, 1, 1, 2, 8, 1);
-            else if (N < 5120) LAUNCH_WMMA(2, 2, 1, 2, 4, 2);
-            else               LAUNCH_WMMA(4, 1, 1, 4, 2, 2);
-        } else if (M <= 48) {
-            if (N < 2816)      LAUNCH_WMMA(2, 1, 1, 4, 2, 2);
-            else if (N < 3840) LAUNCH_WMMA(2, 1, 1, 4, 1, 2);
-            else               LAUNCH_WMMA(2, 1, 1, 4, 4, 2);
-        } else if (M <= 64) {
-            if (N < 3072)      LAUNCH_WMMA(4, 1, 1, 2, 4, 1);
-            else if (N < 5120) LAUNCH_WMMA(4, 1, 1, 4, 2, 2);
-            else               LAUNCH_WMMA(4, 2, 1, 4, 2, 2);
-        } else if (M <= 128) {
-            if (K < 8192) LAUNCH_WMMA(4, 2, 1, 4, 2, 2);
-            else          LAUNCH_WMMA(4, 1, 1, 4, 2, 2);
-        } else if (M <= 256) {
-            if (5 * (int64_t)K < 6 * (int64_t)N) LAUNCH_WMMA(4, 2, 1, 4, 2, 2);
-            else                                  LAUNCH_WMMA(4, 1, 1, 4, 2, 2);
-        } else {
-            if (K < 21504) LAUNCH_WMMA(4, 2, 1, 4, 1, 2);
-            else           LAUNCH_WMMA(4, 1, 1, 4, 2, 2);
-        }
-        return;
-    } else
-    if constexpr (std::is_same_v<T, float>) {
-        // fp32 (three LDS A tiles per stage), fitted separately: total time over the 40 shapes
-        // within 0.1-2.8% of the best swept tile per shape.
-        if (M <= 8) {
-            if (N < 3840)      LAUNCH_WMMA(1, 1, 1, 1, 4, 1);
-            else if (N < 5120) LAUNCH_WMMA(1, 1, 1, 2, 2, 2);
-            else               LAUNCH_WMMA(1, 2, 1, 2, 2, 2);
-        } else if (M <= 16) {
-            if (N < 3840)       LAUNCH_WMMA(1, 1, 1, 2, 4, 1);
-            else if (N < 5120)  LAUNCH_WMMA(2, 1, 1, 2, 2, 1);
-            else if (N < 15360) LAUNCH_WMMA(2, 1, 1, 4, 1, 2);
-            else                LAUNCH_WMMA(2, 2, 1, 4, 1, 2);
-        } else if (M <= 24) {
-            if (N < 3072) LAUNCH_WMMA(1, 1, 1, 2, 4, 1);
-            else          LAUNCH_WMMA(1, 2, 1, 2, 2, 2);
-        } else if (M <= 48) {
-            if (N < 2560)      LAUNCH_WMMA(1, 2, 1, 2, 2, 2);
-            else if (N < 5376) LAUNCH_WMMA(2, 2, 1, 2, 2, 1);
-            else               LAUNCH_WMMA(2, 2, 1, 4, 1, 2);
-        } else {
-            LAUNCH_WMMA(4, 1, 1, 4, 1, 1);
-        }
-        return;
-    } else
-    if (M <= 8) {
-        // Leaves on the aspect ratio K/N: very wide layers (K/N < 2/7) use two warps along N,
-        // very tall ones (K >= 5N) a shorter split-K with 128-K iterations.
-        if (7 * (int64_t)K < 2 * (int64_t)N) LAUNCH_WMMA(1, 1, 1, 2, 8, 1);
-        else if (K >= 5 * N)                  LAUNCH_WMMA(1, 1, 1, 2, 4, 2);
-        else                                  LAUNCH_WMMA(1, 1, 1, 1, 8, 1);
-    } else if (M <= 16) {
-        if (N < 5120) LAUNCH_WMMA(2, 1, 1, 2, 8, 1);
-        else          LAUNCH_WMMA(2, 2, 1, 2, 4, 2);
-    } else if (M <= 24) {
-        if (N < 3072)      LAUNCH_WMMA(1, 2, 1, 1, 8, 1);
-        else if (N < 5120) LAUNCH_WMMA(2, 2, 1, 2, 4, 2);
-        else               LAUNCH_WMMA(4, 1, 1, 4, 2, 2);
-    } else if (M <= 32) {
-        if (N < 3072)      LAUNCH_WMMA(2, 1, 1, 2, 8, 1);
-        else if (N < 5120) LAUNCH_WMMA(2, 2, 1, 2, 4, 2);
-        else               LAUNCH_WMMA(4, 1, 1, 4, 2, 2);
-    } else if (M <= 48) {
-        if (N < 3840)      LAUNCH_WMMA(2, 1, 1, 2, 4, 1);
-        else if (N < 8192) LAUNCH_WMMA(2, 2, 1, 2, 2, 2);
-        else               LAUNCH_WMMA(2, 2, 1, 4, 1, 2);
-    } else if (M <= 64) {
-        if (N < 3072)       LAUNCH_WMMA(4, 1, 1, 2, 4, 1);
-        else if (N < 10240) LAUNCH_WMMA(4, 1, 1, 4, 2, 2);
-        else                LAUNCH_WMMA(4, 2, 1, 4, 1, 2);
-    } else if (M <= 96) {
-        if (N < 3072)      LAUNCH_WMMA(4, 1, 1, 2, 4, 1);
-        else if (N < 8192) LAUNCH_WMMA(4, 2, 1, 4, 2, 2);
-        else               LAUNCH_WMMA(4, 2, 1, 4, 1, 2);
-    } else {
-        if (N < 2816)      LAUNCH_WMMA(4, 1, 1, 4, 2, 2);
-        else if (N < 3072) LAUNCH_WMMA(4, 2, 1, 4, 2, 1);
-        else               LAUNCH_WMMA(4, 2, 1, 4, 1, 2);
-    }
-#undef LAUNCH_WMMA
-    // clang-format on
+    launch_wmma_tile_of<wmma_gen(TARGET), T, TILES>(
+        wmma_pick(RULES, M, N, K), std::make_index_sequence<TILES.size()>{}, A, B, absmax, absmax_8bit, absmax_code,
+        absmax_offset, C, bias, M, N, K, blocksize, quant_type, row_tiles_first, stream
+    );
 }
 
 } // namespace
