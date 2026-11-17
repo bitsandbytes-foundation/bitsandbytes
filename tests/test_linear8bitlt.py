@@ -364,3 +364,25 @@ def test_linear8bitlt_device_movement(device):
 
     # Accelerator outputs should match both times.
     torch.testing.assert_close(out_accelerator_2, out_accelerator, rtol=1e-8, atol=1e-8)
+
+
+@pytest.mark.parametrize("shape", [(32,), (4, 32), (2, 3, 32), (2, 2, 3, 32)])
+@pytest.mark.parametrize("device", get_available_devices())
+def test_linear8bitlt_bias_gradient_input_ranks(shape, device):
+    layer = bnb.nn.Linear8bitLt(32, 64, bias=True, has_fp16_weights=False).to(device)
+    x = torch.randn(shape, device=device, requires_grad=True)
+    out = layer(x)
+    out.sum().backward()
+    assert layer.bias.grad is not None
+    assert layer.bias.grad.shape == (64,)
+
+
+@pytest.mark.parametrize("shape", [(32,), (2, 3, 32), (2, 2, 2, 32)])
+@pytest.mark.parametrize("device", get_available_devices())
+def test_linear8bitlt_fp16_weights_backward_non_2d_ranks(shape, device):
+    layer = bnb.nn.Linear8bitLt(32, 64, bias=False, has_fp16_weights=True).to(device)
+    x = torch.randn(shape, device=device, requires_grad=True)
+    out = layer(x)
+    out.sum().backward()
+    assert layer.weight.grad is not None
+    assert layer.weight.grad.shape == (64, 32)

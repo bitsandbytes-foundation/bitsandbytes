@@ -612,3 +612,14 @@ def test_fsdp_state_dict_save_4bit():
             f"stdout: {result.stdout}\n"
             f"stderr: {result.stderr}"
         )
+
+
+@pytest.mark.parametrize("shape", [(32,), (4, 32), (2, 3, 32), (2, 2, 3, 32)])
+@pytest.mark.parametrize("device", get_available_devices())
+def test_linear4bit_bias_gradient_input_ranks(shape, device):
+    layer = bnb.nn.LinearNF4(32, 64, bias=True).to(device)
+    x = torch.randn(shape, device=device, requires_grad=True)
+    out = layer(x)
+    out.sum().backward()
+    assert layer.bias.grad is not None
+    assert layer.bias.grad.shape == (64,)
