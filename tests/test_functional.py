@@ -694,6 +694,28 @@ class TestQuantize4BitFunctional:
             assert err.item() < 0.11
             assert relerr.item() < 0.28
 
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("default_dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
+    def test_4bit_compressed_stats_from_dict_default_dtype(self, device, quant_type, default_dtype):
+        """from_dict must restore nested_offset exactly when the global default dtype is not float32."""
+        if device == "hpu" and not is_supported_on_hpu(quant_type, torch.bfloat16):
+            pytest.skip("This configuration is not supported on HPU.")
+
+        A1 = torch.randn(128, 128, device=device, dtype=torch.bfloat16)
+        qa, SA = F.quantize_4bit(A1, compress_statistics=True, quant_type=quant_type)
+        expected = F.dequantize_4bit(qa, SA)
+
+        previous = torch.get_default_dtype()
+        torch.set_default_dtype(default_dtype)
+        try:
+            SB = F.QuantState.from_dict(SA.as_dict(packed=True), device=torch.device(device))
+        finally:
+            torch.set_default_dtype(previous)
+
+        torch.testing.assert_close(SB.offset, SA.offset, rtol=0, atol=0)
+        torch.testing.assert_close(F.dequantize_4bit(qa, SB), expected, rtol=0, atol=0)
+
     @pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
     @pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No accelerator device")
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)

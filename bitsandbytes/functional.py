@@ -520,12 +520,14 @@ class QuantState:
         assert set(qs_dict.keys()).issubset(cls.valid_qs_keys)
 
         if "nested_absmax" in qs_dict:
-            offset = torch.tensor(float(qs_dict["nested_offset"])).to(device)
+            nested_dtype = getattr(torch, qs_dict["nested_dtype"])
+            # Not the global default dtype, which loaders often set to bf16/fp16.
+            offset = torch.tensor(float(qs_dict["nested_offset"]), dtype=nested_dtype, device=device)
             state2 = cls(
                 absmax=qs_dict["nested_absmax"].to(device),
                 blocksize=qs_dict["nested_blocksize"],
                 code=qs_dict["nested_quant_map"].to(device),
-                dtype=getattr(torch, qs_dict["nested_dtype"]),
+                dtype=nested_dtype,
             )
         else:
             offset, state2 = None, None
