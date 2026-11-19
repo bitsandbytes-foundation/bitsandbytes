@@ -821,6 +821,7 @@ _ROCM_WMMA_FAMILY_MAIN = {
 # Largest M on the fused path per WMMA target: (bf16/fp16, fp32).
 _ROCM_WMMA_MAX_M = {
     "gfx1100": (384, 128),  # W7900
+    "gfx1101": (448, 512),  # RX 7700 XT
     "gfx1103": (384, 384),  # Radeon 760M
     "gfx1151": (512, 512),  # Radeon 8060S
     "gfx1200": (512, 512),  # RX 9060 XT

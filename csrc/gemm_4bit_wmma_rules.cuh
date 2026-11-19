@@ -179,6 +179,26 @@ inline constexpr WmmaRule wmma_rules_gfx1100_f32[] = {
     {INT_MAX, {},                                                                                          {4, 1, 1, 4, 1, 1}},
 };
 
+/// gfx1101 bf16/fp16: own tiles through M = 64, the gfx1100 tiles above.
+inline constexpr WmmaRule wmma_rules_gfx1101_f16[] = {
+    {8,       {n_lt(4608, {1, 1, 1, 1, 4, 1}), n_lt(10240, {1, 1, 1, 1, 8, 2})},                              {1, 1, 1, 1, 4, 2}},
+    {16,      {n_lt(1280, {2, 1, 1, 1, 8, 1}), n_lt(4608, {2, 2, 1, 1, 4, 1}), n_lt(10240, {2, 1, 1, 4, 2, 2})}, {2, 2, 1, 2, 4, 2}},
+    {32,      {n_lt(3072, {2, 2, 1, 1, 4, 1}), n_lt(5376, {4, 1, 1, 4, 2, 2}), k_over_n_lt(2, 5, {4, 1, 1, 4, 2, 2})}, {4, 2, 1, 2, 2, 1}},
+    {48,      {n_lt(4096, {2, 2, 1, 1, 4, 1})},                                                               {2, 2, 1, 4, 1, 2}},
+    {64,      {n_lt(1280, {4, 1, 1, 2, 4, 1}), n_lt(5120, {4, 2, 1, 2, 2, 1})},                              {4, 2, 1, 4, 1, 2}},
+    {96,      {n_lt(3072, {4, 1, 1, 2, 4, 1}), n_lt(8192, {4, 2, 1, 4, 2, 2})},                              {4, 2, 1, 4, 1, 2}},
+    {INT_MAX, {n_lt(2816, {4, 1, 1, 4, 2, 2}), n_lt(3072, {4, 2, 1, 4, 2, 1})},                              {4, 2, 1, 4, 1, 2}},
+};
+
+/// gfx1101 fp32: own tiles through M = 16, the gfx1100 tiles above.
+inline constexpr WmmaRule wmma_rules_gfx1101_f32[] = {
+    {8,       {n_lt(4608, {1, 1, 1, 2, 2, 1}), n_lt(8192, {1, 2, 1, 2, 2, 2})},                           {1, 2, 1, 2, 2, 1}},
+    {16,      {n_lt(2816, {1, 2, 1, 2, 2, 2}), n_lt(8192, {2, 2, 1, 2, 2, 1})},                           {2, 2, 1, 4, 1, 2}},
+    {24,      {n_lt(3072, {1, 1, 1, 2, 4, 1})},                                                           {1, 2, 1, 2, 2, 2}},
+    {48,      {n_lt(2560, {1, 2, 1, 2, 2, 2}), n_lt(5376, {2, 2, 1, 2, 2, 1})},                           {2, 2, 1, 4, 1, 2}},
+    {INT_MAX, {},                                                                                          {4, 1, 1, 4, 1, 1}},
+};
+
 /// gfx1150 bf16/fp16. At M = 17-64 the first leaf gives narrow N (MoE experts, GQA k/v) its own tile.
 inline constexpr WmmaRule wmma_rules_gfx1150_f16[] = {
     {8,       {k_lt(3072, {1, 1, 1, 1, 8, 1})},                                                                  {1, 1, 1, 1, 8, 2}},
@@ -271,6 +291,12 @@ template <> struct WmmaTileRules<1100> {
     static constexpr int owner = 1100;
     static constexpr const auto& f16 = wmma_rules_gfx1100_f16;
     static constexpr const auto& f32 = wmma_rules_gfx1100_f32;
+};
+
+template <> struct WmmaTileRules<1101> {
+    static constexpr int owner = 1101;
+    static constexpr const auto& f16 = wmma_rules_gfx1101_f16;
+    static constexpr const auto& f32 = wmma_rules_gfx1101_f32;
 };
 
 template <> struct WmmaTileRules<1150> {
