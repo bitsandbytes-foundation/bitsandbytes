@@ -201,6 +201,27 @@ inline constexpr WmmaRule wmma_rules_gfx1151_f32[] = {
     {INT_MAX, {n_lt(2048, {2, 2, 1, 4, 1, 2}), n_lt(3072, {2, 2, 1, 2, 1, 1})},        {2, 2, 1, 4, 1, 2}},
 };
 
+/// gfx1200 bf16/fp16: own tiles at M <= 32 and M = 97-128, the gfx1201 tiles elsewhere. At M <= 16 the
+/// split-K-8 tile covers N < 10240 (gfx1201: N < 3840).
+inline constexpr WmmaRule wmma_rules_gfx1200_f16[] = {
+    {16,      {n_lt(10240, {1, 1, 1, 2, 8, 1})},                                       {1, 1, 1, 4, 4, 2}},
+    {32,      {n_lt(3840, {2, 1, 1, 4, 4, 1}), n_lt(8192, {2, 2, 1, 4, 2, 2})},        {2, 1, 1, 4, 2, 2}},
+    {96,      {n_lt(3840, {2, 1, 1, 4, 4, 1})},                                        {2, 2, 1, 4, 2, 2}},
+    {128,     {n_lt(2816, {2, 2, 1, 4, 2, 2}), n_lt(8192, {4, 2, 1, 4, 1, 1})},        {2, 2, 1, 4, 1, 2}},
+    {160,     {n_lt(3072, {2, 1, 1, 4, 2, 1})},                                        {2, 2, 1, 4, 1, 2}},
+    {INT_MAX, {n_lt(2816, {2, 2, 1, 4, 2, 2}), n_lt(3840, {4, 1, 1, 4, 1, 1})},        {4, 2, 1, 4, 1, 1}},
+};
+
+/// gfx1200 fp32: the gfx1201 table plus its own M = 17-32 bucket.
+inline constexpr WmmaRule wmma_rules_gfx1200_f32[] = {
+    {16,      {n_lt(3840, {1, 1, 1, 2, 2, 1}), n_lt(4608, {1, 1, 1, 4, 2, 1})},        {1, 2, 1, 2, 2, 1}},
+    {32,      {n_lt(3840, {1, 1, 1, 4, 2, 1})},                                        {2, 2, 1, 4, 1, 1}},
+    {48,      {n_lt(8192, {1, 1, 1, 4, 2, 1})},                                        {2, 2, 1, 4, 1, 1}},
+    {96,      {n_lt(3840, {2, 1, 1, 4, 1, 1})},                                        {2, 2, 1, 4, 1, 1}},
+    {192,     {n_lt(2048, {2, 1, 1, 4, 1, 1})},                                        {2, 2, 1, 4, 1, 1}},
+    {INT_MAX, {},                                                                       {2, 2, 1, 4, 1, 1}},
+};
+
 /// gfx1201 bf16/fp16. One 16-row tile covers M <= 16; larger M adds warps along N and rows per warp rather than
 /// warps along M.
 inline constexpr WmmaRule wmma_rules_gfx1201_f16[] = {
@@ -237,6 +258,12 @@ template <> struct WmmaTileRules<1151> {
     static constexpr int owner = 1151;
     static constexpr const auto& f16 = wmma_rules_gfx1151_f16;
     static constexpr const auto& f32 = wmma_rules_gfx1151_f32;
+};
+
+template <> struct WmmaTileRules<1200> {
+    static constexpr int owner = 1200;
+    static constexpr const auto& f16 = wmma_rules_gfx1200_f16;
+    static constexpr const auto& f32 = wmma_rules_gfx1200_f32;
 };
 
 template <> struct WmmaTileRules<1201> {
