@@ -9,8 +9,8 @@
 
 #include "compat.cuh" // CUDA/HIP runtime headers + bnb_stream_t
 
-// WMMA tuning target of the current device: 11 (gfx1100-gfx1102), 113 (gfx1103), 115 (gfx115x), 12 (gfx120x), or 0
-// if the kernel is not enabled for it. Tile rules per target: gemm_4bit_wmma_rules.cuh.
+// WMMA tuning target of the current device: its gfx number (1100-1103, 1150-1153, 1200-1201), or 0 if the kernel is not
+// enabled for it. Tunings per target and their family fallback: gemm_4bit_wmma_rules.cuh.
 int gemm_4bit_wmma_arch();
 
 // Returns false (nothing launched) if `arch` is not a target this build has WMMA kernels for.

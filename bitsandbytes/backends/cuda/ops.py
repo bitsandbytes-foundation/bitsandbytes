@@ -811,17 +811,30 @@ def _gemm_4bit_use_custom_cuda(device_index, dtype, M, N, K):
     return M <= (16 if (tall_k_2xn or n_blocks < 48) else 8)
 
 
+# WMMA kernel targets (csrc/gemm_4bit_wmma_rules.cuh) and the main chip of their family, whose limits a chip uses
+# where it has none of its own.
+_ROCM_WMMA_FAMILY_MAIN = {
+    **dict.fromkeys(("gfx1100", "gfx1101", "gfx1102", "gfx1103"), "gfx1100"),
+    **dict.fromkeys(("gfx1150", "gfx1151", "gfx1152", "gfx1153"), "gfx1151"),
+    **dict.fromkeys(("gfx1200", "gfx1201"), "gfx1201"),
+}
+# Largest M on the fused path per WMMA target: (bf16/fp16, fp32).
+_ROCM_WMMA_MAX_M = {
+    "gfx1100": (384, 128),  # W7900
+    "gfx1103": (384, 384),  # Radeon 760M
+    "gfx1151": (512, 512),  # Radeon 8060S
+    "gfx1201": (384, 512),  # R9700
+}
+
+
 @functools.cache
 def _gemm_4bit_use_custom_rocm(device_index, dtype, M, N, K):
     """
     Fused custom kernel vs dequant+F.linear heuristic for ROCm.
 
     RDNA3/RDNA3.5/RDNA4 with K % 64 == 0 have a WMMA kernel (the C dispatch picks SIMT or WMMA),
-    which stays ahead of dequant+F.linear up to these M limits:
-    - gfx110x: bf16/fp16 through M=384, fp32 through M=128.
-    - gfx1103: all dtypes through M=384.
-    - gfx115x: all dtypes through M=512.
-    - gfx120x: bf16/fp16 through M=384, fp32 through M=512.
+    which stays ahead of dequant+F.linear up to the limits in _ROCM_WMMA_MAX_M; a chip without its own
+    entry uses its family main's (_ROCM_WMMA_FAMILY_MAIN).
     Otherwise (K % 64 != 0) gfx11/gfx12 keep SIMT through M=8. gfx125x (CDNA5) is Wave32 but lacks the v_dot2
     SIMT instructions, so its kernel takes the fp32-FMA CDNA math path; it keeps the gfx12 default
     (M<=8) pending calibration. CDNA/gfx9 is calibrated on MI308X (gfx942): bf16/fp16 win through
@@ -833,15 +846,10 @@ def _gemm_4bit_use_custom_rocm(device_index, dtype, M, N, K):
         return True
 
     arch = _rocm_gfx_arch(device_index)
-    if K % 64 == 0:  # WMMA kernel
-        if arch == "gfx1103":  # RDNA3 iGPU
-            return M <= 384
-        if arch.startswith("gfx110"):  # RDNA3
-            return M <= (128 if dtype == torch.float32 else 384)
-        if arch.startswith("gfx115"):  # RDNA3.5 (gfx1151 values)
-            return M <= 512
-        if arch.startswith("gfx120"):  # RDNA4 (gfx1201 values)
-            return M <= (512 if dtype == torch.float32 else 384)
+    family_main = _ROCM_WMMA_FAMILY_MAIN.get(arch)
+    if family_main is not None and K % 64 == 0:  # WMMA kernel
+        max_m = _ROCM_WMMA_MAX_M.get(arch, _ROCM_WMMA_MAX_M[family_main])
+        return M <= max_m[dtype == torch.float32]
     if arch.startswith("gfx11") or arch.startswith("gfx12"):  # RDNA3 / RDNA4 / CDNA5 (gfx125x)
         return M <= 8
     if arch.startswith("gfx9"):  # CDNA1-4 / MI-series (Wave64)

@@ -57,10 +57,6 @@ using wmma_v16s = short __attribute__((ext_vector_type(16)));
 // products (see wmma_16x16x16), gfx12 one full 16x16x16 product.
 constexpr int wmma_rows(int arch) { return arch == 12 ? 16 : 8; }
 
-// WMMA generation (kernel family) of a tuning target (gemm_4bit_wmma_rules.cuh): gfx120x runs the gfx12
-// kernels, gfx110x, gfx1103 and gfx115x the gfx11 kernels.
-constexpr int wmma_gen(int target) { return target == WMMA_TARGET_GFX12 ? 12 : 11; }
-
 // Per-lane operand fragment: 16 (gfx11) or 8 (gfx12) 16-bit values.
 template <int ARCH> using wmma_frag = std::conditional_t<ARCH == 12, wmma_v4u, wmma_v8u>;
 
@@ -625,25 +621,23 @@ __global__ void __launch_bounds__(KSPLIT* WARPS_M* WARPS_N * 32) gemm_4bit_wmma(
 
 namespace {
 
-// WMMA tuning target for a gcnArchName ("gfx1201" or "gfx1201:xnack-"): 11, 113, 115, 12, or 0.
-// The chips must be ones whose device pass emits the kernel body (BNB_WMMA_DEVICE_ARCH,
-// including builds for gfx11-generic / gfx12-generic); any other device would launch an empty kernel. Measured:
-// gfx1100, gfx1103, gfx1151 and gfx1201. gfx1101/gfx1102, gfx1150/gfx1152/gfx1153 and gfx1200 share the WMMA
-// instructions of their family and use its rules (gfx1100, gfx1151, gfx1201) unmeasured.
+// WMMA tuning target for a gcnArchName ("gfx1201" or "gfx1201:xnack-"): its gfx number if it is in WMMA_TARGETS
+// (chips whose device pass emits the kernel body, BNB_WMMA_DEVICE_ARCH, including builds for gfx11-generic /
+// gfx12-generic), else 0. Tunings per target and their family fallback: gemm_4bit_wmma_rules.cuh.
 int wmma_arch_of(const char* name) {
-    static constexpr struct {
-        const char* chip;
-        int arch;
-    } chips[] = {{"gfx1100", WMMA_TARGET_GFX11},   {"gfx1101", WMMA_TARGET_GFX11},   {"gfx1102", WMMA_TARGET_GFX11},
-                 {"gfx1103", WMMA_TARGET_GFX1103}, {"gfx1150", WMMA_TARGET_GFX115X}, {"gfx1151", WMMA_TARGET_GFX115X},
-                 {"gfx1152", WMMA_TARGET_GFX115X}, {"gfx1153", WMMA_TARGET_GFX115X}, {"gfx1200", WMMA_TARGET_GFX12},
-                 {"gfx1201", WMMA_TARGET_GFX12}};
-
-    for (const auto& c : chips) {
-        const size_t n = std::strlen(c.chip);
-        if (std::strncmp(name, c.chip, n) == 0 && (name[n] == '\0' || name[n] == ':'))
-            return c.arch;
+    if (std::strncmp(name, "gfx", 3) != 0)
+        return 0;
+    int target = 0, digits = 0;
+    for (const char* p = name + 3; *p != '\0' && *p != ':'; p++, digits++) {
+        if (*p < '0' || *p > '9')
+            return 0;
+        target = target * 10 + (*p - '0');
     }
+    if (digits != 4)
+        return 0;
+    for (const int t : WMMA_TARGETS)
+        if (t == target)
+            return t;
     return 0;
 }
 
@@ -667,11 +661,7 @@ int wmma_device_arch() {
 /// Whether blocks walk the row tiles of the same N columns first, so they share B in L2
 /// (see gemm_4bit_wmma_body). Only matters with two or more row tiles. fp32 on gfx110x
 /// stays N-first. The tile rules are fitted with this order.
-bool wmma_row_tiles_first(int target, bool fp32) {
-    if (target == WMMA_TARGET_GFX11 || target == WMMA_TARGET_GFX1103)
-        return !fp32;
-    return target == WMMA_TARGET_GFX12 || target == WMMA_TARGET_GFX115X;
-}
+bool wmma_row_tiles_first(int target, bool fp32) { return wmma_family_main(target) == 1100 ? !fp32 : true; }
 
 /// Launch one tile configuration. KCH_MAX is lowered to 1 when K is not a multiple
 /// of 128; one absmax covers each half-wave's per-iteration K slice when
@@ -744,26 +734,12 @@ void launch_wmma_tile(
     );
 }
 
-/// The tile rule table (gemm_4bit_wmma_rules.cuh) of a tuning target and dtype. gfx1103 uses the gfx110x tables
-/// (it differs in the SIMT/WMMA fp32 cutoffs and Python M limits only); bf16 and fp16 share a table.
+/// The tile rule table (gemm_4bit_wmma_rules.cuh) of a tuning target and dtype; bf16 and fp16 share a table.
 template <int TARGET, typename T> constexpr const auto& wmma_rules() {
-    constexpr bool fp32 = std::is_same_v<T, float>;
-    if constexpr (wmma_gen(TARGET) == 12) {
-        if constexpr (fp32)
-            return wmma_rules_gfx12_f32;
-        else
-            return wmma_rules_gfx12_f16;
-    } else if constexpr (TARGET == WMMA_TARGET_GFX115X) {
-        if constexpr (fp32)
-            return wmma_rules_gfx115_f32;
-        else
-            return wmma_rules_gfx115_f16;
-    } else {
-        if constexpr (fp32)
-            return wmma_rules_gfx11_f32;
-        else
-            return wmma_rules_gfx11_f16;
-    }
+    if constexpr (std::is_same_v<T, float>)
+        return WmmaTileRules<TARGET>::f32;
+    else
+        return WmmaTileRules<TARGET>::f16;
 }
 
 /// The distinct tiles of a rule table in first-use order (at most four per bucket).
@@ -833,12 +809,36 @@ void launch_gemm_4bit_wmma_arch(
     );
 }
 
+/// Launch for `target` if it is WMMA_TARGETS[I], through the launcher of the target owning its tile tables. Only
+/// targets of the generation this pass emits kernels for are instantiated (the host pass: all).
+template <typename T, size_t... I>
+bool launch_gemm_4bit_wmma_of(
+    int target, std::index_sequence<I...>, const T* A, const uint8_t* B, const float* absmax,
+    const uint8_t* absmax_8bit, const float* absmax_code, const float* absmax_offset, T* C, const T* bias, int M, int N,
+    int K, int blocksize, int quant_type, bnb_stream_t stream
+) {
+    bool launched = false;
+    auto one = [&](auto target_constant) {
+        constexpr int TARGET = decltype(target_constant)::value;
+        if constexpr (wmma_gen(TARGET) == 12 ? BNB_WMMA_EMIT_12 : BNB_WMMA_EMIT_11) {
+            launch_gemm_4bit_wmma_arch<WmmaTileRules<TARGET>::owner, T>(
+                A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type, stream
+            );
+            return true;
+        }
+        return false;
+    };
+    (void)((target == WMMA_TARGETS[I] && (launched = one(std::integral_constant<int, WMMA_TARGETS[I]>{}), true)) ||
+           ...);
+    return launched;
+}
+
 } // namespace
 
 int gemm_4bit_wmma_arch() { return wmma_device_arch(); }
 
 /// @brief Host launcher for the RDNA3/RDNA4 WMMA 4-bit GEMM kernel.
-/// @return false (nothing launched) if `arch` is not a WMMA generation this build has kernels for.
+/// @return false (nothing launched) if `arch` is not a WMMA target this build has kernels for.
 /// @tparam T Input/output dtype (`bnb_bfloat16`, `half` or `float`)
 template <typename T>
 bool launch_gemm_4bit_wmma(
@@ -858,35 +858,10 @@ bool launch_gemm_4bit_wmma(
     bnb_stream_t stream           // HIP stream
     // clang-format on
 ) {
-#if BNB_WMMA_EMIT_12
-    if (arch == WMMA_TARGET_GFX12) {
-        launch_gemm_4bit_wmma_arch<WMMA_TARGET_GFX12, T>(
-            A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type, stream
-        );
-        return true;
-    }
-#endif
-#if BNB_WMMA_EMIT_11
-    if (arch == WMMA_TARGET_GFX11) {
-        launch_gemm_4bit_wmma_arch<WMMA_TARGET_GFX11, T>(
-            A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type, stream
-        );
-        return true;
-    }
-    if (arch == WMMA_TARGET_GFX1103) {
-        launch_gemm_4bit_wmma_arch<WMMA_TARGET_GFX1103, T>(
-            A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type, stream
-        );
-        return true;
-    }
-    if (arch == WMMA_TARGET_GFX115X) {
-        launch_gemm_4bit_wmma_arch<WMMA_TARGET_GFX115X, T>(
-            A, B, absmax, absmax_8bit, absmax_code, absmax_offset, C, bias, M, N, K, blocksize, quant_type, stream
-        );
-        return true;
-    }
-#endif
-    return false;
+    return launch_gemm_4bit_wmma_of<T>(
+        arch, std::make_index_sequence<std::size(WMMA_TARGETS)>{}, A, B, absmax, absmax_8bit, absmax_code,
+        absmax_offset, C, bias, M, N, K, blocksize, quant_type, stream
+    );
 }
 
 template bool launch_gemm_4bit_wmma<bnb_bfloat16>(
