@@ -35,6 +35,9 @@ struct WmmaFp32Cutoff {
 // clang-format off
 /// gfx1100: SIMT through M = 4, then WMMA by N; N < 1024 stays on SIMT through M = 64.
 inline constexpr WmmaFp32Cutoff wmma_fp32_cutoffs_gfx1100[] = {{4, INT_MAX}, {5, 3072}, {7, 2816}, {8, 2048}, {12, 2816}, {64, 1024}};
+/// gfx1102: the gfx1100 cutoffs, but WMMA for N >= 8192 already at M = 4.
+inline constexpr WmmaFp32Cutoff wmma_fp32_cutoffs_gfx1102[] = {
+    {3, INT_MAX}, {4, 8192}, {5, 3072}, {7, 2816}, {8, 2048}, {12, 2816}, {64, 1024}};
 /// gfx1103: SIMT through M = 2, WMMA from M = 3 (N >= 3840 through M = 4).
 inline constexpr WmmaFp32Cutoff wmma_fp32_cutoffs_gfx1103[] = {{2, INT_MAX}, {4, 3840}};
 /// gfx1151: SIMT through M = 3, then WMMA by N through M = 7.
@@ -48,6 +51,10 @@ template <int TARGET> struct WmmaFp32Cutoffs : WmmaFp32Cutoffs<wmma_family_main(
 
 template <> struct WmmaFp32Cutoffs<1100> {
     static constexpr const auto& table = wmma_fp32_cutoffs_gfx1100;
+};
+
+template <> struct WmmaFp32Cutoffs<1102> {
+    static constexpr const auto& table = wmma_fp32_cutoffs_gfx1102;
 };
 
 template <> struct WmmaFp32Cutoffs<1103> {
@@ -199,6 +206,27 @@ inline constexpr WmmaRule wmma_rules_gfx1101_f32[] = {
     {INT_MAX, {},                                                                                          {4, 1, 1, 4, 1, 1}},
 };
 
+/// gfx1102 bf16/fp16: own tiles through M = 64 (fewer warps along N, more rows per warp than gfx1100), the
+/// gfx1100 tiles above. N < 1024 at M = 17-48 uses split-K 4.
+inline constexpr WmmaRule wmma_rules_gfx1102_f16[] = {
+    {8,       {k_lt(3840, {1, 2, 1, 1, 8, 1}), k_lt(14336, {1, 1, 1, 1, 4, 2})},                          {1, 1, 1, 1, 8, 2}},
+    {16,      {n_lt(3072, {2, 2, 1, 1, 4, 1}), n_lt(5376, {2, 1, 1, 4, 1, 2})},                           {2, 1, 1, 2, 2, 2}},
+    {32,      {n_lt(1024, {2, 1, 1, 2, 4, 2}), n_lt(3840, {4, 1, 1, 2, 2, 1}), n_lt(5376, {4, 1, 1, 4, 1, 2})}, {4, 2, 1, 4, 1, 2}},
+    {48,      {n_lt(1024, {2, 1, 1, 2, 4, 2}), k_lt(2560, {2, 2, 1, 2, 2, 1}), k_lt(8192, {2, 2, 1, 4, 1, 2})}, {2, 2, 1, 2, 2, 2}},
+    {64,      {k_lt(2560, {4, 1, 1, 4, 2, 1}), k_lt(6144, {4, 2, 1, 4, 1, 2})},                           {4, 2, 1, 4, 2, 2}},
+    {96,      {n_lt(3072, {4, 1, 1, 2, 4, 1}), n_lt(8192, {4, 2, 1, 4, 2, 2})},                           {4, 2, 1, 4, 1, 2}},
+    {INT_MAX, {n_lt(2816, {4, 1, 1, 4, 2, 2}), n_lt(3072, {4, 2, 1, 4, 2, 1})},                           {4, 2, 1, 4, 1, 2}},
+};
+
+/// gfx1102 fp32: the gfx1100 table with its own M = 9-24 buckets.
+inline constexpr WmmaRule wmma_rules_gfx1102_f32[] = {
+    {8,       {n_lt(3840, {1, 1, 1, 1, 4, 1}), n_lt(5120, {1, 1, 1, 2, 2, 2})},        {1, 2, 1, 2, 2, 2}},
+    {16,      {n_lt(3840, {2, 2, 1, 2, 2, 1})},                                        {2, 2, 1, 4, 1, 2}},
+    {24,      {n_lt(3072, {1, 1, 1, 2, 2, 1}), n_lt(8192, {1, 2, 1, 2, 2, 2})},        {2, 2, 1, 4, 1, 2}},
+    {48,      {n_lt(2560, {1, 2, 1, 2, 2, 2}), n_lt(5376, {2, 2, 1, 2, 2, 1})},        {2, 2, 1, 4, 1, 2}},
+    {INT_MAX, {},                                                                       {4, 1, 1, 4, 1, 1}},
+};
+
 /// gfx1150 bf16/fp16. At M = 17-64 the first leaf gives narrow N (MoE experts, GQA k/v) its own tile.
 inline constexpr WmmaRule wmma_rules_gfx1150_f16[] = {
     {8,       {k_lt(3072, {1, 1, 1, 1, 8, 1})},                                                                  {1, 1, 1, 1, 8, 2}},
@@ -297,6 +325,12 @@ template <> struct WmmaTileRules<1101> {
     static constexpr int owner = 1101;
     static constexpr const auto& f16 = wmma_rules_gfx1101_f16;
     static constexpr const auto& f32 = wmma_rules_gfx1101_f32;
+};
+
+template <> struct WmmaTileRules<1102> {
+    static constexpr int owner = 1102;
+    static constexpr const auto& f16 = wmma_rules_gfx1102_f16;
+    static constexpr const auto& f32 = wmma_rules_gfx1102_f32;
 };
 
 template <> struct WmmaTileRules<1150> {
