@@ -531,6 +531,33 @@ def test_optimizer8bit(dim1, dim2, gtype, optim_name, device):
             torch_optimizer.state[p1][name1].copy_(s.data)
 
 
+@pytest.mark.parametrize(
+    "optim_factory",
+    [
+        pytest.param(lambda p: bnb.optim.LAMB8bit(p, lr=0.01), id="lamb8bit"),
+        pytest.param(lambda p: bnb.optim.LARS8bit(p, lr=0.01, momentum=0.9), id="lars8bit"),
+    ],
+)
+@pytest.mark.parametrize("device", get_available_devices(), ids=id_formatter("device"))
+def test_lamb_lars_8bit_blockwise_step(optim_factory, device):
+    # Regression test for https://github.com/bitsandbytes-foundation/bitsandbytes/issues/2150:
+    # LAMB8bit and LARS8bit failed on the first CUDA step with
+    # "Unsupported optimizer name: lamb/lars" because the CUDA dispatch table
+    # for 8-bit blockwise updates had no entry for either optimizer.
+    # A 4096-element parameter sits exactly at the default min_8bit_size
+    # cutoff, so the optimizer state is 8-bit and the blockwise path is used.
+    p = torch.nn.Parameter(torch.ones(4096, device=device, dtype=torch.float32))
+    optimizer = optim_factory([p])
+    p.grad = torch.ones_like(p)
+    optimizer.step()
+
+    assert not torch.equal(p.data, torch.ones_like(p)), "step() did not update the parameter"
+    assert optimizer.state[p]["state1"].dtype == torch.uint8
+    state2 = optimizer.state[p].get("state2")
+    if state2 is not None:
+        assert state2.dtype == torch.uint8
+
+
 optimizer_names_benchmark = [
     "adam8bit_blockwise",
     "paged_adam8bit_blockwise",
