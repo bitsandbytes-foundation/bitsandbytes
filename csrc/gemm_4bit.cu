@@ -1,5 +1,5 @@
 // C API for the custom 4-bit GEMM.
-// Dispatches to SIMT or MMA kernels based on GPU architecture and shape.
+// Dispatches to SIMT, MMA (CUDA) or WMMA (ROCm RDNA3/RDNA4) kernels based on GPU architecture and shape.
 // Computes out[M, N] = A[M, K] @ B[N, K]^T. All pointers are device memory.
 
 #include <cstdint>
@@ -7,6 +7,10 @@
 
 #include "compat.cuh"
 #include "gemm_4bit_simt.cuh"
+#if BNB_HIP
+#include "gemm_4bit_wmma.cuh"
+#include "gemm_4bit_wmma_rules.cuh"
+#endif
 #if defined(BNB_HAS_GEMM4BIT_SM75) || defined(BNB_HAS_GEMM4BIT_SM80)
 // Included only when an MMA-capable arch (sm75/sm80+) is in the build.
 #include "gemm_4bit_common.cuh" // GpuProps, used only by the MMA dispatch below
@@ -38,8 +42,9 @@ GpuProps get_gpu_props() {
 
 /// @brief Fused 4-bit dequantize + GEMM. Computes out[M,N] = A[M,K] @ B[N,K]^T + bias.
 ///
-/// Dispatches to SIMT (sm60+) or MMA (sm75 fp16, sm80+ bf16/fp16) based on GPU arch and shape.
-/// fp32 always uses SIMT. Supports single-level and double-quantized (nested) absmax.
+/// Dispatches to SIMT (sm60+, all ROCm), MMA (sm75 fp16, sm80+ bf16/fp16) or WMMA (RDNA3/RDNA4
+/// bf16/fp16/fp32) based on GPU arch and shape. fp32 uses SIMT except on RDNA3/RDNA4. Supports
+/// single-level and double-quantized (nested) absmax.
 ///
 /// @tparam T Input/output dtype (`bnb_bfloat16`, `half`, or `float`)
 template <typename T>
@@ -61,7 +66,19 @@ static void gemm_4bit(
 ) {
     constexpr bool is_fp32 = std::is_same_v<T, float>;
 
-    // fp32 and M<=3 are always SIMT regardless of GPU -- skip the props lookup.
+#if BNB_HIP
+    // WMMA needs K % 64 == 0 and at least 32-element quantization blocks; wmma_preferred()
+    // (gemm_4bit_wmma_rules.cuh) picks WMMA or SIMT by target, dtype, M and N.
+    const int wmma_arch = K % 64 == 0 && blocksize >= 32 ? gemm_4bit_wmma_arch() : 0;
+    const bool use_wmma = wmma_arch != 0 && wmma_preferred(wmma_arch, is_fp32, M, N);
+    if (use_wmma && launch_gemm_4bit_wmma<T>(
+                        wmma_arch, A, B, absmax, absmax_8bit, absmax_code, absmax_offset, out, bias, M, N, K, blocksize,
+                        quant_type, stream
+                    ))
+        return;
+#endif
+
+    // Otherwise fp32 and M<=3 are always SIMT -- skip the props lookup.
     if (is_fp32 || M <= 3) {
         launch_gemm_4bit_simt<T>(
             A, B, absmax, absmax_8bit, absmax_code, absmax_offset, out, bias, M, N, K, blocksize, quant_type, stream
