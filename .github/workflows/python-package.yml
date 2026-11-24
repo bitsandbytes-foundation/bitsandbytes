@@ -51,7 +51,7 @@ jobs:
           if-no-files-found: error
 
   ##
-  # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64)
+  # This job matrix builds the CUDA versions of the libraries for platforms that support CUDA (Linux x64/aarch64 + Windows x64/ARM64)
   ##
   build-cuda:
     strategy:
@@ -62,7 +62,9 @@ jobs:
           ["11.8.0", "12.1.1", "12.4.1", "12.6.3", "12.8.1", "13.0.2", "13.2.0"]
         include:
           - os: windows-11-vs2026-arm
-            cuda_version: "13.4.0"
+            cuda_version: "13.4.3"
+          - os: windows-11-vs2026-arm
+            cuda_version: "13.5.0"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,7 +82,7 @@ jobs:
           log-file-suffix: ${{ runner.os }}-${{ runner.arch }}-${{matrix.cuda_version}}.txt
       - name: Install CUDA Toolkit (WoA)
         if: runner.os == 'Windows' && runner.arch == 'ARM64'
-        run: ./.github/scripts/install-cuda-woa.ps1
+        run: ./.github/scripts/install-cuda-woa.ps1 -CudaVersion "${{ matrix.cuda_version }}"
         shell: pwsh
       - name: Setup MSVC
         if: runner.os == 'Windows'
