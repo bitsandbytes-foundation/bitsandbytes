@@ -227,6 +227,23 @@ inline constexpr WmmaRule wmma_rules_gfx1102_f32[] = {
     {INT_MAX, {},                                                                       {4, 1, 1, 4, 1, 1}},
 };
 
+/// gfx1103 bf16/fp16: own tiles through M = 64, the gfx1100 tiles above.
+inline constexpr WmmaRule wmma_rules_gfx1103_f16[] = {
+    {8,       {k_lt(8192, {1, 2, 1, 1, 4, 2})},                                        {1, 2, 1, 1, 8, 2}},
+    {16,      {},                                                                       {2, 1, 1, 4, 2, 2}},
+    {32,      {},                                                                       {4, 1, 1, 4, 2, 2}},
+    {48,      {k_lt(12288, {2, 2, 1, 4, 1, 2})},                                       {4, 2, 1, 4, 1, 2}},
+    {64,      {},                                                                       {4, 2, 1, 4, 1, 2}},
+    {96,      {n_lt(3072, {4, 1, 1, 2, 4, 1}), n_lt(8192, {4, 2, 1, 4, 2, 2})},        {4, 2, 1, 4, 1, 2}},
+    {INT_MAX, {n_lt(2816, {4, 1, 1, 4, 2, 2}), n_lt(3072, {4, 2, 1, 4, 2, 1})},        {4, 2, 1, 4, 1, 2}},
+};
+
+/// gfx1103 fp32: one tile through M = 8 and one above.
+inline constexpr WmmaRule wmma_rules_gfx1103_f32[] = {
+    {8,       {},                                                                       {1, 2, 1, 2, 2, 2}},
+    {INT_MAX, {},                                                                       {2, 2, 1, 4, 1, 2}},
+};
+
 /// gfx1150 bf16/fp16. At M = 17-64 the first leaf gives narrow N (MoE experts, GQA k/v) its own tile.
 inline constexpr WmmaRule wmma_rules_gfx1150_f16[] = {
     {8,       {k_lt(3072, {1, 1, 1, 1, 8, 1})},                                                                  {1, 1, 1, 1, 8, 2}},
@@ -311,7 +328,7 @@ inline constexpr WmmaRule wmma_rules_gfx1201_f32[] = {
 
 // clang-format on
 
-/// The tile rule tables of a target: its own where it has them, else its family main's (gfx1103 uses gfx1100's).
+/// The tile rule tables of a target: its own where it has them, else its family main's (gfx1152 uses gfx1151's).
 /// `owner` is the target whose tables they are, so targets sharing tables share one launcher instantiation.
 template <int TARGET> struct WmmaTileRules : WmmaTileRules<wmma_family_main(TARGET)> {};
 
@@ -331,6 +348,12 @@ template <> struct WmmaTileRules<1102> {
     static constexpr int owner = 1102;
     static constexpr const auto& f16 = wmma_rules_gfx1102_f16;
     static constexpr const auto& f32 = wmma_rules_gfx1102_f32;
+};
+
+template <> struct WmmaTileRules<1103> {
+    static constexpr int owner = 1103;
+    static constexpr const auto& f16 = wmma_rules_gfx1103_f16;
+    static constexpr const auto& f32 = wmma_rules_gfx1103_f32;
 };
 
 template <> struct WmmaTileRules<1150> {
