@@ -1,6 +1,6 @@
 #pragma once
 // AMD WMMA 4-bit GEMM tuning rules per gfx target: SIMT or WMMA, and the WMMA tile. A target without its own
-// specialization below uses its family main's (wmma_family_main).
+// specialization below uses its fallback target's (wmma_fallback).
 
 #include <climits>
 #include <cstddef>
@@ -14,13 +14,21 @@ inline constexpr int WMMA_TARGETS[] = {1100, 1101, 1102, 1103, 1150, 1151, 1152,
 /// WMMA generation (kernel family): gfx120x runs the gfx12 kernels, gfx110x and gfx115x the gfx11 kernels.
 constexpr int wmma_gen(int target) { return target >= 1200 ? 12 : 11; }
 
-/// The main target of a chip's family, whose tunings it uses where it has none of its own.
-constexpr int wmma_family_main(int target) {
-    if (target >= 1200)
-        return 1201;
-    if (target >= 1150)
+/// The target whose tunings a target uses where it has none of its own (0: it has all of its own).
+constexpr int wmma_fallback(int target) {
+    switch (target) {
+    case 1101:
+        return 1100;
+    case 1150:
         return 1151;
-    return 1100;
+    case 1152:
+    case 1153:
+        return 1103;
+    case 1200:
+        return 1201;
+    default:
+        return 0;
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -46,8 +54,10 @@ inline constexpr WmmaFp32Cutoff wmma_fp32_cutoffs_gfx1151[] = {{3, INT_MAX}, {5,
 inline constexpr WmmaFp32Cutoff wmma_fp32_cutoffs_gfx1201[] = {{4, INT_MAX}, {5, 8192}, {6, 4096}, {9, 2048}, {15, 1408}, {31, 1024}};
 // clang-format on
 
-/// The fp32 cutoffs of a target: its own where it has them, else its family main's.
-template <int TARGET> struct WmmaFp32Cutoffs : WmmaFp32Cutoffs<wmma_family_main(TARGET)> {};
+/// The fp32 cutoffs of a target: its own where it has them, else its fallback's.
+template <int TARGET> struct WmmaFp32Cutoffs : WmmaFp32Cutoffs<wmma_fallback(TARGET)> {};
+
+template <> struct WmmaFp32Cutoffs<0>; // a target without cutoffs of its own needs a fallback
 
 template <> struct WmmaFp32Cutoffs<1100> {
     static constexpr const auto& table = wmma_fp32_cutoffs_gfx1100;
@@ -328,9 +338,11 @@ inline constexpr WmmaRule wmma_rules_gfx1201_f32[] = {
 
 // clang-format on
 
-/// The tile rule tables of a target: its own where it has them, else its family main's (gfx1152 uses gfx1151's).
+/// The tile rule tables of a target: its own where it has them, else its fallback's.
 /// `owner` is the target whose tables they are, so targets sharing tables share one launcher instantiation.
-template <int TARGET> struct WmmaTileRules : WmmaTileRules<wmma_family_main(TARGET)> {};
+template <int TARGET> struct WmmaTileRules : WmmaTileRules<wmma_fallback(TARGET)> {};
+
+template <> struct WmmaTileRules<0>; // a target without tile tables of its own needs a fallback
 
 template <> struct WmmaTileRules<1100> {
     static constexpr int owner = 1100;
