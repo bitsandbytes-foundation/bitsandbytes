@@ -1,7 +1,7 @@
 # Installs CUDA Toolkit 13.4 or 13.5 for Windows ARM64.
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("13.4.0", "13.5.0")]
+    [ValidateSet("13.4.3", "13.5.0")]
     [string]$CudaVersion
 )
 
@@ -9,14 +9,9 @@ $ErrorActionPreference = "Stop"
 
 $versionParts = $CudaVersion.Split(".")
 $cudaShortVersion = "$($versionParts[0]).$($versionParts[1])"
-if ($CudaVersion -eq "13.4.0") {
-    $baseUrl = "https://packages.nvidia.com/prerelease/cuda"
-    $ccclComponent = "thrust"
-} else {
-    $baseUrl = "https://developer.download.nvidia.com/compute/cuda"
-    $ccclComponent = "cccl"
-}
-$url = "$baseUrl/$CudaVersion/local_installers/cuda_${CudaVersion}_windows_arm64.exe"
+# The CCCL subpackage is named "thrust" through 13.4 and "cccl" from 13.5 on.
+$ccclComponent = if ($cudaShortVersion -eq "13.4") { "thrust" } else { "cccl" }
+$url = "https://developer.download.nvidia.com/compute/cuda/$CudaVersion/local_installers/cuda_${CudaVersion}_windows_arm64.exe"
 $subPackages = @(
     "nvcc_$cudaShortVersion", "crt_$cudaShortVersion", "nvvm_$cudaShortVersion", "nvptxcompiler_$cudaShortVersion",
     "cudart_$cudaShortVersion", "cublas_$cudaShortVersion", "cublas_dev_$cudaShortVersion",
@@ -31,8 +26,9 @@ if ($LASTEXITCODE -ne 0) { throw "Failed to download $url" }
 
 Write-Host "Installing subpackages: $($subPackages -join ' ')"
 $proc = Start-Process -FilePath $installer -ArgumentList (@("-s", "-n") + $subPackages) -Wait -PassThru
-Remove-Item $installer -Force
 if ($proc.ExitCode -ne 0) { throw "CUDA installer exited with code $($proc.ExitCode)" }
+# The installer can keep a handle on its own executable after exiting, so cleanup is best-effort.
+Remove-Item $installer -Force -ErrorAction SilentlyContinue
 
 if (-not (Test-Path "$cudaPath\bin\nvcc.exe")) { throw "nvcc not found under $cudaPath" }
 

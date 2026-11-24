@@ -62,7 +62,7 @@ jobs:
           ["11.8.0", "12.1.1", "12.4.1", "12.6.3", "12.8.1", "13.0.2", "13.2.0"]
         include:
           - os: windows-11-vs2026-arm
-            cuda_version: "13.4.0"
+            cuda_version: "13.4.3"
           - os: windows-11-vs2026-arm
             cuda_version: "13.5.0"
     runs-on: ${{ matrix.os }}
