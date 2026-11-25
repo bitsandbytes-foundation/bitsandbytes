@@ -9,7 +9,7 @@ if [[ -v CUDA_TARGETS ]]; then
     build_capability="${CUDA_TARGETS}"
 elif [ "${RUNNER_ARCH}" = "ARM64" ]; then
     if [ "${RUNNER_OS}" = "Windows" ]; then
-        build_capability="121"
+        build_capability="100;120;121"
     else
         build_capability="75;80;90"
 

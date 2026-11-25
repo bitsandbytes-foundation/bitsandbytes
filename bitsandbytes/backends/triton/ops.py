@@ -73,31 +73,35 @@ def quantize_4bit(
     if A.dtype not in (torch.bfloat16, torch.float16, torch.float32):
         raise ValueError(f"Blockwise 4bit quantization only supports 16/32-bit floats, but got {A.dtype}")
 
+    # The kernel addresses the input as a flat buffer, so it must be contiguous.
+    A = A.contiguous()
+
     n = A.numel()
 
-    # Pad to next multiple of blocksize so the kernel always processes full blocks
-    remainder = n % blocksize
-    if remainder != 0:
-        padding = blocksize - remainder
-        A = torch.nn.functional.pad(A.view(-1), (0, padding), value=0.0)
-        n = A.numel()
+    # The kernel processes blocks in pairs, so absmax is over-allocated and trimmed below.
+    blocks = -(n // -blocksize)
+    paired_blocks = -(n // -(blocksize * 2))
 
-    blocks = -(n // -(blocksize * 2))
+    # Packed element count promised by the fake kernel.
+    packed_elems = (n + 1) // (quant_storage.itemsize * 2)
 
-    absmax = torch.empty((blocks * 2,), device=A.device, dtype=A.dtype)
-    # Use n - n//2 instead of (n+1)//2 to avoid integer overflow for large n
-    out = torch.empty((n - n // 2, 1), device=A.device, dtype=torch.uint8)
+    # One byte per pair of elements, rounded up so the view() to quant_storage is valid.
+    nbytes = n - n // 2
+    nbytes += -nbytes % quant_storage.itemsize
+
+    absmax = torch.empty((paired_blocks * 2,), device=A.device, dtype=A.dtype)
+    out = torch.empty((nbytes, 1), device=A.device, dtype=torch.uint8)
 
     with torch_accelerator_module.device(A.device):
         kernels_4bit.quantize_4bit_blockwise_triton(
-            A, blocksize, quant_type, blocks, absmax, num_elements=n, quantized_out=out
+            A, blocksize, quant_type, paired_blocks, absmax, num_elements=n, quantized_out=out
         )
     packed = out
 
     if quant_storage != torch.uint8:
-        packed = out.squeeze().view(quant_storage).unsqueeze(1)
+        packed = out.view(-1).view(quant_storage)[:packed_elems].unsqueeze(1)
 
-    return packed, absmax.float()
+    return packed, absmax[:blocks].float()
 
 
 def dequantize_4bit(

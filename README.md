@@ -165,7 +165,7 @@ bitsandbytes has the following minimum requirements for all platforms:
     <tr>
       <td></td>
       <td>🟩 NVIDIA GPU <br><code>cuda</code></td>
-      <td>SM121</td>
+      <td>SM100, SM120, SM121</td>
       <td>✅</td>
       <td>✅</td>
       <td>✅</td>
