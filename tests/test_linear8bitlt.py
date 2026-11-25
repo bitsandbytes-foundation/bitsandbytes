@@ -364,3 +364,22 @@ def test_linear8bitlt_device_movement(device):
 
     # Accelerator outputs should match both times.
     torch.testing.assert_close(out_accelerator_2, out_accelerator, rtol=1e-8, atol=1e-8)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("threshold", [0.0, 6.0], ids=id_formatter("threshold"))
+def test_linear8bitlt_non_contiguous_input(device, threshold):
+    # Pooling and last-token heads pass strided views of the hidden states to the layer,
+    # e.g. hidden_states[:, 0] (BERT-style pooler) or hidden_states[:, -1:, :].
+    torch.manual_seed(0)
+    layer = Linear8bitLt(64, 32, has_fp16_weights=False, threshold=threshold).to(device)
+    hidden_states = torch.randn(8, 16, 64, dtype=torch.float16, device=device)
+
+    for x in (hidden_states[:, 0], hidden_states[:, -1:, :]):
+        assert not x.is_contiguous()
+        with torch.no_grad():
+            out = layer(x)
+            ref = layer(x.contiguous())
+        # The bug reads unrelated rows, so the error is O(1); the tolerance only absorbs
+        # last-bit differences between strided and contiguous paths on some backends.
+        torch.testing.assert_close(out, ref, rtol=1e-2, atol=1e-2)
