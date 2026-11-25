@@ -141,14 +141,13 @@ static inline float32x4_t neon_bf16x4_to_f32(const bf16_t* src) {
 
 // NEON-optimized float to BF16 conversion (4 values at a time, with rounding)
 static inline void neon_f32_to_bf16x4(const float32x4_t src, bf16_t* dst) {
-    uint32x4_t bits = vreinterpretq_u32_f32(src);
-    // Round to nearest even: add 0x7FFF + ((bits >> 16) & 1)
-    uint32x4_t lsb = vshrq_n_u32(bits, 16);
-    lsb = vandq_u32(lsb, vdupq_n_u32(1));
-    uint32x4_t rounding = vaddq_u32(vdupq_n_u32(0x7FFF), lsb);
-    bits = vaddq_u32(bits, rounding);
-    // Extract upper 16 bits
-    uint16x4_t result = vshrn_n_u32(bits, 16);
+    const uint32x4_t bits = vreinterpretq_u32_f32(src);
+    // Round to nearest even: add 0x7FFF + ((bits >> 16) & 1), keep the upper 16 bits.
+    const uint32x4_t lsb = vandq_u32(vshrq_n_u32(bits, 16), vdupq_n_u32(1));
+    const uint32x4_t rounding = vaddq_u32(vdupq_n_u32(0x7FFF), lsb);
+    // vaddhn instead of vaddq + vshrn: MSVC ARM64 (14.51+) fuses a vaddq_u32 on the reinterpreted
+    // result of a preceding vmulq_f32 into an integer MLA, see google/XNNPACK#11368.
+    const uint16x4_t result = vaddhn_u32(bits, rounding);
     vst1_u16(reinterpret_cast<uint16_t*>(dst), result);
 }
 
