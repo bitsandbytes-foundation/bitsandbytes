@@ -5,11 +5,6 @@ import torch
 
 from . import kernels_4bit, kernels_8bit_quant, kernels_optim
 
-# currently codes unused, kept for reference
-# Should be the same for quant/dequant
-# from bitsandbytes.functional import get_4bit_type
-# _FP4_QUANT_TABLE = get_4bit_type("fp4", device="xpu")
-# _NF4_QUANT_TABLE = get_4bit_type("nf4", device="xpu")
 device_type = torch.accelerator.current_accelerator().type if hasattr(torch, "accelerator") else "cuda"
 torch_accelerator_module = getattr(torch, device_type, torch.cuda)
 
