@@ -99,7 +99,7 @@ jobs:
       # Windows + CUDA: Install CUDA Toolkit
       - name: Install CUDA Toolkit
         if: inputs.backend == 'cuda' && inputs.platform == 'windows'
-        run: ./.github/scripts/install-cuda-windows.ps1 -CudaVersion "${{ inputs.cuda_version }}" -ExtraSubPackages nvrtc_dev
+        run: ./.github/scripts/install-cuda-windows.ps1 -CudaVersion "${{ inputs.cuda_version }}"
         shell: pwsh
 
       # Windows: Setup MSVC (needed for both CPU and CUDA builds)

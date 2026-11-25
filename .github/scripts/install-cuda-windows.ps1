@@ -3,8 +3,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [ValidatePattern("^\d+\.\d+\.\d+$")]
-    [string]$CudaVersion,
-    [string[]]$ExtraSubPackages = @()
+    [string]$CudaVersion
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,7 +28,6 @@ $packages = @("nvcc", "cudart", "cublas", "cublas_dev")
 if ($version.Major -ge 13) { $packages += @("crt", "nvvm", "nvptxcompiler") }
 # The CCCL subpackage is named "thrust" through 13.4 and "cccl" from 13.5 on.
 $packages += if ($version -ge [version]"13.5") { "cccl" } else { "thrust" }
-$packages += $ExtraSubPackages
 $subPackages = $packages | ForEach-Object { "${_}_$cudaShortVersion" }
 
 $cudaPath = "$env:ProgramFiles\NVIDIA GPU Computing Toolkit\CUDA\v$cudaShortVersion"
