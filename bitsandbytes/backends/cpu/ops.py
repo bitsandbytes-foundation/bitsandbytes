@@ -364,6 +364,9 @@ def _optimizer_update_32bit_cpu(
     gnorm_scale: float,
     skip_zeros: bool = False,
 ) -> None:
+    if skip_zeros:
+        raise NotImplementedError("skip_zeros is not supported yet")
+
     g_float = g.float() * gnorm_scale
     p_float = p.data.float()
 
@@ -489,6 +492,9 @@ def _optimizer_update_8bit_blockwise_cpu(
     gnorm_scale: float,
     skip_zeros: bool = False,
 ) -> None:
+    if skip_zeros:
+        raise NotImplementedError("skip_zeros is not supported yet")
+
     blocksize = 256
 
     # Dequantize states
