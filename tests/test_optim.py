@@ -649,9 +649,9 @@ def test_benchmark_blockwise(dim1, dim2, gtype, optim_name, device):
 
 ademamix_state_dict_opts = [
     ("AdEMAMix8bit", lambda p: bnb.optim.AdEMAMix8bit(p, lr=1e-3)),
-    ("AdEMAMix32bit", lambda p: bnb.optim.AdEMAMix(p, lr=1e-3)),
+    ("AdEMAMix32bit", lambda p: bnb.optim.AdEMAMix32bit(p, lr=1e-3)),
     ("AdEMAMix8bit_scheduled", lambda p: bnb.optim.AdEMAMix8bit(p, lr=1e-3, t_alpha=100, t_beta3=100)),
-    ("AdEMAMix32bit_scheduled", lambda p: bnb.optim.AdEMAMix(p, lr=1e-3, t_alpha=100, t_beta3=100)),
+    ("AdEMAMix32bit_scheduled", lambda p: bnb.optim.AdEMAMix32bit(p, lr=1e-3, t_alpha=100, t_beta3=100)),
 ]
 
 
