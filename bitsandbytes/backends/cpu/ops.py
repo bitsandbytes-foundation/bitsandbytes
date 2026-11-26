@@ -169,9 +169,10 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
 
-        if len(shape) == 1:
-            shape = (1, shape[0])
-
+        # The kernel views the input as a 2-D (m, n) matrix, with m == 1 for 1-D
+        # inputs. The output buffer keeps the caller-provided shape: the
+        # CUDA/default/MPS backends and the registered fake kernel all return
+        # exactly `shape`.
         m = prod(shape[:-1])
         n = shape[-1]
 
@@ -245,12 +246,14 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
             from kernels import get_kernel
 
             gemm_4bit_forward_kernel = get_kernel(
-                "kernels-community/quantization-bitsandbytes", version=1
+                "kernels-community/quantization-bitsandbytes",
+                version=1,
+                backend="cpu",
             ).gemm_4bit_forward
         except Exception as exc:  # pragma: no cover - best effort fallback
             gemm_4bit_forward_kernel = None
             logger.warning(
-                "Failed to load CPU gemm_4bit_forward from kernels-community: %s. Please make sure you already `pip install kernels` and the kernels >= 0.11.1",
+                "Failed to load CPU gemm_4bit_forward from kernels-community: %s. Please make sure you already `pip install kernels` and the kernels >= 0.13.0",
                 exc,
             )
 
@@ -362,6 +365,9 @@ def _optimizer_update_32bit_cpu(
     gnorm_scale: float,
     skip_zeros: bool = False,
 ) -> None:
+    if skip_zeros:
+        raise NotImplementedError("skip_zeros is not supported yet")
+
     g_float = g.float() * gnorm_scale
     p_float = p.data.float()
 
@@ -487,6 +493,9 @@ def _optimizer_update_8bit_blockwise_cpu(
     gnorm_scale: float,
     skip_zeros: bool = False,
 ) -> None:
+    if skip_zeros:
+        raise NotImplementedError("skip_zeros is not supported yet")
+
     blocksize = 256
 
     # Dequantize states

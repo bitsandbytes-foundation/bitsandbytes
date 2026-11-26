@@ -33,6 +33,12 @@ _GEMM_4BIT_SHAPES = [
     (40, 36864, 128),  # 64x128-64 wide-N
     (48, 8192, 512),  # 64x64-64 on GDDR+A100, K=512
     (48, 8192, 8192),  # 64x64-128, large K
+    (2, 1000, 256),  # RDNA3/RDNA4 WMMA: smallest M, N tail
+    (24, 6000, 704),  # RDNA3/RDNA4 WMMA: 64-K iterations (K % 128 != 0), wide N
+    (200, 2000, 512),  # RDNA3/RDNA4 WMMA: M > 128 tile with split-K
+    (5, 8192, 256),  # RDNA4 WMMA: fp32 starts at M=5 on wide N
+    (16, 6144, 512),  # RDNA4 WMMA: wide-N M <= 16 tile (128-K iterations for fp16/bf16)
+    (17, 4096, 704),  # RDNA4 WMMA: one row past a 16-row tile, K % 128 != 0
 ]
 
 
@@ -694,6 +700,28 @@ class TestQuantize4BitFunctional:
             assert err.item() < 0.11
             assert relerr.item() < 0.28
 
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("default_dtype", [torch.float16, torch.bfloat16], ids=describe_dtype)
+    def test_4bit_compressed_stats_from_dict_default_dtype(self, device, quant_type, default_dtype):
+        """from_dict must restore nested_offset exactly when the global default dtype is not float32."""
+        if device == "hpu" and not is_supported_on_hpu(quant_type, torch.bfloat16):
+            pytest.skip("This configuration is not supported on HPU.")
+
+        A1 = torch.randn(128, 128, device=device, dtype=torch.bfloat16)
+        qa, SA = F.quantize_4bit(A1, compress_statistics=True, quant_type=quant_type)
+        expected = F.dequantize_4bit(qa, SA)
+
+        previous = torch.get_default_dtype()
+        torch.set_default_dtype(default_dtype)
+        try:
+            SB = F.QuantState.from_dict(SA.as_dict(packed=True), device=torch.device(device))
+        finally:
+            torch.set_default_dtype(previous)
+
+        torch.testing.assert_close(SB.offset, SA.offset, rtol=0, atol=0)
+        torch.testing.assert_close(F.dequantize_4bit(qa, SB), expected, rtol=0, atol=0)
+
     @pytest.mark.parametrize("device", get_available_devices(no_cpu=True))
     @pytest.mark.skipif(not get_available_devices(no_cpu=True), reason="No accelerator device")
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16], ids=describe_dtype)
@@ -1011,6 +1039,81 @@ class TestQuantize4BitFunctional:
         else:
             threshold = 0.16
         assert mean_err < threshold
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+    @pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+    @pytest.mark.parametrize("blocksize", [32, 64], ids=id_formatter("blocksize"))
+    @pytest.mark.parametrize("N", [1000, 8192], ids=id_formatter("N"))
+    @pytest.mark.parametrize("M", [1, 4, 5, 8, 16, 17, 40, 100], ids=id_formatter("M"))
+    def test_matmul_4bit_fp32_precision(self, M, N, blocksize, quant_type, compress_statistics, device):
+        # fp32 must keep fp32-level accuracy on every kernel path (the RDNA3/RDNA4 WMMA paths
+        # emulate it with split bf16 operands). Compare against a float64 product of the
+        # same dequantized weights. N=8192 reaches RDNA4's fp32 WMMA tiles at small M, which
+        # narrow weights (N=1000) leave to SIMT up to M=31.
+        if device != "cuda":
+            pytest.skip("fp32 precision bound is calibrated for the CUDA/ROCm kernels")
+        K = 1024
+        A = torch.randn(1, M, K, dtype=torch.float32, device=device)
+        B = torch.randn(N, K, dtype=torch.float32, device=device) / (K**0.5)
+        qB, qs = F.quantize_4bit(
+            B, blocksize=blocksize, quant_type=quant_type, compress_statistics=compress_statistics
+        )
+        ref = A.double() @ F.dequantize_4bit(qB, qs).double().t()
+        out = bnb.matmul_4bit(A, qB, qs)
+        # Mean absolute error over mean absolute reference. The fp32 kernels and the fp32
+        # dequant+F.linear fallback stay below ~1.5e-6 (the RDNA4 three-part split-bf16 WMMA path
+        # with blocksize 64 is the highest); a two-part bf16 split or bf16 math would be at >=8e-6.
+        rel = ((out.double() - ref).abs().mean() / ref.abs().mean()).item()
+        assert rel < 2e-6
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("M", [4, 100], ids=id_formatter("M"))
+    def test_matmul_4bit_fp32_special_values(self, M, device):
+        # Inf and NaN activations must propagate as in fp32 math on every kernel path (the
+        # RDNA3/RDNA4 split-bf16 WMMA path must not turn Inf * (zero lower part) into NaN).
+        if device != "cuda":
+            pytest.skip("checks the CUDA/ROCm 4-bit GEMM kernels")
+        N, K = 4096, 1024
+        A = torch.randn(1, M, K, dtype=torch.float32, device=device)
+        A[..., 0] = float("inf")
+        A[..., 1::4, 1] = float("-inf")
+        A[..., 2::4, 2] = float("nan")
+        B = torch.randn(N, K, dtype=torch.float32, device=device) / (K**0.5)
+        qB, qs = F.quantize_4bit(B, blocksize=64, quant_type="nf4")
+        ref = A.double() @ F.dequantize_4bit(qB, qs).double().t()
+        out = bnb.matmul_4bit(A, qB, qs).double()
+        assert torch.equal(out.isnan(), ref.isnan())
+        assert torch.equal(out.isposinf(), ref.isposinf())
+        assert torch.equal(out.isneginf(), ref.isneginf())
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
+    @pytest.mark.parametrize("M", [1, 2, 8], ids=id_formatter("M"))
+    def test_matmul_4bit_rocm_simt_reduction(self, device, dtype, M):
+        # The fused SIMT kernel sums each warp with DPP moves on every ROCm arch. K % 64 != 0
+        # (so blocksize 32) keeps RDNA3/RDNA4 on SIMT rather than WMMA.
+        # Compare against the same dequantized weight so only the kernel is measured.
+        torch_device = torch.device(device)
+        if torch_device.type != "cuda" or torch.version.hip is None:
+            pytest.skip("ROCm is required")
+        from bitsandbytes.backends.cuda.ops import _gemm_4bit_use_custom_rocm
+
+        index = torch_device.index if torch_device.index is not None else torch.cuda.current_device()
+        N, K = 256, 480
+        if not _gemm_4bit_use_custom_rocm(index, dtype, M, N, K):
+            pytest.skip("fused kernel is not selected for this shape on this arch")
+
+        torch.manual_seed(0)
+        A = torch.randn(M, K, dtype=dtype, device=device)
+        B = torch.randn(N, K, dtype=dtype, device=device)
+        linear = bnb.nn.Linear4bit(K, N, bias=False, quant_type="nf4", compute_dtype=dtype, device="meta")
+        linear.weight = bnb.nn.Params4bit(B, quant_type="nf4", blocksize=32, requires_grad=False)
+        linear = linear.to(device)
+        ref = A.float() @ F.dequantize_4bit(linear.weight.data, linear.weight.quant_state).float().t()
+        out = linear(A).float()
+        relative_l1 = (out - ref).abs().mean() / ref.abs().mean()
+        assert relative_l1.item() < 0.02
 
     @pytest.mark.parametrize("device", get_available_devices())
     def test_matmul_4bit_weight_orientation(self, device):
