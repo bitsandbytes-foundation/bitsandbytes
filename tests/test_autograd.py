@@ -234,3 +234,72 @@ def test_matmul_4bit(
 
             if req_grad[2]:
                 torch.testing.assert_close(gradBias1, gradBias2)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE, ids=id_formatter("compress_statistics"))
+@pytest.mark.parametrize("recycle", ["weight", "quant_state", "both"])
+def test_matmul_4bit_checkpoint_recycled_buffers(device, compress_statistics, recycle):
+    # A caller that re-materialises each layer's 4-bit weight and quant-state tensors into a few
+    # reused buffers right before use (weight offloading, layer streaming) relies on
+    # torch.utils.checkpoint recomputing the saved tensors: the recompute loads the layer into a
+    # different buffer than the original forward did, so anything backward reads from a plain ctx
+    # attribute belongs to another layer by then (#2034).
+    dtype = torch.float32 if device == "cpu" else torch.float16
+    n_layers, dim, n_buffers = 4, 128, 2
+    QuantState = bnb.functional.QuantState
+
+    torch.manual_seed(0)
+    layers = [
+        bnb.functional.quantize_4bit(
+            torch.randn(dim, dim, device=device, dtype=dtype) / dim**0.5,
+            compress_statistics=compress_statistics,
+            quant_type="nf4",
+        )
+        for _ in range(n_layers)
+    ]
+    x0 = torch.randn(8, dim, device=device, dtype=dtype)
+
+    def input_grad(recycle_weight, recycle_state):
+        buffers, calls = {}, {}
+
+        def load(name, t, recycled):
+            if not recycled:
+                return t
+            ring = buffers.setdefault(name, [torch.empty_like(t) for _ in range(n_buffers)])
+            calls[name] = calls.get(name, -1) + 1
+            return ring[calls[name] % n_buffers].copy_(t)
+
+        def layer(h, i):
+            B, qs = layers[i]
+            state2 = None
+            if qs.nested:
+                state2 = QuantState(
+                    absmax=load("absmax2", qs.state2.absmax, recycle_state),
+                    code=qs.state2.code,
+                    blocksize=qs.state2.blocksize,
+                    dtype=qs.state2.dtype,
+                )
+            qs = QuantState(
+                absmax=load("absmax", qs.absmax, recycle_state),
+                shape=qs.shape,
+                code=qs.code,
+                blocksize=qs.blocksize,
+                quant_type=qs.quant_type,
+                dtype=qs.dtype,
+                offset=load("offset", qs.offset, recycle_state) if qs.nested else None,
+                state2=state2,
+            )
+            return torch.relu(bnb.matmul_4bit(h, load("B", B, recycle_weight), quant_state=qs))
+
+        x = x0.clone().requires_grad_(True)
+        h = x
+        for i in range(n_layers):
+            h = torch.utils.checkpoint.checkpoint(layer, h, i, use_reentrant=False)
+        h.float().pow(2).sum().backward()
+        return x.grad
+
+    expected = input_grad(False, False)
+    actual = input_grad(recycle in ("weight", "both"), recycle in ("quant_state", "both"))
+    assert expected.abs().max() > 0
+    torch.testing.assert_close(actual, expected)
