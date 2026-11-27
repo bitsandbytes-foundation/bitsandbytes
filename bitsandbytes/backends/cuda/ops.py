@@ -1083,10 +1083,25 @@ str2optimizer8bit_blockwise = {
         lib.cadagrad_8bit_blockwise_grad_fp16,
         lib.cadagrad_8bit_blockwise_grad_bf16,
     ),
+    # LAMB is Adam-based (two optimizer states) and LARS is momentum-based
+    # (one optimizer state): both reuse the corresponding blockwise kernels,
+    # mirroring the 32-bit dispatch table above as well as the CPU and Triton
+    # backends. Without these entries LAMB8bit/LARS8bit failed on the first
+    # CUDA step with "Unsupported optimizer name: lamb/lars".
+    "lamb": (
+        lib.cadam_8bit_blockwise_grad_fp32,
+        lib.cadam_8bit_blockwise_grad_fp16,
+        lib.cadam_8bit_blockwise_grad_bf16,
+    ),
     "ademamix": (
         lib.cademamix_8bit_blockwise_grad_fp32,
         lib.cademamix_8bit_blockwise_grad_fp16,
         lib.cademamix_8bit_blockwise_grad_bf16,
+    ),
+    "lars": (
+        lib.cmomentum_8bit_blockwise_grad_fp32,
+        lib.cmomentum_8bit_blockwise_grad_fp16,
+        lib.cmomentum_8bit_blockwise_grad_bf16,
     ),
 }
 
