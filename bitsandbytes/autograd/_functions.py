@@ -297,6 +297,37 @@ class MatMul8bitFp(torch.autograd.Function):
         return grad_A, grad_B, None, grad_bias, None
 
 
+def _quant_state_tensors(quant_state: F.QuantState) -> tuple[torch.Tensor, ...]:
+    """The tensors of a 4-bit QuantState that dequantize_4bit reads."""
+    if quant_state.nested:
+        return (quant_state.absmax, quant_state.offset, quant_state.state2.absmax, quant_state.state2.code)
+    return (quant_state.absmax,)
+
+
+def _quant_state_with(quant_state: F.QuantState, tensors: tuple[torch.Tensor, ...]) -> F.QuantState:
+    """A copy of quant_state that uses `tensors` (as returned by _quant_state_tensors) instead of its own."""
+    if quant_state.nested:
+        absmax, offset, absmax2, code2 = tensors
+        state2 = F.QuantState(
+            absmax=absmax2,
+            code=code2,
+            blocksize=quant_state.state2.blocksize,
+            dtype=quant_state.state2.dtype,
+        )
+    else:
+        (absmax,), offset, state2 = tensors, None, None
+    return F.QuantState(
+        absmax=absmax,
+        shape=quant_state.shape,
+        code=quant_state.code,
+        blocksize=quant_state.blocksize,
+        quant_type=quant_state.quant_type,
+        dtype=quant_state.dtype,
+        offset=offset,
+        state2=state2,
+    )
+
+
 class MatMul4Bit(torch.autograd.Function):
     # forward is the same, but we added the fallback for pre-turing GPUs
 
@@ -354,10 +385,19 @@ class MatMul4Bit(torch.autograd.Function):
         ctx.state = quant_state
         ctx.dtype_A, ctx.dtype_B, ctx.dtype_bias = A.dtype, B.dtype, None if bias is None else bias.dtype
 
+        # Save the packed weight and the quant-state tensors backward dequantizes with
+        # (absmax, and for nested quantization offset / state2.absmax / state2.code)
+        # through save_for_backward rather than as plain ctx attributes.
+        # torch.utils.checkpoint discards and recomputes *saved* tensors, so a caller
+        # that re-materialises them (weight offloading, layer streaming) into recycled
+        # buffers under checkpointing gets fresh copies in backward. A raw ctx attribute
+        # is invisible to that mechanism and would keep pointing at the original
+        # buffer -- silently wrong gradients. ctx.state is kept for its non-tensor
+        # metadata only.
         if any(ctx.needs_input_grad[:2]):
-            ctx.tensors = (None, B)
+            ctx.save_for_backward(B, *_quant_state_tensors(quant_state))
         else:
-            ctx.tensors = (None, None)
+            ctx.save_for_backward()
 
         return output
 
@@ -368,7 +408,8 @@ class MatMul4Bit(torch.autograd.Function):
             return torch.zeros_like(ctx.A), torch.zeros_like(ctx.B), None, bias_grad, None
 
         req_gradA, _, _, req_gradBias, _ = ctx.needs_input_grad
-        _, B = ctx.tensors
+        saved = ctx.saved_tensors
+        B = saved[0] if saved else None
 
         grad_A, grad_B, grad_bias = None, None, None
 
@@ -379,9 +420,10 @@ class MatMul4Bit(torch.autograd.Function):
         # not supported by PyTorch. TODO: create work-around
         # if req_gradB: grad_B = torch.matmul(grad_output.t(), A)
         if req_gradA:
-            # B in ctx.tensors is already in canonical [(N*K+1)//2, 1] form (normalized in forward).
+            # B from saved_tensors is already in canonical [(N*K+1)//2, 1] form (normalized in forward).
             # dequantize returns [N, K]; matmul(grad_output[M,N], [N,K]) = grad_A[M,K].
-            grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, ctx.state).to(grad_output.dtype))
+            state = _quant_state_with(ctx.state, saved[1:])
+            grad_A = torch.matmul(grad_output, F.dequantize_4bit(B, state).to(grad_output.dtype))
 
         return grad_A, grad_B, None, grad_bias, None
 
