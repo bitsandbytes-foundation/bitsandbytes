@@ -145,8 +145,6 @@ class RMSprop32bit(Optimizer1State):
                 The momentum value speeds up the optimizer by taking bigger steps.
             centered (`bool`, defaults to `False`):
                 Whether the gradients are normalized by the variance. If `True`, it can help training at the expense of additional compute.
-            optim_bits (`int`, defaults to 32):
-                The number of bits of the optimizer state.
             args (`object`, defaults to `None`):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
