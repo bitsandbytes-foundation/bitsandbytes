@@ -260,6 +260,30 @@ class Test4bitBlockwiseQuantOps:
         opcheck(torch.ops.bitsandbytes.gemv_4bit.default, (A, B_q, B.shape, absmax, code, blocksize))
 
     @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=describe_dtype)
+    @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("blocksize", [128, 256], ids=id_formatter("blocksize"))
+    def test_gemv_4bit_unaligned_mps(self, device, dtype, storage_dtype, quant_type, blocksize):
+        if device != "mps":
+            pytest.skip("Unaligned GEMV fallback is specific to MPS.")
+
+        # Quantization blocks span rows when K is not divisible by blocksize.
+        A = torch.randn(1, 1, 320, dtype=dtype, device=device)
+        B = torch.randn(96, 320, dtype=dtype, device=device)
+        B_q, absmax = torch.ops.bitsandbytes.quantize_4bit(B, blocksize, quant_type, storage_dtype)
+        code = bitsandbytes.functional.get_4bit_type(quant_type, device=device, blocksize=blocksize)
+        B_dq = torch.ops.bitsandbytes.dequantize_4bit(B_q, absmax, blocksize, quant_type, B.shape, dtype)
+        expected = torch.nn.functional.linear(A, B_dq)
+
+        actual = torch.ops.bitsandbytes.gemv_4bit.default(A, B_q, B.shape, absmax, code, blocksize)
+        torch.testing.assert_close(actual, expected)
+
+        out = torch.empty_like(expected)
+        torch.ops.bitsandbytes.gemv_4bit.out(A, B_q, B.shape, absmax, code, blocksize, out=out)
+        torch.testing.assert_close(out, expected)
+
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("requires_grad", TRUE_FALSE, ids=id_formatter("requires_grad"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("has_bias", TRUE_FALSE, ids=id_formatter("has_bias"))

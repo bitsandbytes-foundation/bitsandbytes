@@ -198,7 +198,8 @@ def _gemv_4bit_impl(
     code: torch.Tensor,
     blocksize: int,
 ) -> torch.Tensor:
-    if blocksize in (64, 128, 256) and (k := _get_kernel()) is not None:
+    # The Hub GEMV kernel indexes absmax per row, so blocks must not straddle rows.
+    if blocksize in (64, 128, 256) and shapeB[1] % blocksize == 0 and (k := _get_kernel()) is not None:
         if B.dtype != torch.uint8:
             B = B.view(torch.uint8)
 
@@ -264,7 +265,7 @@ def _(
         )
 
     # Use HF Hub kernel when supported for GEMV.
-    if M == 1 and blocksize in (64, 128, 256) and (k := _get_kernel()) is not None:
+    if M == 1 and blocksize in (64, 128, 256) and K % blocksize == 0 and (k := _get_kernel()) is not None:
         if B.dtype != torch.uint8:
             B = B.view(torch.uint8)
         result = k.gemv_4bit(A, B, absmax.view(N, -1), N, blocksize, _QUANT_MAP[quant_type])
