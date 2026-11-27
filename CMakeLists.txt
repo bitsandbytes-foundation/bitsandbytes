@@ -160,33 +160,6 @@ if(BUILD_CUDA)
         message(FATAL_ERROR "CUDA Version > 13 is not supported")
     endif()
 
-    # CMake < 3.23.0 does not define CMAKE_CUDA_ARCHITECTURES_ALL.
-    if(CMAKE_VERSION VERSION_LESS "3.23.0")
-        message(STATUS "CMake < 3.23.0; determining CUDA architectures supported...")
-
-        if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "13.0")
-            # Starting in CUDA 13.0, Thor Blackwell is renamed to SM110.
-            # Support for architectures older than Turing (SM75) is removed.
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 75 80 86 87 88 89 90 100 103 110 120 121)
-            list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 80 90 100 110 120)
-        else()
-            # 11.8-12.9 supports these at a minimum.
-            set(CMAKE_CUDA_ARCHITECTURES_ALL 50 52 53 60 61 62 70 72 75 80 86 87 89 90)
-            set(CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 50 60 70 80 90)
-
-            # CUDA 12.8 adds support for Blackwell.
-            if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.8")
-                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 100 101 120 121)
-                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL_MAJOR 100 120)
-            endif()
-
-            # CUDA 12.9 adds SM103 (Blackwell B300).
-            if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL "12.9")
-                list(APPEND CMAKE_CUDA_ARCHITECTURES_ALL 103)
-            endif()
-        endif()
-    endif()
-
     string(APPEND CMAKE_CUDA_FLAGS " --use_fast_math")
 
     # It's safe for us to enable more aggressive compression for 13.0+
@@ -203,19 +176,27 @@ if(BUILD_CUDA)
         string(APPEND CMAKE_CUDA_FLAGS " -Xptxas=-v")
     endif()
 
-    foreach(capability ${CMAKE_CUDA_ARCHITECTURES_ALL})
-        # Most of the items here are like: `xx-real`, so we just extract the `xx` portion
-        string(REGEX MATCH "[0-9]+" capability_id "${capability}")
-        if(capability_id GREATER 0)
-            list(APPEND POSSIBLE_CAPABILITIES ${capability_id})
+    if(NOT DEFINED COMPUTE_CAPABILITY)
+        # CMake's architecture tables can predate the installed toolkit.
+        execute_process(
+            COMMAND "${CUDAToolkit_NVCC_EXECUTABLE}" --list-gpu-code
+            OUTPUT_VARIABLE _gpu_codes
+            COMMAND_ERROR_IS_FATAL ANY
+        )
+        string(REGEX MATCHALL "[^ \t\r\n]+" _gpu_codes "${_gpu_codes}")
+        # Keep generic Maxwell and newer targets, as in the previous defaults.
+        set(_capabilities "")
+        foreach(_code IN LISTS _gpu_codes)
+            if(_code MATCHES "^sm_([0-9]+)$" AND CMAKE_MATCH_1 GREATER_EQUAL 50)
+                list(APPEND _capabilities "${CMAKE_MATCH_1}")
+            endif()
+        endforeach()
+        if(NOT _capabilities)
+            message(FATAL_ERROR "nvcc reported no supported CUDA architectures. Set COMPUTE_CAPABILITY explicitly.")
         endif()
-    endforeach()
+        set(COMPUTE_CAPABILITY "${_capabilities}" CACHE STRING "Compute Capabilities Targeted")
+    endif()
 
-    # This can be changed via -D argument to CMake
-    # By default all possible capabilities are compiled
-    set(COMPUTE_CAPABILITY "${POSSIBLE_CAPABILITIES}" CACHE STRING "Compute Capabilities Targeted")
-
-    message(STATUS "CUDA Capabilities Available: ${POSSIBLE_CAPABILITIES}")
     message(STATUS "CUDA Capabilities  Selected: ${COMPUTE_CAPABILITY}")
 
     # Use the "real" option to build native cubin for all selections.
