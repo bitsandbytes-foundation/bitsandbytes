@@ -157,9 +157,13 @@ def replace_linear(
                 model._modules[name].bias = old_module.bias
 
             if post_processing_function is not None:
-                func = getattr(module, post_processing_function, None)
+                # Look the hook up on the replacement, not on the module we just swapped out: the
+                # original is a plain `nn.Linear` and never carries it, so `getattr(..., None)`
+                # returned None and the hook silently never ran. It is already bound to the new
+                # instance, so it takes no argument.
+                func = getattr(model._modules[name], post_processing_function, None)
                 if func is not None:
-                    func(module)
+                    func()
     return model
 
 
