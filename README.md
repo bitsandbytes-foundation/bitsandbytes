@@ -8,6 +8,10 @@
     <a href="https://pypi.org/project/bitsandbytes/"><img alt="PyPI - Python Version" src="https://img.shields.io/pypi/pyversions/bitsandbytes"></a>
 </p>
 
+<p align="center">
+  <b>English</b> · <a href="https://github.com/bitsandbytes-foundation/bitsandbytes/blob/main/README.zh.md">简体中文</a>
+</p>
+
 `bitsandbytes` enables accessible large language models via k-bit quantization for PyTorch. We provide three main features for dramatically reducing memory consumption for inference and training:
 
 * 8-bit optimizers uses block-wise quantization to maintain 32-bit performance at a small fraction of the memory cost.
