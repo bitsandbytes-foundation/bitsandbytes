@@ -186,6 +186,28 @@ class Test4bitBlockwiseQuantOps:
         assert torch.isfinite(out).all(), "Dequantized output contains NaN or Inf"
 
     @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    def test_dequantize_4bit_rejects_shape_larger_than_packed(self, device, quant_type):
+        """A quant_state whose shape claims more elements than the packed tensor holds must
+        be rejected, not dequantized -- otherwise the kernel reads past the packed buffer."""
+        blocksize = 64
+        honest = torch.randn(64, 1, dtype=torch.float16, device=device)
+        packed, state = bitsandbytes.functional.quantize_4bit(honest, blocksize=blocksize, quant_type=quant_type)
+
+        claimed = (4096, 4096)
+        n = prod(claimed)
+        forged = bitsandbytes.functional.QuantState(
+            quant_type=quant_type,
+            absmax=torch.ones(-(n // -blocksize), dtype=torch.float32, device=device),
+            blocksize=blocksize,
+            code=state.code.clone(),
+            dtype=torch.float16,
+            shape=torch.Size(claimed),
+        )
+        with pytest.raises(ValueError, match="inconsistent with the packed data"):
+            bitsandbytes.functional.dequantize_4bit(packed, forged)
+
+    @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
