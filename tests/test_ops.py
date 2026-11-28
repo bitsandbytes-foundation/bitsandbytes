@@ -187,6 +187,32 @@ class Test4bitBlockwiseQuantOps:
 
     @pytest.mark.parametrize("device", get_available_devices())
     @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
+    @pytest.mark.parametrize(
+        "storage_dtype", [torch.uint8, torch.float16, torch.bfloat16, torch.int32], ids=id_formatter("storage_dtype")
+    )
+    @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
+    @pytest.mark.parametrize("numel", [2, 6, 12, 2050])
+    def test_quantize_4bit_packed_buffer_holds_all_bytes(self, device, dtype, storage_dtype, quant_type, numel):
+        """The packed buffer must hold ceil(numel / 2) bytes for every quant_storage.
+
+        When numel is not a multiple of 2 * quant_storage.itemsize, a floor division here
+        under-allocates and the kernel writes past the end of the buffer.
+        """
+        if device == "hpu" and not is_supported_on_hpu(quant_type, dtype, storage_dtype):
+            pytest.skip("This configuration is not supported on HPU.")
+
+        packed_bytes = -(numel // -2)
+        if device != "cuda" and packed_bytes % storage_dtype.itemsize:
+            pytest.skip("The default backend packs via a byte view, so it cannot express this size.")
+
+        A = torch.randn(numel, 1, dtype=dtype, device=device)
+
+        packed, _ = torch.ops.bitsandbytes.quantize_4bit.default(A, 64, quant_type, storage_dtype)
+
+        assert packed.numel() * storage_dtype.itemsize >= packed_bytes
+
+    @pytest.mark.parametrize("device", get_available_devices())
+    @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32], ids=id_formatter("dtype"))
     @pytest.mark.parametrize("storage_dtype", [torch.uint8, torch.bfloat16], ids=id_formatter("storage_dtype"))
     @pytest.mark.parametrize("quant_type", ["fp4", "nf4"])
     @pytest.mark.parametrize("blocksize", [32, 64, 128, 256, 512])
