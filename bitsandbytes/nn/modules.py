@@ -1162,20 +1162,26 @@ class Linear8bitLt(nn.Linear):
         self.weight.CB = None
         self.weight.SCB = None
 
-    def to(self, *args, **kwargs):
-        # Call the parent to() method to handle standard parameter/buffer movement
-        result = super().to(*args, **kwargs)
+    def _apply(self, fn, recurse=True):
+        super()._apply(fn, recurse=recurse)
+        weight = self.weight
 
-        device, _, _, _ = torch._C._nn._parse_to(*args, **kwargs)
-
-        # Handle state tensors if needed.
-        if device is not None:
-            if result.state.CB is not None:
-                result.state.CB = result.state.CB.to(device)
-            if result.state.SCB is not None:
-                result.state.SCB = result.state.SCB.to(device)
-
-        return result
+        # The weight owns the row scales until the first forward transfers them to the matmul state.
+        for cache in (weight, self.state):
+            scales = getattr(cache, "SCB", None)
+            if scales is not None:
+                if scales.device != weight.device:
+                    cache.SCB = fn(scales) if scales.is_meta else scales.to(weight.device)
+                if weight.dtype == torch.int8:
+                    cache.CB = weight.data
+                elif cache.CB is not None and cache.CB.device != weight.device:
+                    cache.CB = fn(cache.CB)
+        if getattr(weight, "CB", None) is not None and weight.SCB is None:
+            # Moving an already-quantized Int8Params can reattach CB after init_8bit_state.
+            weight.CB = None
+        if self.state.idx is not None and self.state.idx.device != weight.device:
+            self.state.idx = None
+        return self
 
     def forward(self, x: torch.Tensor):
         self.state.is_training = self.training
