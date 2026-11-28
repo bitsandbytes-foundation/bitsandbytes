@@ -484,11 +484,11 @@ def test_4bit_linear_weight_fsdp_fix(device):
     assert module.weight.quant_state is not None
 
 
-def test_embedding_not_implemented_error():
-    with pytest.raises(NotImplementedError):
-        emb = bnb.nn.Embedding4bit(32, 32)
-        emb.state_dict()
-
-    with pytest.raises(NotImplementedError):
-        emb = bnb.nn.Embedding8bit(32, 32)
-        emb.state_dict()
+@pytest.mark.parametrize("embedding_cls", [bnb.nn.Embedding8bit, bnb.nn.EmbeddingFP4, bnb.nn.EmbeddingNF4])
+def test_embedding_unquantized_checkpoint(embedding_cls):
+    emb = embedding_cls(32, 32)
+    restored = embedding_cls(32, 32)
+    result = restored.load_state_dict(emb.state_dict(), strict=True)
+    assert not result.missing_keys
+    assert not result.unexpected_keys
+    torch.testing.assert_close(restored.weight, emb.weight, rtol=0, atol=0)
