@@ -2,7 +2,6 @@ from collections.abc import Sequence
 import ctypes as ct
 import logging
 from typing import Optional
-from warnings import warn
 
 from packaging import version
 import torch
@@ -12,7 +11,7 @@ from bitsandbytes.functional import _get_tensor_stream, get_ptr
 from ..._ops import register_kernel
 from ...cextension import ErrorHandlerMockBNBNativeLibrary, lib
 from ..default.ops import _gemm_4bit_default_impl
-from ..utils import _get_4bit_code, triton_available
+from ..utils import _get_4bit_code, _warn_gemm_4bit_unaligned, triton_available
 
 logger = logging.getLogger(__name__)
 
@@ -186,11 +185,7 @@ def _(
                 out = out + bias
             return out
 
-        warn(
-            f"inner dimension ({K}) is not aligned for fast kernel "
-            f"with blocksize={blocksize}, falling back to slower implementation.",
-            UserWarning,
-        )
+        _warn_gemm_4bit_unaligned(K, blocksize)
 
     return _gemm_4bit_default_impl(
         A,
