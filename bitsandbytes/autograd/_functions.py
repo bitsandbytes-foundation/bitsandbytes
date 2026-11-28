@@ -411,6 +411,13 @@ def matmul_4bit(
     out: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
 ):
+    """Apply a linear transformation to `A` using the packed 4-bit weights `B`.
+
+    On CUDA, the input shape, GPU architecture, and dtype influence whether the
+    operation uses a fused kernel or dequantizes the weights before calling
+    `torch.nn.functional.linear`. Floating-point rounding can differ between
+    these paths, including when a change in batch size switches kernels.
+    """
     if quant_state is None:
         raise ValueError("quant_state is required")
     if len(quant_state.shape) != 2:
