@@ -951,7 +951,7 @@ class Embedding4bit(nn.Embedding):
         )
         assert output_absmax.shape == (input.numel() * blocks_per_emb,)
 
-        output_quant_state = copy.deepcopy(self.weight.quant_state)
+        output_quant_state = copy.copy(self.weight.quant_state)
         output_quant_state.absmax = output_absmax
         output_quant_state.shape = torch.Size((*input.shape, self.embedding_dim))
 
