@@ -88,11 +88,14 @@ class Adam8bit(Optimizer2State):
             weight_decay (`float`, defaults to 0.0):
                 The weight decay value for the optimizer.
             amsgrad (`bool`, defaults to `False`):
-                Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
-                Note: This parameter is not supported in Adam8bit and must be False.
+                .. deprecated::
+                    Not supported in Adam8bit and must be False. This parameter exists only for
+                    signature compatibility with :class:`Adam` and will be removed in a future version.
             optim_bits (`int`, defaults to 32):
-                The number of bits of the optimizer state.
-                Note: This parameter is not used in Adam8bit as it always uses 8-bit optimization.
+                .. deprecated::
+                    Not used in Adam8bit. This optimizer always uses 8-bit states regardless of this
+                    value. The parameter exists only for signature compatibility with :class:`Adam`
+                    and will be removed in a future version.
             args (`object`, defaults to `None`):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
@@ -100,13 +103,10 @@ class Adam8bit(Optimizer2State):
             is_paged (`bool`, defaults to `False`):
                 Whether the optimizer is a paged optimizer or not.
         """
-        # Validate unsupported parameters
         if amsgrad:
             raise ValueError("Adam8bit does not support amsgrad=True")
 
         if optim_bits != 32:
-            # We allow the default value of 32 to maintain compatibility with the function signature,
-            # but any other value is invalid since Adam8bit always uses 8-bit optimization
             raise ValueError("Adam8bit only supports optim_bits=32 (default value for compatibility)")
 
         super().__init__(
@@ -116,7 +116,7 @@ class Adam8bit(Optimizer2State):
             betas,
             eps,
             weight_decay,
-            8,  # Hardcoded to 8 bits
+            8,
             args,
             min_8bit_size,
             is_paged=is_paged,
@@ -258,11 +258,14 @@ class PagedAdam8bit(Optimizer2State):
             weight_decay (`float`, defaults to 0.0):
                 The weight decay value for the optimizer.
             amsgrad (`bool`, defaults to `False`):
-                Whether to use the [AMSGrad](https://hf.co/papers/1904.09237) variant of Adam that uses the maximum of past squared gradients instead.
-                Note: This parameter is not supported in PagedAdam8bit and must be False.
+                .. deprecated::
+                    Not supported in PagedAdam8bit and must be False. This parameter exists only for
+                    signature compatibility with :class:`Adam` and will be removed in a future version.
             optim_bits (`int`, defaults to 32):
-                The number of bits of the optimizer state.
-                Note: This parameter is not used in PagedAdam8bit as it always uses 8-bit optimization.
+                .. deprecated::
+                    Not used in PagedAdam8bit. This optimizer always uses 8-bit states regardless of
+                    this value. The parameter exists only for signature compatibility with :class:`Adam`
+                    and will be removed in a future version.
             args (`object`, defaults to `None`):
                 An object with additional arguments.
             min_8bit_size (`int`, defaults to 4096):
