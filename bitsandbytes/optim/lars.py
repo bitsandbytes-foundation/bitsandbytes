@@ -251,7 +251,7 @@ class PytorchLARS(Optimizer):
                     assert p.dtype == torch.float32
                     pnorm = torch.norm(p.detach())
                     unorm = torch.norm(update)
-                    if unorm > max_unorm * pnorm:
+                    if pnorm > 0 and unorm > max_unorm * pnorm:
                         update_scale = max_unorm * pnorm / unorm
 
                 p.add_(update, alpha=-lr * update_scale)
