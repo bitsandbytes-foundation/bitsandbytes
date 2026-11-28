@@ -73,22 +73,25 @@ def _(
 ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
     subB = None
 
-    if outlier_cols is not None and outlier_cols.numel():
-        # Extract the inputs with outliers in original precision
+    if outlier_cols is not None:
+        # Extract the inputs with outliers in original precision. Keep this
+        # two-dimensional even when there are no outliers so the output
+        # metadata is data-independent for FakeTensor and torch.compile.
         subA = A[:, outlier_cols].contiguous()
 
-        # Dequantize the corresponding weight columns
-        subB = (
-            torch.ops.bitsandbytes.int8_vectorwise_dequant.default(CB[:, outlier_cols].contiguous(), SCB)
-            .to(A.dtype)
-            .t()
-        )
+        if outlier_cols.numel():
+            # Dequantize the corresponding weight columns
+            subB = (
+                torch.ops.bitsandbytes.int8_vectorwise_dequant.default(CB[:, outlier_cols].contiguous(), SCB)
+                .to(A.dtype)
+                .t()
+            )
 
-        # TODO: if state.has_fp16_weights: subB = B[:, outlier_cols].t()
+            # TODO: if state.has_fp16_weights: subB = B[:, outlier_cols].t()
 
     else:
         # Needed for torch.compile when there are no outliers.
-        subA = torch.empty(0, device=A.device, dtype=A.dtype)
+        subA = A.new_empty((A.shape[0], 0))
 
     # Int8 Matmul + Dequant + Bias
     output = torch.ops.bitsandbytes.int8_scaled_mm.default(CA, CB, SCA, SCB, bias=bias, dtype=A.dtype)
