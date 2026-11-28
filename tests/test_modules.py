@@ -434,6 +434,50 @@ def test_4bit_linear_warnings(device, caplog):
 
 
 @pytest.mark.parametrize("device", get_available_devices())
+def test_4bit_linear_fp32_compute_dtype_warning(device, caplog):
+    """float32 compute is several times slower than 16-bit on GPU (no MMA 4-bit GEMM kernel
+    exists for it), and is easy to select unintentionally because
+    transformers.BitsAndBytesConfig defaults bnb_4bit_compute_dtype to float32. Check that we
+    say so once, and only where a faster 16-bit kernel actually exists.
+    """
+    dim = 64
+    marker = "4-bit GEMM kernel for float32"
+    expect_warning = device == "cuda"
+
+    def build(compute_dtype):
+        return nn.Sequential(
+            *[bnb.nn.Linear4bit(dim, dim, compute_dtype=compute_dtype, quant_type="nf4") for _ in range(4)]
+        ).to(device)
+
+    # An explicitly configured float32 compute_dtype: compute_type_is_set is already True, so
+    # set_compute_type() -- and its own float32 warnings -- never runs.
+    bnb.nn.modules._warn_fp32_compute_dtype.cache_clear()
+    with caplog_at_level(caplog, logging.WARNING, "bitsandbytes.nn.modules"):
+        net = build(torch.float32)
+        inp = torch.rand(8, dim, device=device, dtype=torch.float32)
+        for _ in range(3):
+            net(inp)
+    # 4 layers x 3 forwards: the hint is logged once per process per device type, not per call.
+    assert len([msg for msg in caplog.messages if marker in msg]) == (1 if expect_warning else 0)
+
+    # A float32 compute_dtype inferred from float32 inputs by set_compute_type() is just as slow.
+    caplog.clear()
+    bnb.nn.modules._warn_fp32_compute_dtype.cache_clear()
+    with caplog_at_level(caplog, logging.WARNING, "bitsandbytes.nn.modules"):
+        net = build(None)
+        net(torch.rand(8, dim, device=device, dtype=torch.float32))
+    assert len([msg for msg in caplog.messages if marker in msg]) == (1 if expect_warning else 0)
+
+    # A 16-bit compute_dtype is the recommended setting and must stay silent.
+    caplog.clear()
+    bnb.nn.modules._warn_fp32_compute_dtype.cache_clear()
+    with caplog_at_level(caplog, logging.WARNING, "bitsandbytes.nn.modules"):
+        net = build(torch.bfloat16)
+        net(torch.rand(8, dim, device=device, dtype=torch.bfloat16))
+    assert not [msg for msg in caplog.messages if marker in msg]
+
+
+@pytest.mark.parametrize("device", get_available_devices())
 def test_4bit_embedding_warnings(device, caplog):
     num_embeddings = 128
     default_block_size = 64
