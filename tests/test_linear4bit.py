@@ -1,4 +1,5 @@
 import copy
+import gc
 import os
 import pathlib
 import pickle
@@ -6,6 +7,7 @@ import platform
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
+import weakref
 
 import pytest
 import torch
@@ -307,6 +309,87 @@ def test_deepcopy_param(device, quant_type, blocksize, compress_statistics):
     # there was a bug where deepcopy would modify the original object
     assert dict_keys_before == dict_keys_after
     assert dict_keys_before == dict_keys_copy
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE)
+@pytest.mark.parametrize("quantize_before_copy", TRUE_FALSE)
+def test_deepcopy_linear4bit_keeps_quantization_in_the_copy(
+    device, quant_type, compress_statistics, quantize_before_copy
+):
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
+
+    torch.manual_seed(31)
+    original = bnb.nn.Linear4bit(64, 32, quant_type=quant_type, compress_statistics=compress_statistics)
+    if quantize_before_copy:
+        original.to(device)
+    cloned = copy.deepcopy(original)
+    assert cloned.weight.module is cloned
+    assert cloned.weight.data_ptr() != original.weight.data_ptr()
+    assert cloned.quant_state is cloned.weight.quant_state
+
+    if not quantize_before_copy:
+        cloned.to(device)
+        assert original.quant_state is None
+        assert original.weight.quant_state is None
+        original.to(device)
+    assert cloned.quant_state is cloned.weight.quant_state
+    assert cloned.quant_state is not original.quant_state
+    torch.testing.assert_close(cloned.weight, original.weight, rtol=0, atol=0)
+
+    original_optimizer = torch.optim.SGD([original.bias], lr=0.1, momentum=0.9)
+    cloned_optimizer = torch.optim.SGD([cloned.bias], lr=0.1, momentum=0.9)
+    for _ in range(3):
+        original_optimizer.zero_grad()
+        cloned_optimizer.zero_grad()
+        x = torch.randn(2, 64, device=device, requires_grad=True)
+        cloned_x = x.detach().clone().requires_grad_()
+        expected = original(x)
+        actual = cloned(cloned_x)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        expected.square().mean().backward()
+        actual.square().mean().backward()
+        torch.testing.assert_close(cloned_x.grad, x.grad, rtol=0, atol=0)
+        torch.testing.assert_close(cloned.bias.grad, original.bias.grad, rtol=0, atol=0)
+        original_optimizer.step()
+        cloned_optimizer.step()
+        torch.testing.assert_close(cloned.bias, original.bias, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("quant_type", ["nf4", "fp4"])
+@pytest.mark.parametrize("compress_statistics", TRUE_FALSE)
+def test_deepcopy_params4bit_preserves_shared_state_and_module_references(device, quant_type, compress_statistics):
+    if device == "hpu" and not is_supported_on_hpu(quant_type):
+        pytest.skip("This configuration is not supported on HPU.")
+
+    original = bnb.nn.Linear4bit(64, 32, quant_type=quant_type, compress_statistics=compress_statistics).to(device)
+    weight, state, module, repeated_weight = copy.deepcopy(
+        [original.weight, original.quant_state, original, original.weight]
+    )
+    assert weight is repeated_weight
+    assert weight is module.weight
+    assert weight.module is module
+    assert state is weight.quant_state is module.quant_state
+    assert state is not original.quant_state
+    assert state.absmax.data_ptr() != original.quant_state.absmax.data_ptr()
+    if compress_statistics:
+        assert state.state2.absmax.data_ptr() != original.quant_state.state2.absmax.data_ptr()
+
+
+@pytest.mark.parametrize("quantize_before_copy", TRUE_FALSE)
+def test_deepcopy_linear4bit_does_not_keep_the_source_module_alive(quantize_before_copy):
+    original = bnb.nn.Linear4bit(64, 32)
+    if quantize_before_copy:
+        original.to("cpu")
+    reference = weakref.ref(original)
+    cloned = copy.deepcopy(original)
+    del original
+    gc.collect()
+    assert reference() is None
+    assert cloned.weight.module is cloned
 
 
 @pytest.mark.parametrize("device", get_available_devices())
