@@ -58,6 +58,7 @@ using bnb_error_t = hipError_t;
 #define BNB_DEVICE_MALLOC(p, s) hipMalloc(p, s)
 #define BNB_DEVICE_FREE(p) hipFree(p)
 #define BNB_DEVICE_MEMSET(p, v, s) hipMemset(p, v, s)
+#define BNB_DEVICE_MEMSET_ASYNC(p, v, s, stream) hipMemsetAsync(p, v, s, stream)
 
 #else // CUDA
 
@@ -70,6 +71,7 @@ using bnb_error_t = cudaError_t;
 #define BNB_DEVICE_MALLOC(p, s) cudaMalloc(p, s)
 #define BNB_DEVICE_FREE(p) cudaFree(p)
 #define BNB_DEVICE_MEMSET(p, v, s) cudaMemset(p, v, s)
+#define BNB_DEVICE_MEMSET_ASYNC(p, v, s, stream) cudaMemsetAsync(p, v, s, stream)
 
 #endif
 
