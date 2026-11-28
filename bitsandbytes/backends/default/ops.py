@@ -5,7 +5,7 @@ from typing import Optional
 
 import torch
 
-from ..._ops import register_kernel
+from ..._ops import _check_dequantize_4bit_nested, register_kernel
 from ..utils import _get_4bit_code
 
 
@@ -298,6 +298,106 @@ def _(
         A = A.view(torch.uint8)
     code = _get_4bit_code(quant_type, A.device)
     return _dequantize_4bit_compute(A.reshape(-1), absmax, code, blocksize, shape, dtype)
+
+
+def _dequantize_4bit_nested_default_impl(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    nested_blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+    out: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    _check_dequantize_4bit_nested(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        nested_blocksize,
+        quant_type,
+        shape,
+        dtype,
+        out,
+    )
+    absmax = torch.ops.bitsandbytes.dequantize_blockwise.default(
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        nested_blocksize,
+        torch.float32,
+    )
+    result = torch.ops.bitsandbytes.dequantize_4bit.default(
+        A,
+        absmax + offset,
+        blocksize,
+        quant_type,
+        shape,
+        dtype,
+    )
+    return out.copy_(result) if out is not None else result
+
+
+@register_kernel("bitsandbytes::dequantize_4bit_nested", "default")
+def _(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    nested_blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    return _dequantize_4bit_nested_default_impl(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        nested_blocksize,
+        quant_type,
+        shape,
+        dtype,
+    )
+
+
+@register_kernel("bitsandbytes::dequantize_4bit_nested.out", "default")
+def _(
+    A: torch.Tensor,
+    absmax_8bit: torch.Tensor,
+    nested_absmax: torch.Tensor,
+    nested_code: torch.Tensor,
+    offset: torch.Tensor,
+    blocksize: int,
+    nested_blocksize: int,
+    quant_type: str,
+    shape: Sequence[int],
+    dtype: torch.dtype,
+    out: torch.Tensor,
+) -> None:
+    _dequantize_4bit_nested_default_impl(
+        A,
+        absmax_8bit,
+        nested_absmax,
+        nested_code,
+        offset,
+        blocksize,
+        nested_blocksize,
+        quant_type,
+        shape,
+        dtype,
+        out,
+    )
 
 
 @register_kernel("bitsandbytes::gemv_4bit", "default")
