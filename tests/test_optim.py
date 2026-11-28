@@ -1,3 +1,4 @@
+import copy
 import io
 import sys
 import time
@@ -14,6 +15,104 @@ from tests.helpers import describe_dtype, get_available_devices, id_formatter
 # import apex
 
 k = 20
+
+
+@pytest.mark.parametrize(
+    "optimizer_cls", [bnb.optim.Adam8bit, bnb.optim.Adam32bit, bnb.optim.SGD8bit, bnb.optim.SGD32bit]
+)
+@pytest.mark.parametrize("return_replacement", [False, True])
+@pytest.mark.parametrize("device", get_available_devices())
+def test_load_state_dict_hooks_migrate_groups_and_resume(optimizer_cls, return_replacement, device):
+    torch.manual_seed(43)
+    model = torch.nn.Sequential(
+        torch.nn.Linear(64, 64, bias=False), torch.nn.ReLU(), torch.nn.Linear(64, 64, bias=False)
+    ).to(device)
+    kwargs = {"momentum": 0.9} if "SGD" in optimizer_cls.__name__ else {}
+    optimizer = optimizer_cls(model.parameters(), lr=0.01, **kwargs)
+    inputs = torch.randn(4, 64, device=device)
+    for _ in range(3):
+        optimizer.zero_grad()
+        model(inputs).square().mean().backward()
+        optimizer.step()
+    checkpoint_buffer = io.BytesIO()
+    torch.save(optimizer.state_dict(), checkpoint_buffer)
+    checkpoint_buffer.seek(0)
+    checkpoint = torch.load(checkpoint_buffer)
+    expected_checkpoint = copy.deepcopy(checkpoint)
+    restored = copy.deepcopy(model)
+    restored_optimizer = optimizer_cls(
+        [{"params": restored[0].parameters()}, {"params": restored[2].parameters()}], lr=0.5, **kwargs
+    )
+    calls = []
+
+    def migrate_groups(opt, state_dict):
+        assert opt is restored_optimizer
+        calls.append("pre")
+        group = state_dict["param_groups"][0]
+        groups = [dict(group, params=[parameter_id]) for parameter_id in group["params"]]
+        if return_replacement:
+            return dict(state_dict, param_groups=groups)
+        state_dict["param_groups"] = groups
+
+    def check_loaded_state(opt):
+        assert opt is restored_optimizer
+        calls.append("post")
+        assert len(opt.param_groups) == 2
+        assert all(group["lr"] == 0.01 for group in opt.param_groups)
+        for parameter in restored.parameters():
+            assert opt.state[parameter]["step"] == 3
+            expected_dtype = torch.uint8 if "8bit" in optimizer_cls.__name__ else torch.float32
+            assert opt.state[parameter]["state1"].dtype == expected_dtype
+
+    restored_optimizer.register_load_state_dict_pre_hook(migrate_groups)
+    restored_optimizer.register_load_state_dict_post_hook(check_loaded_state)
+    restored_optimizer.load_state_dict(checkpoint)
+    assert calls == ["pre", "post"]
+    torch.testing.assert_close(checkpoint, expected_checkpoint, rtol=0, atol=0)
+    for _ in range(3):
+        optimizer.zero_grad()
+        restored_optimizer.zero_grad()
+        expected = model(inputs)
+        actual = restored(inputs)
+        torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        expected.square().mean().backward()
+        actual.square().mean().backward()
+        optimizer.step()
+        restored_optimizer.step()
+        for original_parameter, restored_parameter in zip(model.parameters(), restored.parameters()):
+            torch.testing.assert_close(restored_parameter, original_parameter, rtol=0, atol=0)
+            torch.testing.assert_close(
+                restored_optimizer.state[restored_parameter], optimizer.state[original_parameter], rtol=0, atol=0
+            )
+
+
+@pytest.mark.parametrize("move_to_device", [False, True])
+def test_load_state_dict_hook_order_and_removal(move_to_device):
+    parameter = torch.nn.Parameter(torch.ones(2))
+    optimizer = bnb.optim.Adam32bit([parameter])
+    checkpoint = optimizer.state_dict()
+    calls = []
+    pre = optimizer.register_load_state_dict_pre_hook(lambda opt, state: calls.append("pre"))
+    pre_first = optimizer.register_load_state_dict_pre_hook(lambda opt, state: calls.append("pre_first"), prepend=True)
+    post = optimizer.register_load_state_dict_post_hook(lambda opt: calls.append("post"))
+    post_first = optimizer.register_load_state_dict_post_hook(lambda opt: calls.append("post_first"), prepend=True)
+    optimizer.load_state_dict(checkpoint, move_to_device=move_to_device)
+    assert calls == ["pre_first", "pre", "post_first", "post"]
+    for handle in (pre, pre_first, post, post_first):
+        handle.remove()
+    calls.clear()
+    optimizer.load_state_dict(checkpoint, move_to_device=move_to_device)
+    assert calls == []
+
+
+def test_load_state_dict_post_hook_requires_successful_load():
+    optimizer = bnb.optim.Adam32bit([torch.nn.Parameter(torch.ones(2))])
+    calls = []
+    optimizer.register_load_state_dict_pre_hook(lambda opt, state: calls.append("pre"))
+    optimizer.register_load_state_dict_post_hook(lambda opt: calls.append("post"))
+    with pytest.raises(ValueError, match="different number of parameter groups"):
+        optimizer.load_state_dict({"state": {}, "param_groups": []})
+    assert calls == ["pre"]
 
 
 def assert_most_approx_close(a, b, rtol=1e-3, atol=1e-3, max_error_count=0):
