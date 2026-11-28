@@ -5,7 +5,7 @@ import pytest
 
 from bitsandbytes.cextension import get_cuda_bnb_library_path
 from bitsandbytes.consts import DYNAMIC_LIBRARY_SUFFIX
-from bitsandbytes.cuda_specs import CUDASpecs
+from bitsandbytes.cuda_specs import CUDASpecs, get_rocm_gpu_arch
 
 
 @pytest.fixture
@@ -133,3 +133,55 @@ def test_override_invalid_format(monkeypatch, cuda120_spec):
     monkeypatch.setenv("BNB_CUDA_VERSION", "12.4")
     with pytest.raises(RuntimeError, match="digits only"):
         get_cuda_bnb_library_path(cuda120_spec)
+
+
+def test_rocm_arch_override_skips_tool_probe(monkeypatch):
+    monkeypatch.setenv("BNB_ROCM_ARCH", "gfx90a:sramecc+:xnack-")
+
+    with (
+        patch("torch.version.hip", "7.0.0"),
+        patch("bitsandbytes.cuda_specs.subprocess.run") as run,
+    ):
+        assert get_rocm_gpu_arch() == "gfx90a"
+
+    run.assert_not_called()
+
+
+def test_rocm_arch_without_override_uses_tool_probe(monkeypatch):
+    monkeypatch.delenv("BNB_ROCM_ARCH", raising=False)
+
+    with (
+        patch("torch.version.hip", "7.0.0"),
+        patch("bitsandbytes.cuda_specs.platform.system", return_value="Linux"),
+        patch("bitsandbytes.cuda_specs.subprocess.run") as run,
+    ):
+        run.return_value.stdout = "  Name: gfx942\n"
+        assert get_rocm_gpu_arch() == "gfx942"
+
+    run.assert_called_once_with(["rocminfo"], capture_output=True, text=True)
+
+
+def test_invalid_rocm_arch_override_is_reported(monkeypatch, caplog):
+    monkeypatch.setenv("BNB_ROCM_ARCH", "90a")
+
+    with (
+        patch("torch.version.hip", "7.0.0"),
+        patch("bitsandbytes.cuda_specs.subprocess.run") as run,
+        caplog.at_level("WARNING"),
+    ):
+        assert get_rocm_gpu_arch() == "unknown"
+
+    run.assert_not_called()
+    assert "BNB_ROCM_ARCH" in caplog.text
+
+
+def test_non_rocm_ignores_arch_override(monkeypatch):
+    monkeypatch.setenv("BNB_ROCM_ARCH", "gfx90a")
+
+    with (
+        patch("torch.version.hip", None),
+        patch("bitsandbytes.cuda_specs.subprocess.run") as run,
+    ):
+        assert get_rocm_gpu_arch() == "unknown"
+
+    run.assert_not_called()
