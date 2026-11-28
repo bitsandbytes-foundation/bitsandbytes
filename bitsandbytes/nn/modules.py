@@ -125,8 +125,8 @@ class StableEmbedding(torch.nn.Embedding):
             self.sparse,
         )
 
-        # always apply layer norm in full precision
-        emb = emb.to(torch.get_default_dtype())
+        # Follow the normalization parameters, which use full precision by default.
+        emb = emb.to(self.norm.weight.dtype)
 
         return self.norm(emb).to(self.weight.dtype)
 
