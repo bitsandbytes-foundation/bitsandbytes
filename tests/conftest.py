@@ -6,6 +6,66 @@ import pytest
 import torch
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--require-mps-hub",
+        action="store_true",
+        help="Require MPS, the bitsandbytes-mps Hub kernel, and a passing test that verifies Hub execution.",
+    )
+
+
+def _require_mps_hub():
+    from tests.helpers import get_available_devices
+
+    if "mps" not in get_available_devices() or not torch.backends.mps.is_available():
+        raise pytest.UsageError("--require-mps-hub requires an available MPS device selected by BNB_TEST_DEVICE.")
+
+    from bitsandbytes.backends.mps import ops
+
+    kernel = ops._get_kernel()
+    if kernel is None:
+        raise pytest.UsageError(
+            "--require-mps-hub could not load kernels-community/bitsandbytes-mps; "
+            "macOS 26+ and a compatible kernels package/Hub build are required."
+        )
+    return kernel
+
+
+class _MPSHubExecutionCheck:
+    def __init__(self):
+        self.verified_tests = 0
+
+    def pytest_runtest_logreport(self, report):
+        if report.when == "call" and report.passed and ("mps_hub_verified", True) in report.user_properties:
+            self.verified_tests += 1
+
+    def pytest_sessionfinish(self, session, exitstatus):
+        if exitstatus == pytest.ExitCode.OK and not self.verified_tests:
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
+            reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+            if reporter is not None:
+                reporter.write_sep(
+                    "=",
+                    "ERROR: --require-mps-hub completed without any passing test verifying Hub execution. "
+                    "Include test_dequantize_4bit_mps with a supported Hub block size.",
+                    red=True,
+                )
+
+
+def pytest_configure(config):
+    if config.getoption("--require-mps-hub"):
+        _require_mps_hub()
+        config.pluginmanager.register(_MPSHubExecutionCheck(), "mps-hub-execution-check")
+
+
+def pytest_report_header(config):
+    if config.getoption("--require-mps-hub"):
+        from importlib.metadata import version
+
+        kernel = _require_mps_hub()
+        return f"MPS Hub required: torch={torch.__version__}, kernels={version('kernels')}, variant={kernel.__file__}"
+
+
 def _set_seed():
     torch.manual_seed(0)
     torch.cuda.manual_seed_all(0)
