@@ -145,6 +145,9 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         shape: Sequence[int],
         dtype: torch.dtype,
     ) -> torch.Tensor:
+        # Byte views and native kernels require contiguous packed storage.
+        A = A.contiguous()
+
         # Fallback as AVX512 implementation has accuracy issues with blocksize >= 2048.
         # Note: this is not a common use case.
         avx512_fallback = _has_avx512 and blocksize >= 2048
@@ -168,6 +171,7 @@ if not isinstance(lib, ErrorHandlerMockBNBNativeLibrary):
         # TODO: support half precision absmax
         if absmax.dtype != torch.float32:
             absmax = absmax.float()
+        absmax = absmax.contiguous()
 
         # The kernel views the input as a 2-D (m, n) matrix, with m == 1 for 1-D
         # inputs. The output buffer keeps the caller-provided shape: the
