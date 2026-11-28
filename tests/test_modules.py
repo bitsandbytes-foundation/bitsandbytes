@@ -225,6 +225,35 @@ def test_linear_kbit_fp32_bias(device, module):
         assert l1.bias is None
 
 
+@pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("module_name", ["Int8Lt", "NF4"])
+@pytest.mark.parametrize("input_shape", [(32,), (2, 3, 32), (2, 2, 2, 32)], ids=str)
+def test_kbit_bias_grad_non_2d(device, module_name, input_shape):
+    """Bias gradients must reduce every leading dimension, including 1-D inputs."""
+    if module_name == "Int8Lt" and device != "cpu":
+        pytest.skip("CUDA int8 forward only accepts 2-D/3-D activations; covered on CPU.")
+
+    dtype = torch.float32 if device == "cpu" else torch.float16
+    torch.manual_seed(0)
+
+    ref = nn.Linear(32, 64, bias=True, dtype=dtype, device=device)
+    if module_name == "Int8Lt":
+        kbit = bnb.nn.Linear8bitLt(32, 64, bias=True, has_fp16_weights=False).to(device)
+    else:
+        kbit = bnb.nn.LinearNF4(32, 64, bias=True).to(device)
+    kbit.bias.data.copy_(ref.bias.data)
+
+    x = torch.randn(input_shape, device=device, dtype=dtype)
+    out = kbit(x)
+    out_ref = ref(x)
+    grad_out = torch.randn_like(out_ref)
+
+    (out * grad_out).sum().backward()
+    (out_ref * grad_out).sum().backward()
+
+    torch.testing.assert_close(kbit.bias.grad, ref.bias.grad, atol=1e-2, rtol=1e-2)
+
+
 module_dict = {
     "Int8Lt": bnb.nn.Linear8bitLt,
     "4bit": bnb.nn.Linear4bit,
