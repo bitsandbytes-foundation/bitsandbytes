@@ -92,8 +92,8 @@ class StableEmbedding(torch.nn.Embedding):
             scale_grad_by_freq,
             sparse,
             _weight,
-            device,
-            dtype,
+            device=device,
+            dtype=dtype,
         )
         self.norm = torch.nn.LayerNorm(embedding_dim, device=device)
         GlobalOptimManager.get_instance().register_module_override(self, "weight", {"optim_bits": 32})
