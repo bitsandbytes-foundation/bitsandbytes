@@ -250,6 +250,63 @@ def test_linear8bit_load_state_dict_raises_runtime_for_tied_weight():
 
 
 @pytest.mark.parametrize("device", get_available_devices())
+@pytest.mark.parametrize("threshold", [0.0, 6.0])
+@pytest.mark.parametrize("save_after_forward", TRUE_FALSE)
+@pytest.mark.parametrize("destination_state", ["cold", "train", "eval"])
+def test_linear8bit_checkpoint_reload_after_forward(device, threshold, save_after_forward, destination_state):
+    torch.manual_seed(23)
+    destination = torch.nn.Sequential(Linear8bitLt(64, 32, has_fp16_weights=False, threshold=threshold)).to(device)
+    inputs = torch.randn(4, 64, device=device)
+    if destination_state != "cold":
+        destination.train(destination_state == "train")
+        with torch.no_grad():
+            destination(inputs)
+        assert destination[0].weight.SCB is None
+        assert destination[0].state.SCB is not None
+
+    for scale in (1.0, 3.0):
+        reference = torch.nn.Sequential(Linear8bitLt(64, 32, has_fp16_weights=False, threshold=threshold))
+        with torch.no_grad():
+            reference[0].weight.mul_(scale)
+        reference.to(device)
+        if save_after_forward:
+            with torch.no_grad():
+                reference(inputs)
+        checkpoint = torch_load_from_buffer(torch_save_to_buffer(reference.state_dict()))
+        expected_checkpoint = copy.deepcopy(checkpoint)
+        destination.load_state_dict(checkpoint, strict=True)
+        torch.testing.assert_close(checkpoint, expected_checkpoint, rtol=0, atol=0)
+
+        reference.eval()
+        destination.eval()
+        with torch.no_grad():
+            torch.testing.assert_close(destination(inputs), reference(inputs), rtol=0, atol=0)
+        torch.testing.assert_close(destination[0].state.SCB, checkpoint["0.SCB"], rtol=0, atol=0)
+        assert destination[0].state.CB.data_ptr() == destination[0].weight.data_ptr()
+        torch.testing.assert_close(destination.state_dict(), checkpoint, rtol=0, atol=0)
+
+        reference.train()
+        destination.train()
+        reference_optimizer = torch.optim.SGD([reference[0].bias], lr=0.1, momentum=0.9)
+        destination_optimizer = torch.optim.SGD([destination[0].bias], lr=0.1, momentum=0.9)
+        for _ in range(3):
+            reference_optimizer.zero_grad()
+            destination_optimizer.zero_grad()
+            reference_input = inputs.detach().clone().requires_grad_()
+            destination_input = inputs.detach().clone().requires_grad_()
+            expected = reference(reference_input)
+            actual = destination(destination_input)
+            torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+            expected.square().mean().backward()
+            actual.square().mean().backward()
+            torch.testing.assert_close(destination_input.grad, reference_input.grad, rtol=0, atol=0)
+            torch.testing.assert_close(destination[0].bias.grad, reference[0].bias.grad, rtol=0, atol=0)
+            reference_optimizer.step()
+            destination_optimizer.step()
+            torch.testing.assert_close(destination[0].bias, reference[0].bias, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("device", get_available_devices())
 @pytest.mark.parametrize("threshold", [0.0, 6.0], ids=id_formatter("threshold"))
 @pytest.mark.parametrize("bias", TRUE_FALSE, ids=id_formatter("bias"))
 @pytest.mark.parametrize("fullgraph", TRUE_FALSE, ids=id_formatter("fullgraph"))

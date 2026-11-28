@@ -1142,6 +1142,8 @@ class Linear8bitLt(nn.Linear):
             if input_name == "SCB":
                 weight_scb = getattr(self.weight, "SCB", None)
                 if weight_scb is None:
+                    weight_scb = self.state.SCB
+                if weight_scb is None:
                     # buffers not yet initialized, can't access them directly without quantizing first
                     raise RuntimeError(
                         "Loading a quantized checkpoint into non-quantized Linear8bitLt is "
@@ -1152,7 +1154,7 @@ class Linear8bitLt(nn.Linear):
                 weight_scb.copy_(input_param)
 
                 if self.state.SCB is not None:
-                    self.state.SCB = self.weight.SCB
+                    self.state.SCB = weight_scb
 
                 unexpected_keys.remove(key)
 
