@@ -830,7 +830,15 @@ def maybe_rearrange_weight(state_dict, prefix, local_metadata, strict, missing_k
         raise ValueError(f"Only 'row' weight format is supported, got {weight_format}")
 
 
-class Embedding8bit(nn.Embedding):
+class _EmbeddingWithOutputDtype(nn.Embedding):
+    def _apply(self, fn, recurse=True):
+        output_dtype = fn(torch.empty(0, dtype=self.dtype)).dtype
+        module = super()._apply(fn, recurse)
+        self.dtype = output_dtype
+        return module
+
+
+class Embedding8bit(_EmbeddingWithOutputDtype):
     """
     This class implements [LLM.int8()](https://arxiv.org/abs/2208.07339) algorithm for embedding layer
 
@@ -877,7 +885,7 @@ class Embedding8bit(nn.Embedding):
         return output.to(self.dtype)
 
 
-class Embedding4bit(nn.Embedding):
+class Embedding4bit(_EmbeddingWithOutputDtype):
     """
     This is the base class similar to Linear4bit. It implements the 4-bit quantization algorithm presented in
     [QLoRA](https://arxiv.org/abs/2305.14314) for embeddings.
